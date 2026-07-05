@@ -1,0 +1,5 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Nexaform mark: monograma "N" dentro de um frame de app que também é um balão de conversa -->
+  <path d="M10 4H22C25.3137 4 28 6.68629 28 10V18C28 21.3137 25.3137 24 22 24H15L10 28.5V24C6.68629 24 4 21.3137 4 18V10C4 6.68629 6.68629 4 10 4Z" stroke="#94A3B8" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M12 19V9.5L20 19V9.5" stroke="#635BFF" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

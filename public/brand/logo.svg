@@ -1,0 +1,6 @@
+<svg width="180" height="40" viewBox="0 0 180 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Nexaform lockup horizontal (dark mode) -->
+  <path d="M13 8H25C28.3137 8 31 10.6863 31 14V22C31 25.3137 28.3137 28 25 28H18L13 32.5V28C9.68629 28 7 25.3137 7 22V14C7 10.6863 9.68629 8 13 8Z" stroke="#94A3B8" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M15 23V13.5L23 23V13.5" stroke="#635BFF" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="41" y="26.5" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="19" font-weight="600" letter-spacing="-0.4" fill="#F8FAFC">Nexaform</text>
+</svg>

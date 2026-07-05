@@ -1,0 +1,5 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Favicon: N sobre o fundo da marca, legível a 16px -->
+  <rect width="32" height="32" rx="8" fill="#0B1020"/>
+  <path d="M10.5 23V9L21.5 23V9" stroke="#635BFF" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

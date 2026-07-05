@@ -1,0 +1,7 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- App icon Nexaform: frame-balão + N em duo-tone da marca -->
+  <rect width="512" height="512" rx="112" fill="#0B1020"/>
+  <path d="M172 96H340C382.526 96 417 130.474 417 173V283C417 325.526 382.526 360 340 360H248L176 419V360C133.474 360 96 325.526 96 283V173C96 130.474 130.474 96 172 96Z" stroke="#94A3B8" stroke-opacity="0.55" stroke-width="26" stroke-linejoin="round"/>
+  <path d="M196 300V156L316 300" stroke="#635BFF" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M316 300V156" stroke="#8B5CF6" stroke-width="34" stroke-linecap="round"/>
+</svg>

@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ArrowUp, Check, Loader2, Sparkles } from "lucide-react";
+import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AppSchema, GenerationResult } from "@/lib/engine/types";
+import { AppGenerationResult, looksLikeApp } from "@/lib/engine/app-types";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -15,37 +16,46 @@ interface Message {
   content: string;
 }
 
+export type ProjectMode = "empty" | "site" | "app";
+
 interface ChatPanelProps {
   projectId: string;
   threadId: string;
   initialMessages: Message[];
+  mode: ProjectMode;
   schema: AppSchema | null;
+  code: string | null;
+  projectName: string;
   starterPrompt?: string | null;
-  onResult: (result: GenerationResult) => void;
+  onSiteResult: (result: GenerationResult) => void;
+  onAppResult: (result: AppGenerationResult) => void;
   onGeneratingChange?: (generating: boolean) => void;
 }
 
-const SUGGESTIONS = [
+const SITE_SUGGESTIONS = [
   "Crie uma landing page para minha cafeteria",
-  "Quero um dashboard de vendas com KPIs e gráfico",
-  "Monte um portfólio de fotografia com galeria",
-  "Crie um site para meu SaaS com planos e FAQ",
+  "Um dashboard de vendas com KPIs e gráfico",
+  "Um portfólio de fotografia com galeria",
 ];
-
-const REFINE_SUGGESTIONS = [
-  "Mude a cor para azul",
-  "Adicione uma seção de FAQ",
-  "Crie uma página Sobre",
-  "Mude para modo claro",
+const APP_SUGGESTIONS = [
+  "Um app de lista de tarefas com prioridades",
+  "Uma calculadora de gorjeta",
+  "Um quiz de perguntas e respostas",
 ];
+const REFINE_SITE = ["Mude a cor para azul", "Adicione uma seção de FAQ", "Crie uma página Sobre"];
+const REFINE_APP = ["Adicione um placar", "Deixe o tema escuro", "Adicione um botão de reiniciar"];
 
 export function ChatPanel({
   projectId,
   threadId,
   initialMessages,
+  mode,
   schema,
+  code,
+  projectName,
   starterPrompt,
-  onResult,
+  onSiteResult,
+  onAppResult,
   onGeneratingChange,
 }: ChatPanelProps) {
   const supabase = useMemo(() => createClient(), []);
@@ -55,9 +65,14 @@ export function ChatPanel({
   const [plan, setPlan] = useState<string[]>([]);
   const [planDone, setPlanDone] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const startedRef = useRef(false);
+
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
   const schemaRef = useRef(schema);
   schemaRef.current = schema;
-  const startedRef = useRef(false);
+  const codeRef = useRef(code);
+  codeRef.current = code;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -79,6 +94,9 @@ export function ChatPanel({
     const content = text.trim();
     if (!content || generating) return;
 
+    // Decide o modo desta geração
+    const useApp = modeRef.current === "app" || (modeRef.current === "empty" && looksLikeApp(content));
+
     setInput("");
     setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", content }]);
     setGenerating(true);
@@ -88,42 +106,48 @@ export function ChatPanel({
     persist("user", content);
 
     try {
-      const res = await fetch("/api/generate", {
+      const endpoint = useApp ? "/api/generate-app" : "/api/generate";
+      const payload = useApp
+        ? {
+            projectId,
+            message: content,
+            currentCode: codeRef.current,
+            name: projectName,
+            userKey: localStorage.getItem("nexaform:ai-key") || null,
+            userProvider: localStorage.getItem("nexaform:ai-provider") || null,
+          }
+        : {
+            projectId,
+            message: content,
+            schema: schemaRef.current,
+            userKey: localStorage.getItem("nexaform:ai-key") || null,
+            userProvider: localStorage.getItem("nexaform:ai-provider") || null,
+          };
+
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          projectId,
-          message: content,
-          schema: schemaRef.current,
-          userKey: localStorage.getItem("nexaform:ai-key") || null,
-          userProvider: localStorage.getItem("nexaform:ai-provider") || null,
-        }),
+        body: JSON.stringify(payload),
       });
-
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error ?? "Falha na geração.");
-      }
+      if (!res.ok) throw new Error(data?.error ?? "Falha na geração.");
 
-      const result = data as GenerationResult;
-
-      // Progresso visual: revela os passos do plano um a um
-      setPlan(result.plan);
-      for (let i = 0; i <= result.plan.length; i++) {
-        await new Promise((r) => setTimeout(r, 350));
+      const steps: string[] = Array.isArray(data.plan) ? data.plan : [];
+      setPlan(steps);
+      for (let i = 0; i <= steps.length; i++) {
+        await new Promise((r) => setTimeout(r, 320));
         setPlanDone(i);
       }
 
-      setMessages((m) => [...m, { id: crypto.randomUUID(), role: "assistant", content: result.reply }]);
-      persist("assistant", result.reply);
-      onResult(result);
+      setMessages((m) => [...m, { id: crypto.randomUUID(), role: "assistant", content: data.reply }]);
+      persist("assistant", data.reply);
+
+      if (useApp) onAppResult(data as AppGenerationResult);
+      else onSiteResult(data as GenerationResult);
     } catch (err: any) {
-      const msg = err?.message ?? "Algo deu errado. Tente novamente.";
+      const msg = err?.message ?? "Algo deu errado.";
       toast.error("Geração falhou", { description: msg });
-      setMessages((m) => [
-        ...m,
-        { id: crypto.randomUUID(), role: "assistant", content: `Ops — ${msg}` },
-      ]);
+      setMessages((m) => [...m, { id: crypto.randomUUID(), role: "assistant", content: `Ops — ${msg}` }]);
     } finally {
       setGenerating(false);
       onGeneratingChange?.(false);
@@ -132,34 +156,29 @@ export function ChatPanel({
     }
   }
 
-  const suggestions = schema ? REFINE_SUGGESTIONS : SUGGESTIONS;
+  const suggestions =
+    mode === "app" ? REFINE_APP : mode === "site" ? REFINE_SITE : [...APP_SUGGESTIONS.slice(0, 2), SITE_SUGGESTIONS[0]];
 
   return (
     <div className="flex h-full flex-col">
-      {/* Status do construtor — sempre visível */}
       <div className="flex items-center justify-between border-b px-4 py-2.5">
         <span className="text-xs font-medium">Construtor</span>
         <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span
-            className={cn(
-              "h-1.5 w-1.5 rounded-full",
-              generating ? "animate-pulse-soft bg-brand-500" : "bg-emerald-500"
-            )}
-          />
-          {generating ? "Construindo…" : "Pronto para iterar"}
+          {mode === "app" ? <Code2 className="h-3 w-3" /> : mode === "site" ? <Layout className="h-3 w-3" /> : null}
+          <span className={cn("h-1.5 w-1.5 rounded-full", generating ? "animate-pulse-soft bg-brand-500" : "bg-emerald-500")} />
+          {generating ? "Construindo…" : mode === "app" ? "App · pronto para iterar" : mode === "site" ? "Site · pronto para iterar" : "Pronto"}
         </span>
       </div>
 
-      {/* Histórico */}
       <div className="flex-1 space-y-4 overflow-y-auto p-4 scrollbar-thin">
         {messages.length === 0 && !generating && (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-brand-gradient text-white">
               <Sparkles className="h-4 w-4" />
             </div>
-            <p className="text-sm font-medium">O que vamos construir hoje?</p>
-            <p className="mt-1 max-w-[220px] text-xs text-muted-foreground">
-              Descreva seu app, site ou dashboard — eu cuido da estrutura e do visual.
+            <p className="text-sm font-medium">O que vamos construir?</p>
+            <p className="mt-1 max-w-[240px] text-xs text-muted-foreground">
+              Descreva um app funcional (jogo, ferramenta, calculadora) ou um site — eu escrevo e executo o código.
             </p>
           </div>
         )}
@@ -177,13 +196,12 @@ export function ChatPanel({
           </div>
         ))}
 
-        {/* Progresso da geração */}
         {generating && (
           <div className="max-w-[85%] space-y-2 rounded-xl bg-secondary p-3.5">
             {plan.length === 0 ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                Interpretando seu pedido…
+                Escrevendo o código…
               </div>
             ) : (
               plan.map((step, i) => (
@@ -210,14 +228,13 @@ export function ChatPanel({
         <div ref={bottomRef} />
       </div>
 
-      {/* Sugestões rápidas */}
       {!generating && (
         <div className="flex flex-wrap gap-1.5 px-4 pb-2">
           {suggestions.slice(0, 3).map((s) => (
             <button
               key={s}
               onClick={() => send(s)}
-              className="rounded-full border px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary/60 hover:text-foreground"
+              className="rounded-full border px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-brand-500/60 hover:text-foreground"
             >
               {s}
             </button>
@@ -225,7 +242,6 @@ export function ChatPanel({
         </div>
       )}
 
-      {/* Input */}
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -243,7 +259,7 @@ export function ChatPanel({
                 send(input);
               }
             }}
-            placeholder={schema ? "Peça um refinamento…" : "Descreva o que você quer construir…"}
+            placeholder={mode === "empty" ? "Descreva o app ou site que você quer…" : "Peça um refinamento…"}
             rows={2}
             className="min-h-0 resize-none border-0 shadow-none focus-visible:ring-0"
             disabled={generating}

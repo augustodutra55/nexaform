@@ -6,18 +6,20 @@ import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { AppSchema, GenerationResult, isValidSchema } from "@/lib/engine/types";
+import { AppCode, AppGenerationResult, isAppCode } from "@/lib/engine/app-types";
 import { useProjectStore } from "@/lib/store/project";
 import { resolvePlan, type AccessProfile } from "@/lib/access";
-import { ChatPanel } from "@/components/project/chat-panel";
+import { ChatPanel, ProjectMode } from "@/components/project/chat-panel";
 import { EditorPanel } from "@/components/project/editor-panel";
 import { ProjectTopbar, VersionRow } from "@/components/project/project-topbar";
 import { PreviewPane } from "@/components/preview/preview-pane";
+import { AppRunner } from "@/components/preview/app-runner";
 import { Skeleton } from "@/components/ui/skeleton";
 
 interface ProjectRow {
   id: string;
   name: string;
-  schema: AppSchema | null;
+  schema: any;
   published: boolean;
   share_slug: string | null;
 }
@@ -37,9 +39,14 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [editorOpen, setEditorOpen] = useState(true);
   const [starter, setStarter] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+
+  // Modo do projeto: site (schema) | app (código) | empty
+  const [mode, setMode] = useState<ProjectMode>("empty");
+  const [appCode, setAppCode] = useState<string | null>(null);
+  const [appVer, setAppVer] = useState(0);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
 
-  /* ── Carregamento inicial ─────────────────────────────────── */
+  /* ── Carregamento ─────────────────────────────────────────── */
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -55,16 +62,17 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       }
       setProject(proj as ProjectRow);
       store.reset();
-      if (isValidSchema(proj.schema)) {
+      if (isAppCode(proj.schema)) {
+        setMode("app");
+        setAppCode(proj.schema.code);
+      } else if (isValidSchema(proj.schema)) {
+        setMode("site");
         store.setSchema(proj.schema, { recordHistory: false, dirty: false });
+      } else {
+        setMode("empty");
       }
 
-      // thread de chat (cria se não existir)
-      let { data: thread } = await supabase
-        .from("chat_threads")
-        .select("id")
-        .eq("project_id", projectId)
-        .maybeSingle();
+      let { data: thread } = await supabase.from("chat_threads").select("id").eq("project_id", projectId).maybeSingle();
       if (!thread) {
         const { data: userData } = await supabase.auth.getUser();
         const { data: created } = await supabase
@@ -110,28 +118,24 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, supabase]);
 
-  /* ── Autosave (debounce) ──────────────────────────────────── */
+  /* ── Autosave do modo site ────────────────────────────────── */
   const { schema, saveState } = store;
   useEffect(() => {
-    if (saveState !== "dirty" || !project) return;
+    if (mode !== "site" || saveState !== "dirty" || !project) return;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       store.setSaveState("saving");
-      const { error } = await supabase
-        .from("projects")
-        .update({ schema, updated_at: new Date().toISOString() })
-        .eq("id", project.id);
+      const { error } = await supabase.from("projects").update({ schema, updated_at: new Date().toISOString() }).eq("id", project.id);
       store.setSaveState(error ? "dirty" : "saved");
-      if (error) toast.error("Falha ao salvar automaticamente", { description: "Vamos tentar de novo." });
     }, 1200);
     return () => clearTimeout(saveTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema, saveState, project?.id]);
+  }, [schema, saveState, project?.id, mode]);
 
-  /* ── Atalhos de teclado ───────────────────────────────────── */
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        if (mode !== "site") return;
         e.preventDefault();
         e.shiftKey ? store.redo() : store.undo();
       }
@@ -139,17 +143,36 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [mode]);
 
-  /* ── Handlers ─────────────────────────────────────────────── */
-  const handleResult = useCallback(
+  /* ── Resultados ───────────────────────────────────────────── */
+  const handleSiteResult = useCallback(
     async (result: GenerationResult) => {
+      setMode("site");
       store.setSchema(result.schema);
-      // registra versão
       const label = result.plan[0] ?? "Geração";
       const { data } = await supabase
         .from("versions")
         .insert({ project_id: projectId, schema: result.schema, label: label.slice(0, 120) })
+        .select("id, label, created_at, schema")
+        .single();
+      if (data) setVersions((v) => [data as any, ...v]);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [projectId, supabase]
+  );
+
+  const handleAppResult = useCallback(
+    async (result: AppGenerationResult) => {
+      setMode("app");
+      setAppCode(result.app.code);
+      setAppVer((n) => n + 1);
+      // salva o AppCode no campo schema (jsonb)
+      await supabase.from("projects").update({ schema: result.app, updated_at: new Date().toISOString() }).eq("id", projectId);
+      const label = result.plan[0] ?? "Geração de app";
+      const { data } = await supabase
+        .from("versions")
+        .insert({ project_id: projectId, schema: result.app, label: label.slice(0, 120) })
         .select("id, label, created_at, schema")
         .single();
       if (data) setVersions((v) => [data as any, ...v]);
@@ -167,15 +190,14 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
   async function handlePublish(): Promise<string | null> {
     if (!project) return null;
-    if (!store.schema) {
+    const hasContent = mode === "app" ? !!appCode : !!store.schema;
+    if (!hasContent) {
       toast.error("Nada para publicar ainda", { description: "Gere a primeira versão pelo chat." });
       return null;
     }
     const slug = project.share_slug ?? nanoid(10);
-    const { error } = await supabase
-      .from("projects")
-      .update({ published: true, share_slug: slug, schema: store.schema })
-      .eq("id", project.id);
+    const payload = mode === "app" ? { kind: "app", name: project.name, description: "", code: appCode } : store.schema;
+    const { error } = await supabase.from("projects").update({ published: true, share_slug: slug, schema: payload }).eq("id", project.id);
     if (error) {
       toast.error("Não foi possível publicar");
       return null;
@@ -188,27 +210,36 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     const plan = resolvePlan(access);
     if (!plan.canExport) {
       toast.error("Exportação disponível no plano Pro", {
-        description: "Faça upgrade para baixar o projeto completo.",
+        description: "Faça upgrade para baixar o projeto.",
         action: { label: "Ver planos", onClick: () => router.push("/pricing") },
       });
       return;
     }
-    if (!store.schema) {
+    const content = mode === "app" ? appCode ?? "" : JSON.stringify(store.schema, null, 2);
+    if (!content) {
       toast.error("Nada para exportar ainda");
       return;
     }
-    const blob = new Blob([JSON.stringify(store.schema, null, 2)], { type: "application/json" });
+    const blob = new Blob([content], { type: mode === "app" ? "text/plain" : "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${project?.name ?? "projeto"}.nexaform.json`;
+    a.download = mode === "app" ? `${project?.name ?? "app"}.jsx` : `${project?.name ?? "projeto"}.nexaform.json`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success("Projeto exportado");
+    toast.success("Exportado");
   }
 
   function handleRestoreVersion(v: VersionRow) {
-    if (isValidSchema(v.schema)) store.setSchema(v.schema);
+    if (isAppCode(v.schema)) {
+      setMode("app");
+      setAppCode(v.schema.code);
+      setAppVer((n) => n + 1);
+      supabase.from("projects").update({ schema: v.schema }).eq("id", projectId);
+    } else if (isValidSchema(v.schema)) {
+      setMode("site");
+      store.setSchema(v.schema);
+    }
   }
 
   /* ── Render ───────────────────────────────────────────────── */
@@ -236,6 +267,8 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     );
   }
 
+  const showSiteEditor = mode === "site" && editorOpen;
+
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
       <ProjectTopbar
@@ -251,33 +284,38 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
         onToggleEditor={() => setEditorOpen((o) => !o)}
       />
       <div className="flex min-h-0 flex-1">
-        {/* Chat */}
         <aside className="flex w-[340px] shrink-0 flex-col border-r xl:w-[380px]">
           <ChatPanel
             projectId={projectId}
             threadId={threadId}
             initialMessages={messages}
+            mode={mode}
             schema={store.schema}
+            code={appCode}
+            projectName={project.name}
             starterPrompt={starter}
-            onResult={handleResult}
+            onSiteResult={handleSiteResult}
+            onAppResult={handleAppResult}
             onGeneratingChange={setGenerating}
           />
         </aside>
 
-        {/* Preview */}
         <div className="min-w-0 flex-1">
-          <PreviewPane
-            schema={store.schema}
-            currentPageId={store.currentPageId}
-            onNavigate={store.setCurrentPage}
-            selectedSectionId={store.selectedSectionId}
-            onSelectSection={store.selectSection}
-            generating={generating}
-          />
+          {mode === "app" ? (
+            <AppRunner code={appCode ?? ""} version={appVer} />
+          ) : (
+            <PreviewPane
+              schema={store.schema}
+              currentPageId={store.currentPageId}
+              onNavigate={store.setCurrentPage}
+              selectedSectionId={store.selectedSectionId}
+              onSelectSection={store.selectSection}
+              generating={generating}
+            />
+          )}
         </div>
 
-        {/* Editor complementar */}
-        {editorOpen && (
+        {showSiteEditor && (
           <aside className="hidden w-[300px] shrink-0 border-l lg:block">
             <EditorPanel />
           </aside>

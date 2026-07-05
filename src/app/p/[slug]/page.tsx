@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { isValidSchema } from "@/lib/engine/types";
+import { isAppCode } from "@/lib/engine/app-types";
 import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { PublicPreview } from "./public-preview";
@@ -17,7 +18,9 @@ export default async function PublicProjectPage({ params }: { params: { slug: st
     .eq("published", true)
     .maybeSingle();
 
-  if (!project || !isValidSchema(project.schema)) notFound();
+  if (!project || (!isValidSchema(project.schema) && !isAppCode(project.schema))) notFound();
+
+  const appCode = isAppCode(project.schema) ? project.schema.code : null;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -31,7 +34,7 @@ export default async function PublicProjectPage({ params }: { params: { slug: st
         </Button>
       </header>
       <main className="min-h-0 flex-1">
-        <PublicPreview schema={project.schema} />
+        <PublicPreview schema={isValidSchema(project.schema) ? project.schema : null} appCode={appCode} />
       </main>
     </div>
   );

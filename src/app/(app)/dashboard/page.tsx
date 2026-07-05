@@ -266,7 +266,7 @@ export default function DashboardPage() {
               }
             }}
             rows={2}
-            placeholder="Descreva o que você quer construir e pressione Enter — ex.: “um dashboard de vendas com KPIs e gráfico”"
+            placeholder="Descreva o app ou site que você quer e pressione Enter — ex.: “um jogo da velha” ou “uma landing de cafeteria”"
             className="min-h-0 resize-none border-0 text-base shadow-none focus-visible:ring-0"
           />
           <Button type="submit" size="icon" variant="brand" disabled={busy || !quickPrompt.trim()} aria-label="Construir">
@@ -275,9 +275,9 @@ export default function DashboardPage() {
         </div>
         <div className="flex flex-wrap gap-1.5 px-2 pb-1 pt-2">
           {[
+            "Um jogo da velha",
+            "Uma calculadora de gorjeta",
             "Landing page para uma cafeteria",
-            "Dashboard de vendas com KPIs",
-            "Portfólio de fotografia",
           ].map((s) => (
             <button
               key={s}

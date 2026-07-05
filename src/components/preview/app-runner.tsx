@@ -1,0 +1,147 @@
+"use client";
+
+/**
+ * AppRunner — executa código React arbitrário no navegador, com segurança.
+ *
+ * O código gerado (um componente `App`) é injetado em um <iframe sandbox>
+ * que carrega React 18 (UMD), Babel Standalone (transpila JSX/TSX em runtime)
+ * e Tailwind (Play CDN). É assim que um clone do Lovable renderiza apps
+ * funcionais de verdade — jogos, ferramentas, lógica — sem servidor de build.
+ *
+ * O iframe roda com sandbox="allow-scripts" (sem allow-same-origin), então
+ * o código do usuário fica isolado da app e dos cookies/sessão.
+ */
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, Loader2, Monitor, Smartphone, RefreshCw } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+interface AppRunnerProps {
+  code: string;
+  /** chave para forçar recarregamento quando o código muda */
+  version?: string | number;
+}
+
+function buildSrcDoc(code: string): string {
+  // O código do usuário é embutido como um script type="text/babel".
+  // Escapamos </script> para não quebrar o documento.
+  const safe = code.replace(/<\/script>/gi, "<\\/script>");
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  html,body,#root{height:100%;margin:0}
+  body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#0b1020;color:#0f172a}
+  #root{background:#ffffff}
+  .nx-error{padding:20px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#b91c1c;background:#fef2f2;white-space:pre-wrap;height:100%;box-sizing:border-box;overflow:auto;font-size:13px;line-height:1.5}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+  window.addEventListener('error', function(e){ showError(e.message); });
+  window.addEventListener('unhandledrejection', function(e){ showError((e.reason && e.reason.message) || String(e.reason)); });
+  function showError(msg){
+    var r = document.getElementById('root');
+    if(r) r.innerHTML = '<div class="nx-error">⚠ Erro ao executar o app:\\n\\n' + String(msg).replace(/</g,'&lt;') + '</div>';
+  }
+</script>
+<script type="text/babel" data-presets="react,typescript" data-type="module">
+const { useState, useEffect, useRef, useMemo, useCallback, useReducer, Fragment } = React;
+try {
+${safe}
+
+  const mount = document.getElementById('root');
+  const root = ReactDOM.createRoot(mount);
+  root.render(React.createElement(App));
+} catch (err) {
+  const r = document.getElementById('root');
+  if(r) r.innerHTML = '<div class="nx-error">⚠ Erro: ' + String(err && err.message || err).replace(/</g,'&lt;') + '</div>';
+}
+</script>
+</body>
+</html>`;
+}
+
+export function AppRunner({ code, version }: AppRunnerProps) {
+  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const srcDoc = useMemo(() => (code ? buildSrcDoc(code) : ""), [code, version, reloadKey]);
+
+  useEffect(() => {
+    setLoading(true);
+  }, [srcDoc]);
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b px-3 py-2">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="flex h-2 w-2 rounded-full bg-emerald-500" />
+          App em execução
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setReloadKey((k) => k + 1)}
+            aria-label="Recarregar app"
+            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => setDevice("desktop")}
+            aria-label="Desktop"
+            className={cn("rounded-md p-1.5 transition-colors", device === "desktop" ? "bg-secondary text-foreground" : "text-muted-foreground")}
+          >
+            <Monitor className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => setDevice("mobile")}
+            aria-label="Mobile"
+            className={cn("rounded-md p-1.5 transition-colors", device === "mobile" ? "bg-secondary text-foreground" : "text-muted-foreground")}
+          >
+            <Smartphone className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      <div className="relative flex-1 overflow-auto bg-secondary/40 p-4">
+        {!code ? (
+          <div className="flex h-full flex-col items-center justify-center text-center">
+            <AlertTriangle className="mb-3 h-6 w-6 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">Descreva o app no chat para gerar e executar o código.</p>
+          </div>
+        ) : (
+          <div
+            className={cn(
+              "mx-auto h-full overflow-hidden rounded-xl border bg-white shadow-xl transition-all",
+              device === "mobile" ? "max-w-[390px]" : "max-w-5xl"
+            )}
+          >
+            {loading && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-secondary/40">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              </div>
+            )}
+            <iframe
+              key={reloadKey}
+              ref={iframeRef}
+              title="Preview do app"
+              sandbox="allow-scripts allow-pointer-lock allow-popups allow-modals"
+              srcDoc={srcDoc}
+              onLoad={() => setLoading(false)}
+              className="h-full w-full border-0 bg-white"
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -17,10 +17,13 @@ import {
   ArrowUp,
   Mic,
   Square,
+  LayoutTemplate,
+  Bookmark,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { timeAgo } from "@/lib/utils";
 import { resolvePlan, isOwner, type AccessProfile } from "@/lib/access";
+import { readMeta, STATUS_LABEL, STATUS_STYLE, STARTER_TEMPLATES } from "@/lib/studio";
 import { LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,6 +55,7 @@ interface Project {
   updated_at: string;
   published: boolean;
   schema: unknown;
+  meta: any;
 }
 
 export default function DashboardPage() {
@@ -66,6 +70,7 @@ export default function DashboardPage() {
   const [renameTarget, setRenameTarget] = useState<Project | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [quickPrompt, setQuickPrompt] = useState("");
+  const [galleryOpen, setGalleryOpen] = useState(false);
 
   // Comando por voz (Web Speech API — grátis)
   const [listening, setListening] = useState(false);
@@ -109,7 +114,7 @@ export default function DashboardPage() {
   const load = useCallback(async () => {
     const { data, error } = await supabase
       .from("projects")
-      .select("id, name, description, updated_at, published, schema")
+      .select("id, name, description, updated_at, published, schema, meta")
       .order("updated_at", { ascending: false });
     if (error) {
       toast.error("Não foi possível carregar seus projetos");
@@ -245,6 +250,47 @@ export default function DashboardPage() {
     load();
   }
 
+  async function handleSaveAsTemplate(p: Project) {
+    const meta = { ...readMeta(p.meta), template: true };
+    const { error } = await supabase.from("projects").update({ meta }).eq("id", p.id);
+    if (error) {
+      toast.error("Não foi possível salvar como modelo");
+      return;
+    }
+    toast.success("Salvo como modelo", { description: "Aparece em “Começar de um modelo”." });
+    load();
+  }
+
+  /** Cria projeto a partir de um modelo embutido (gera pela IA) ou de um projeto-modelo (copia schema). */
+  async function handleCreateFrom(opts: { prompt?: string; schema?: unknown; name: string }) {
+    const plan = resolvePlan(access);
+    if (plan.maxProjects !== -1 && (projects?.length ?? 0) >= plan.maxProjects) {
+      toast.error(`Limite de ${plan.maxProjects} projetos no plano ${plan.name}`);
+      return;
+    }
+    setBusy(true);
+    const { data: userData } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from("projects")
+      .insert({
+        user_id: userData.user!.id,
+        name: opts.name,
+        description: opts.prompt?.slice(0, 240) ?? "",
+        schema: opts.schema ?? null,
+      })
+      .select("id")
+      .single();
+    setBusy(false);
+    if (error || !data) {
+      toast.error("Não foi possível criar o projeto");
+      return;
+    }
+    setGalleryOpen(false);
+    // modelo embutido → dispara a geração pela IA na tela do projeto
+    if (opts.prompt && !opts.schema) sessionStorage.setItem(`nexaform:starter:${data.id}`, opts.prompt);
+    router.push(`/projeto/${data.id}`);
+  }
+
   async function handleDelete() {
     if (!deleteTarget) return;
     setBusy(true);
@@ -285,6 +331,9 @@ export default function DashboardPage() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
+          <Button variant="outline" onClick={() => setGalleryOpen(true)}>
+            <LayoutTemplate /> Começar de um modelo
+          </Button>
           <Button variant="brand" onClick={() => setCreateOpen(true)}>
             <Plus /> {isOwner(access) ? "Novo projeto de cliente" : "Novo projeto"}
           </Button>
@@ -403,7 +452,10 @@ export default function DashboardPage() {
                           <Pencil /> Renomear
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleDuplicate(p)}>
-                          <Copy /> Duplicar
+                          <Copy /> Duplicar como base
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleSaveAsTemplate(p)}>
+                          <Bookmark /> Salvar como modelo
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
@@ -418,13 +470,33 @@ export default function DashboardPage() {
                   <p className="mt-3 line-clamp-2 min-h-[2.5rem] text-sm text-muted-foreground">
                     {p.description || "Sem descrição — abra o chat e comece a construir."}
                   </p>
-                  <div className="mt-3 flex items-center gap-2">
-                    {p.published ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {(() => {
+                      const m = readMeta(p.meta);
+                      if (isOwner(access) && m.status) {
+                        return (
+                          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[m.status]}`}>
+                            {STATUS_LABEL[m.status]}
+                          </span>
+                        );
+                      }
+                      return p.published ? (
+                        <Badge variant="success" className="gap-1">
+                          <Globe className="h-3 w-3" /> Publicado
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary">Rascunho</Badge>
+                      );
+                    })()}
+                    {p.published && isOwner(access) && (
                       <Badge variant="success" className="gap-1">
-                        <Globe className="h-3 w-3" /> Publicado
+                        <Globe className="h-3 w-3" /> No ar
                       </Badge>
-                    ) : (
-                      <Badge variant="secondary">Rascunho</Badge>
+                    )}
+                    {readMeta(p.meta).template && (
+                      <Badge variant="default" className="gap-1">
+                        <Bookmark className="h-3 w-3" /> Modelo
+                      </Badge>
                     )}
                     {!p.schema && <Badge variant="outline">Vazio</Badge>}
                   </div>
@@ -500,6 +572,66 @@ export default function DashboardPage() {
               {busy && <Loader2 className="animate-spin" />} Excluir para sempre
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Galeria: começar de um modelo (universal: sites, apps, jogos + seus modelos) */}
+      <Dialog open={galleryOpen} onOpenChange={setGalleryOpen}>
+        <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Começar de um modelo</DialogTitle>
+            <DialogDescription>Reaproveite um ponto de partida — site, app ou jogo — e refine no chat.</DialogDescription>
+          </DialogHeader>
+
+          {/* Modelos do usuário (projetos salvos como modelo) */}
+          {(projects ?? []).some((p) => readMeta(p.meta).template) && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Seus modelos</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(projects ?? [])
+                  .filter((p) => readMeta(p.meta).template)
+                  .map((p) => (
+                    <button
+                      key={p.id}
+                      disabled={busy}
+                      onClick={() => handleCreateFrom({ schema: p.schema, name: `${p.name} (cópia)` })}
+                      className="rounded-lg border p-3 text-left transition-colors hover:border-brand-500/60"
+                    >
+                      <p className="text-sm font-medium">{p.name}</p>
+                      <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{p.description || "Modelo salvo"}</p>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">Modelos prontos</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {STARTER_TEMPLATES.map((t) => (
+                <button
+                  key={t.id}
+                  disabled={busy}
+                  onClick={() => handleCreateFrom({ prompt: t.prompt, name: t.name })}
+                  className="flex items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:border-brand-500/60"
+                >
+                  <span className="text-xl leading-none">{t.emoji}</span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium">{t.name}</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">{t.desc}</span>
+                    <span className="mt-1 inline-block rounded-full bg-secondary px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                      {t.kind === "app" ? "app" : "site"}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+          {busy && (
+            <p className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Criando projeto…
+            </p>
+          )}
         </DialogContent>
       </Dialog>
     </div>

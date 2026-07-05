@@ -15,18 +15,32 @@ import {
   Loader2,
   PanelRight,
   CloudUpload,
+  ClipboardList,
+  Save,
 } from "lucide-react";
 import { useProjectStore } from "@/lib/store/project";
 import { timeAgo } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ProjectMeta, ProjectStatus, STATUS_LABEL, STATUS_ORDER, STATUS_STYLE } from "@/lib/studio";
+import { cn } from "@/lib/utils";
 
 export interface VersionRow {
   id: string;
@@ -41,11 +55,15 @@ interface TopbarProps {
   shareSlug: string | null;
   canExport: boolean;
   versions: VersionRow[];
+  meta: ProjectMeta;
+  studio: boolean;
   onRename: (name: string) => void;
   onRestoreVersion: (v: VersionRow) => void;
   onPublish: () => Promise<string | null>;
   onExport: () => void;
   onToggleEditor: () => void;
+  onMetaChange: (patch: Partial<ProjectMeta>) => void;
+  onSaveVersion: (label: string) => Promise<void>;
 }
 
 export function ProjectTopbar({
@@ -54,15 +72,22 @@ export function ProjectTopbar({
   shareSlug,
   canExport,
   versions,
+  meta,
+  studio,
   onRename,
   onRestoreVersion,
   onPublish,
   onExport,
   onToggleEditor,
+  onMetaChange,
+  onSaveVersion,
 }: TopbarProps) {
   const { saveState, past, future, undo, redo } = useProjectStore();
   const [versionsOpen, setVersionsOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [versionName, setVersionName] = useState("");
+  const status: ProjectStatus = meta.status ?? "rascunho";
 
   async function handleShare() {
     let slug = shareSlug;
@@ -91,9 +116,33 @@ export function ProjectTopbar({
           onBlur={(e) => e.target.value.trim() && e.target.value !== name && onRename(e.target.value.trim())}
           aria-label="Nome do projeto"
         />
-        <Badge variant={published ? "success" : "secondary"} className="hidden sm:inline-flex">
-          {published ? "Publicado" : "Rascunho"}
-        </Badge>
+        {studio ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className={cn(
+                  "hidden shrink-0 rounded-full px-2.5 py-1 text-xs font-medium transition-opacity hover:opacity-80 sm:inline-flex",
+                  STATUS_STYLE[status]
+                )}
+                title="Status de produção"
+              >
+                {STATUS_LABEL[status]}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {STATUS_ORDER.map((s) => (
+                <DropdownMenuItem key={s} onClick={() => onMetaChange({ status: s })}>
+                  <span className={cn("mr-2 h-2 w-2 rounded-full", STATUS_STYLE[s])} />
+                  {STATUS_LABEL[s]}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <Badge variant={published ? "success" : "secondary"} className="hidden sm:inline-flex">
+            {published ? "Publicado" : "Rascunho"}
+          </Badge>
+        )}
         <span className="hidden items-center gap-1 text-xs text-muted-foreground md:flex">
           {saveState === "saving" ? (
             <>
@@ -118,6 +167,17 @@ export function ProjectTopbar({
         <Button variant="ghost" size="icon" onClick={redo} disabled={future.length === 0} aria-label="Refazer" title="Refazer (⌘⇧Z)">
           <Redo2 />
         </Button>
+        {studio && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setDetailsOpen(true)}
+            aria-label="Detalhes de produção"
+            title="Briefing / observações internas"
+          >
+            <ClipboardList />
+          </Button>
+        )}
         <Button variant="ghost" size="icon" onClick={() => setVersionsOpen(true)} aria-label="Histórico de versões" title="Histórico de versões">
           <History />
         </Button>
@@ -139,9 +199,33 @@ export function ProjectTopbar({
           <DialogHeader>
             <DialogTitle>Histórico de versões</DialogTitle>
             <DialogDescription>
-              Cada geração cria uma versão. Restaure qualquer uma — o estado atual vai para o undo.
+              Cada geração cria uma versão. Salve marcos com nome e restaure quando quiser.
             </DialogDescription>
           </DialogHeader>
+
+          {/* Salvar versão atual com nome manual */}
+          <div className="flex items-end gap-2 rounded-lg border bg-secondary/30 p-3">
+            <div className="flex-1 space-y-1">
+              <Label className="text-xs">Salvar versão atual</Label>
+              <Input
+                value={versionName}
+                onChange={(e) => setVersionName(e.target.value)}
+                placeholder="Ex.: cliente aprovou o hero"
+                className="h-8"
+              />
+            </div>
+            <Button
+              size="sm"
+              onClick={async () => {
+                await onSaveVersion(versionName.trim() || "Marco manual");
+                setVersionName("");
+                toast.success("Versão salva no histórico");
+              }}
+            >
+              <Save className="h-3.5 w-3.5" /> Salvar
+            </Button>
+          </div>
+
           <div className="space-y-2">
             {versions.length === 0 && (
               <p className="py-6 text-center text-sm text-muted-foreground">
@@ -168,6 +252,40 @@ export function ProjectTopbar({
               </div>
             ))}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Detalhes de produção (briefing / notas internas) */}
+      <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Detalhes de produção</DialogTitle>
+            <DialogDescription>Informações internas — não aparecem na entrega ao cliente.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-xs">Cliente / rótulo</Label>
+              <Input
+                defaultValue={meta.client ?? ""}
+                onBlur={(e) => onMetaChange({ client: e.target.value })}
+                placeholder="Ex.: Clínica Sorriso Perfeito"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs">Observações internas</Label>
+              <Textarea
+                defaultValue={meta.notes ?? ""}
+                onBlur={(e) => onMetaChange({ notes: e.target.value })}
+                rows={5}
+                placeholder="Escopo, prazos, pendências, o que o cliente pediu…"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="brand" onClick={() => setDetailsOpen(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

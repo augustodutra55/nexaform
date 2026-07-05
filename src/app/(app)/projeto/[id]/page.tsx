@@ -8,7 +8,8 @@ import { createClient } from "@/lib/supabase/client";
 import { AppSchema, GenerationResult, isValidSchema } from "@/lib/engine/types";
 import { AppCode, AppGenerationResult, isAppCode } from "@/lib/engine/app-types";
 import { useProjectStore } from "@/lib/store/project";
-import { resolvePlan, type AccessProfile } from "@/lib/access";
+import { resolvePlan, isOwner, type AccessProfile } from "@/lib/access";
+import { ProjectMeta, readMeta } from "@/lib/studio";
 import { ChatPanel, ProjectMode } from "@/components/project/chat-panel";
 import { EditorPanel } from "@/components/project/editor-panel";
 import { ProjectTopbar, VersionRow } from "@/components/project/project-topbar";
@@ -22,6 +23,7 @@ interface ProjectRow {
   schema: any;
   published: boolean;
   share_slug: string | null;
+  meta: any;
 }
 
 export default function ProjectPage({ params }: { params: { id: string } }) {
@@ -44,6 +46,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [mode, setMode] = useState<ProjectMode>("empty");
   const [appCode, setAppCode] = useState<string | null>(null);
   const [appVer, setAppVer] = useState(0);
+  const [meta, setMeta] = useState<ProjectMeta>({});
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
 
   /* ── Carregamento ─────────────────────────────────────────── */
@@ -52,7 +55,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     (async () => {
       const { data: proj, error } = await supabase
         .from("projects")
-        .select("id, name, schema, published, share_slug")
+        .select("id, name, schema, published, share_slug, meta")
         .eq("id", projectId)
         .maybeSingle();
       if (cancelled) return;
@@ -61,6 +64,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
         return;
       }
       setProject(proj as ProjectRow);
+      setMeta(readMeta(proj.meta));
       store.reset();
       if (isAppCode(proj.schema)) {
         setMode("app");
@@ -188,6 +192,26 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     toast.success("Projeto renomeado");
   }
 
+  async function handleMetaChange(patch: Partial<ProjectMeta>) {
+    const next = { ...meta, ...patch };
+    setMeta(next);
+    await supabase.from("projects").update({ meta: next, updated_at: new Date().toISOString() }).eq("id", projectId);
+  }
+
+  async function handleSaveVersion(label: string) {
+    const payload = mode === "app" ? { kind: "app", name: project?.name, code: appCode } : store.schema;
+    if (!payload) {
+      toast.error("Nada para salvar ainda");
+      return;
+    }
+    const { data } = await supabase
+      .from("versions")
+      .insert({ project_id: projectId, schema: payload, label: label.slice(0, 120) })
+      .select("id, label, created_at, schema")
+      .single();
+    if (data) setVersions((v) => [data as any, ...v]);
+  }
+
   async function handlePublish(): Promise<string | null> {
     if (!project) return null;
     const hasContent = mode === "app" ? !!appCode : !!store.schema;
@@ -277,11 +301,15 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
         shareSlug={project.share_slug}
         canExport={resolvePlan(access).canExport}
         versions={versions}
+        meta={meta}
+        studio={isOwner(access)}
         onRename={handleRename}
         onRestoreVersion={handleRestoreVersion}
         onPublish={handlePublish}
         onExport={handleExport}
         onToggleEditor={() => setEditorOpen((o) => !o)}
+        onMetaChange={handleMetaChange}
+        onSaveVersion={handleSaveVersion}
       />
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-[340px] shrink-0 flex-col border-r xl:w-[380px]">

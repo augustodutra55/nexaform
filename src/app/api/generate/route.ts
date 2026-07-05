@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Corpo inválido." }, { status: 400 });
   }
 
-  const { projectId, message, schema, userKey, userProvider } = body ?? {};
+  const { projectId, message, schema, userKey, userProvider, costMode } = body ?? {};
   if (!projectId || typeof message !== "string" || !message.trim()) {
     return NextResponse.json({ error: "Requisição incompleta." }, { status: 400 });
   }
@@ -80,16 +80,22 @@ export async function POST(req: NextRequest) {
     schema: safeSchema,
     userKey: typeof userKey === "string" ? userKey : null,
     userProvider: userProvider ?? null,
+    costMode: costMode ?? "auto",
   });
 
-  // ── Registro de uso ─────────────────────────────────────────
+  // ── Registro de uso + custo real ────────────────────────────
   await supabase.from("generations").insert({
     user_id: user.id,
     project_id: projectId,
     prompt: message.slice(0, 2000),
     provider: result.provider,
     status: "completed",
+    cost_usd: result.cost ?? 0,
+    model: result.model ?? null,
   });
 
-  return NextResponse.json(result);
+  const { data: rows } = await supabase.from("generations").select("cost_usd").eq("project_id", projectId);
+  const projectCost = (rows ?? []).reduce((s: number, r: any) => s + Number(r.cost_usd ?? 0), 0);
+
+  return NextResponse.json({ ...result, projectCost });
 }

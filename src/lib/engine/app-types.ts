@@ -25,6 +25,10 @@ export interface AppGenerationResult {
   plan: string[];
   app: AppCode;
   provider: "template" | "claude" | "openrouter";
+  /** Custo real desta geração em USD (0 para template/local). */
+  cost?: number;
+  /** Modelo usado (para transparência de custo). */
+  model?: string;
 }
 
 export function isAppCode(value: any): value is AppCode {

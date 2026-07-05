@@ -60,6 +60,10 @@ export interface GenerationResult {
   plan: string[];
   schema: AppSchema;
   provider: "local" | "claude" | "openrouter";
+  /** Custo real desta geração em USD (0 para motor local). */
+  cost?: number;
+  /** Modelo usado. */
+  model?: string;
 }
 
 export interface ChatMessage {

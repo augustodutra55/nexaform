@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Corpo inválido." }, { status: 400 });
   }
-  const { projectId, message, currentCode, name, userKey, userProvider } = body ?? {};
+  const { projectId, message, currentCode, name, userKey, userProvider, costMode } = body ?? {};
   if (!projectId || typeof message !== "string" || !message.trim()) {
     return NextResponse.json({ error: "Requisição incompleta." }, { status: 400 });
   }
@@ -57,6 +57,7 @@ export async function POST(req: NextRequest) {
     name: typeof name === "string" ? name : "App",
     userKey: typeof userKey === "string" ? userKey : null,
     userProvider: userProvider ?? null,
+    costMode: costMode ?? "auto",
   });
 
   await supabase.from("generations").insert({
@@ -65,7 +66,13 @@ export async function POST(req: NextRequest) {
     prompt: message.slice(0, 2000),
     provider: result.provider,
     status: "completed",
+    cost_usd: result.cost ?? 0,
+    model: result.model ?? null,
   });
 
-  return NextResponse.json(result);
+  // custo acumulado do projeto
+  const { data: rows } = await supabase.from("generations").select("cost_usd").eq("project_id", projectId);
+  const projectCost = (rows ?? []).reduce((s: number, r: any) => s + Number(r.cost_usd ?? 0), 0);
+
+  return NextResponse.json({ ...result, projectCost });
 }

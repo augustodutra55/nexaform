@@ -64,6 +64,8 @@ export function ChatPanel({
   const [generating, setGenerating] = useState(false);
   const [plan, setPlan] = useState<string[]>([]);
   const [planDone, setPlanDone] = useState(0);
+  const [lastCost, setLastCost] = useState<number | null>(null);
+  const [projectCost, setProjectCost] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const startedRef = useRef(false);
 
@@ -146,6 +148,7 @@ export function ChatPanel({
 
     try {
       const endpoint = useApp ? "/api/generate-app" : "/api/generate";
+      const costMode = localStorage.getItem("nexaform:cost-mode") || "auto";
       const payload = useApp
         ? {
             projectId,
@@ -154,6 +157,7 @@ export function ChatPanel({
             name: projectName,
             userKey: localStorage.getItem("nexaform:ai-key") || null,
             userProvider: localStorage.getItem("nexaform:ai-provider") || null,
+            costMode,
           }
         : {
             projectId,
@@ -161,6 +165,7 @@ export function ChatPanel({
             schema: schemaRef.current,
             userKey: localStorage.getItem("nexaform:ai-key") || null,
             userProvider: localStorage.getItem("nexaform:ai-provider") || null,
+            costMode,
           };
 
       const res = await fetch(endpoint, {
@@ -180,6 +185,9 @@ export function ChatPanel({
 
       setMessages((m) => [...m, { id: crypto.randomUUID(), role: "assistant", content: data.reply }]);
       persist("assistant", data.reply);
+
+      if (typeof data.cost === "number") setLastCost(data.cost);
+      if (typeof data.projectCost === "number") setProjectCost(data.projectCost);
 
       if (useApp) onAppResult(data as AppGenerationResult);
       else onSiteResult(data as GenerationResult);
@@ -201,11 +209,18 @@ export function ChatPanel({
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b px-4 py-2.5">
-        <span className="text-xs font-medium">Construtor</span>
-        <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1.5 text-xs font-medium">
           {mode === "app" ? <Code2 className="h-3 w-3" /> : mode === "site" ? <Layout className="h-3 w-3" /> : null}
+          Construtor
+        </span>
+        <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          {projectCost !== null && (
+            <span className="rounded-full bg-secondary px-1.5 py-0.5 tabular-nums" title="Custo acumulado deste projeto">
+              ${projectCost.toFixed(3)}
+            </span>
+          )}
           <span className={cn("h-1.5 w-1.5 rounded-full", generating ? "animate-pulse-soft bg-brand-500" : "bg-emerald-500")} />
-          {generating ? "Construindo…" : mode === "app" ? "App · pronto para iterar" : mode === "site" ? "Site · pronto para iterar" : "Pronto"}
+          {generating ? "Construindo…" : "Pronto"}
         </span>
       </div>
 

@@ -263,11 +263,11 @@ export default function DashboardPage() {
     <div className="container max-w-6xl py-10">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Seus projetos</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{isOwner(access) ? "Estúdio de produção" : "Seus projetos"}</h1>
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             {projects ? `${projects.length} projeto${projects.length === 1 ? "" : "s"}` : "Carregando…"}
             {isOwner(access) ? (
-              <Badge className="gap-1">Owner · acesso total</Badge>
+              <Badge className="gap-1">Studio · acesso total</Badge>
             ) : (
               <span>
                 · plano <span className="capitalize">{access.plan ?? "free"}</span>
@@ -286,7 +286,7 @@ export default function DashboardPage() {
             />
           </div>
           <Button variant="brand" onClick={() => setCreateOpen(true)}>
-            <Plus /> Novo projeto
+            <Plus /> {isOwner(access) ? "Novo projeto de cliente" : "Novo projeto"}
           </Button>
         </div>
       </div>
@@ -332,11 +332,10 @@ export default function DashboardPage() {
           </Button>
         </div>
         <div className="flex flex-wrap gap-1.5 px-2 pb-1 pt-2">
-          {[
-            "Um jogo da velha",
-            "Uma calculadora de gorjeta",
-            "Landing page para uma cafeteria",
-          ].map((s) => (
+          {(isOwner(access)
+            ? ["Landing para clínica odontológica", "Página de vendas de infoproduto", "Site institucional para advogado"]
+            : ["Um jogo da velha", "Uma calculadora de gorjeta", "Landing page para uma cafeteria"]
+          ).map((s) => (
             <button
               key={s}
               type="button"

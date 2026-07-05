@@ -9,7 +9,7 @@ import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { PublicPreview } from "./public-preview";
 
-export const revalidate = 60;
+export const revalidate = 10;
 
 async function fetchProject(slug: string) {
   const supabase = createClient();
@@ -27,10 +27,11 @@ export async function generateMetadata({ params }: { params: { slug: string } })
   const project = await fetchProject(params.slug);
   if (!project) return { title: "Projeto não encontrado" };
   const meta = readMeta(project.meta);
-  const title = project.name;
   const description =
     project.description?.slice(0, 160) ||
-    `${project.name} — publicado com Nexaform.`;
+    (meta.whitelabel ? project.name : `${project.name} — publicado com Nexaform.`);
+  // white-label: título absoluto, sem o sufixo "· Nexaform".
+  const title = meta.whitelabel ? { absolute: project.name } : project.name;
   return {
     title,
     description,

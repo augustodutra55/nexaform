@@ -47,6 +47,8 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [appCode, setAppCode] = useState<string | null>(null);
   const [appVer, setAppVer] = useState(0);
   const [meta, setMeta] = useState<ProjectMeta>({});
+  const metaRef = useRef<ProjectMeta>({});
+  metaRef.current = meta;
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
 
   /* ── Carregamento ─────────────────────────────────────────── */
@@ -193,7 +195,10 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   }
 
   async function handleMetaChange(patch: Partial<ProjectMeta>) {
-    const next = { ...meta, ...patch };
+    // Merge contra o valor MAIS RECENTE (ref), evitando sobrescrever
+    // alterações concorrentes (ex.: input blur + toggle quase juntos).
+    const next = { ...metaRef.current, ...patch };
+    metaRef.current = next;
     setMeta(next);
     await supabase.from("projects").update({ meta: next, updated_at: new Date().toISOString() }).eq("id", projectId);
   }

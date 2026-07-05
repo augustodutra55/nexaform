@@ -44,6 +44,9 @@ function buildSrcDoc(code: string): string {
 <body>
 <div id="root"></div>
 <script>
+  // Proteção: impede o código do preview de tocar na página pai / storage do app.
+  try { Object.defineProperty(window, 'parent', { get: function(){ return window; } }); } catch(e){}
+  try { Object.defineProperty(window, 'top', { get: function(){ return window; } }); } catch(e){}
   window.addEventListener('error', function(e){ showError(e.message); });
   window.addEventListener('unhandledrejection', function(e){ showError((e.reason && e.reason.message) || String(e.reason)); });
   function showError(msg){
@@ -134,7 +137,7 @@ export function AppRunner({ code, version }: AppRunnerProps) {
               key={reloadKey}
               ref={iframeRef}
               title="Preview do app"
-              sandbox="allow-scripts allow-pointer-lock allow-popups allow-modals"
+              sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-modals"
               srcDoc={srcDoc}
               onLoad={() => setLoading(false)}
               className="h-full w-full border-0 bg-white"

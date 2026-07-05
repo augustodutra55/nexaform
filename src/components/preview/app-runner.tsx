@@ -22,9 +22,10 @@ interface AppRunnerProps {
 }
 
 function buildSrcDoc(code: string): string {
-  // O código do usuário é embutido como um script type="text/babel".
-  // Escapamos </script> para não quebrar o documento.
-  const safe = code.replace(/<\/script>/gi, "<\\/script>");
+  // O código do usuário vai como string JSON e é transpilado em runtime com
+  // Babel no modo CLÁSSICO (React.createElement) — sem import de jsx-runtime,
+  // que não existe no navegador sem bundler.
+  const codeJson = JSON.stringify(code);
   return `<!doctype html>
 <html lang="pt-BR">
 <head>
@@ -54,18 +55,24 @@ function buildSrcDoc(code: string): string {
     if(r) r.innerHTML = '<div class="nx-error">⚠ Erro ao executar o app:\\n\\n' + String(msg).replace(/</g,'&lt;') + '</div>';
   }
 </script>
-<script type="text/babel" data-presets="react,typescript" data-type="module">
-const { useState, useEffect, useRef, useMemo, useCallback, useReducer, Fragment } = React;
-try {
-${safe}
-
-  const mount = document.getElementById('root');
-  const root = ReactDOM.createRoot(mount);
-  root.render(React.createElement(App));
-} catch (err) {
-  const r = document.getElementById('root');
-  if(r) r.innerHTML = '<div class="nx-error">⚠ Erro: ' + String(err && err.message || err).replace(/</g,'&lt;') + '</div>';
-}
+<script>
+  (function(){
+    var USERCODE = ${codeJson};
+    try {
+      var out = Babel.transform(USERCODE, {
+        presets: [['react', { runtime: 'classic' }], 'typescript'],
+        filename: 'app.tsx'
+      }).code;
+      var factory = new Function('React', 'ReactDOM',
+        'var {useState,useEffect,useRef,useMemo,useCallback,useReducer,useContext,createContext,Fragment} = React;'
+        + out + '\\n; return typeof App !== "undefined" ? App : null;');
+      var App = factory(React, ReactDOM);
+      if (!App) { showError('O código não definiu um componente App.'); return; }
+      ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+    } catch (err) {
+      showError((err && err.message) || String(err));
+    }
+  })();
 </script>
 </body>
 </html>`;

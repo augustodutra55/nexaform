@@ -12,6 +12,8 @@ export interface ProjectMeta {
   template?: boolean;
   /** Cliente/rótulo do projeto (opcional). */
   client?: string;
+  /** Entrega white-label: publicação sem a marca Nexaform. */
+  whitelabel?: boolean;
 }
 
 export const STATUS_LABEL: Record<ProjectStatus, string> = {

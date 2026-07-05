@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -278,6 +279,16 @@ export function ProjectTopbar({
                 onBlur={(e) => onMetaChange({ notes: e.target.value })}
                 rows={5}
                 placeholder="Escopo, prazos, pendências, o que o cliente pediu…"
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <div>
+                <p className="text-sm font-medium">Entrega white-label</p>
+                <p className="text-xs text-muted-foreground">Publicar sem a marca Nexaform, como entrega do cliente.</p>
+              </div>
+              <Switch
+                checked={!!meta.whitelabel}
+                onCheckedChange={(v) => onMetaChange({ whitelabel: v })}
               />
             </div>
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -15,6 +15,8 @@ import {
   Globe,
   Loader2,
   ArrowUp,
+  Mic,
+  Square,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { timeAgo } from "@/lib/utils";
@@ -64,6 +66,45 @@ export default function DashboardPage() {
   const [renameTarget, setRenameTarget] = useState<Project | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [quickPrompt, setQuickPrompt] = useState("");
+
+  // Comando por voz (Web Speech API — grátis)
+  const [listening, setListening] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const recRef = useRef<any>(null);
+  useEffect(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    setVoiceSupported(!!SR);
+  }, []);
+  function toggleMic() {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      toast.error("Seu navegador não suporta ditado por voz", { description: "Use o Chrome." });
+      return;
+    }
+    if (listening) {
+      recRef.current?.stop();
+      return;
+    }
+    const rec = new SR();
+    rec.lang = "pt-BR";
+    rec.interimResults = true;
+    rec.continuous = false;
+    const base = quickPrompt ? quickPrompt.trim() + " " : "";
+    rec.onresult = (e: any) => {
+      let t = "";
+      for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
+      setQuickPrompt(base + t);
+    };
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    recRef.current = rec;
+    try {
+      rec.start();
+      setListening(true);
+    } catch {
+      setListening(false);
+    }
+  }
 
   const load = useCallback(async () => {
     const { data, error } = await supabase
@@ -266,9 +307,26 @@ export default function DashboardPage() {
               }
             }}
             rows={2}
-            placeholder="Descreva o app ou site que você quer e pressione Enter — ex.: “um jogo da velha” ou “uma landing de cafeteria”"
+            placeholder={
+              listening
+                ? "Ouvindo… fale o app ou site que você quer"
+                : "Descreva ou dite o app/site e pressione Enter — ex.: “um jogo da velha” ou “uma landing de cafeteria”"
+            }
             className="min-h-0 resize-none border-0 text-base shadow-none focus-visible:ring-0"
           />
+          {voiceSupported && (
+            <Button
+              type="button"
+              size="icon"
+              variant={listening ? "brand" : "ghost"}
+              onClick={toggleMic}
+              aria-label={listening ? "Parar" : "Ditar por voz"}
+              title={listening ? "Parar" : "Ditar por voz"}
+              className={listening ? "animate-pulse-soft" : ""}
+            >
+              {listening ? <Square /> : <Mic />}
+            </Button>
+          )}
           <Button type="submit" size="icon" variant="brand" disabled={busy || !quickPrompt.trim()} aria-label="Construir">
             {busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}
           </Button>

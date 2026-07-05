@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout } from "lucide-react";
+import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout, Mic, Square } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AppSchema, GenerationResult } from "@/lib/engine/types";
 import { AppGenerationResult, looksLikeApp } from "@/lib/engine/app-types";
@@ -66,6 +66,45 @@ export function ChatPanel({
   const [planDone, setPlanDone] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const startedRef = useRef(false);
+
+  // ── Comando por voz (Web Speech API — grátis, roda no navegador) ──
+  const [listening, setListening] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const recRef = useRef<any>(null);
+  useEffect(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    setVoiceSupported(!!SR);
+  }, []);
+  function toggleMic() {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      toast.error("Seu navegador não suporta ditado por voz", { description: "Use o Chrome para o comando de voz." });
+      return;
+    }
+    if (listening) {
+      recRef.current?.stop();
+      return;
+    }
+    const rec = new SR();
+    rec.lang = "pt-BR";
+    rec.interimResults = true;
+    rec.continuous = false;
+    const base = input ? input.trim() + " " : "";
+    rec.onresult = (e: any) => {
+      let t = "";
+      for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
+      setInput(base + t);
+    };
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    recRef.current = rec;
+    try {
+      rec.start();
+      setListening(true);
+    } catch {
+      setListening(false);
+    }
+  }
 
   const modeRef = useRef(mode);
   modeRef.current = mode;
@@ -259,17 +298,38 @@ export function ChatPanel({
                 send(input);
               }
             }}
-            placeholder={mode === "empty" ? "Descreva o app ou site que você quer…" : "Peça um refinamento…"}
+            placeholder={
+              listening
+                ? "Ouvindo… fale o que você quer construir"
+                : mode === "empty"
+                ? "Descreva ou dite o app/site que você quer…"
+                : "Peça um refinamento (ou use o microfone)…"
+            }
             rows={2}
             className="min-h-0 resize-none border-0 shadow-none focus-visible:ring-0"
             disabled={generating}
           />
+          {voiceSupported && (
+            <Button
+              type="button"
+              size="icon"
+              variant={listening ? "brand" : "ghost"}
+              onClick={toggleMic}
+              disabled={generating}
+              aria-label={listening ? "Parar de ouvir" : "Ditar por voz"}
+              title={listening ? "Parar" : "Ditar por voz"}
+              className={listening ? "animate-pulse-soft" : ""}
+            >
+              {listening ? <Square /> : <Mic />}
+            </Button>
+          )}
           <Button type="submit" size="icon" variant="brand" disabled={generating || !input.trim()} aria-label="Enviar">
             {generating ? <Loader2 className="animate-spin" /> : <ArrowUp />}
           </Button>
         </div>
         <p className="mt-1.5 px-1 text-[10px] text-muted-foreground">
           <kbd className="rounded border px-1">⏎</kbd> envia · <kbd className="rounded border px-1">⇧⏎</kbd> quebra linha
+          {voiceSupported ? " · 🎙 fale pelo microfone" : ""}
         </p>
       </form>
     </div>

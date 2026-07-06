@@ -10,7 +10,9 @@ import { AppCode, AppFile, AppGenerationResult, EngineMode, isAppCode, isMultiFi
 import { useProjectStore } from "@/lib/store/project";
 import { resolvePlan, isOwner, type AccessProfile } from "@/lib/access";
 import { ProjectMeta, readMeta } from "@/lib/studio";
+import { cn } from "@/lib/utils";
 import { ChatPanel, ProjectMode } from "@/components/project/chat-panel";
+import { CodePanel } from "@/components/project/code-panel";
 import { EditorPanel } from "@/components/project/editor-panel";
 import { ProjectTopbar, VersionRow } from "@/components/project/project-topbar";
 import { PreviewPane } from "@/components/preview/preview-pane";
@@ -50,6 +52,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [appName, setAppName] = useState<string>("App");
   const [appVer, setAppVer] = useState(0);
   const [engineMode, setEngineMode] = useState<EngineMode | null>(null);
+  const [appView, setAppView] = useState<"preview" | "code">("preview");
 
   // AppCode atual (multi-arquivo ou single-file legado) para salvar/publicar/exportar.
   const currentApp = useCallback(
@@ -365,6 +368,32 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     toast.success("Exportado");
   }
 
+  /** Arquivos para a aba de Código (single-file vira um App.jsx). */
+  const codeFiles: AppFile[] =
+    appFiles && appFiles.length
+      ? appFiles
+      : appCode
+      ? [{ path: "App.jsx", content: appCode }]
+      : [];
+
+  /** Aplica edições manuais de código: persiste e re-executa o preview. */
+  async function handleApplyCode(edited: AppFile[]) {
+    let app: AppCode;
+    if (appFiles && appFiles.length) {
+      setAppFiles(edited);
+      setAppEntry((e) => (edited.some((f) => f.path === e) ? e : edited[0]?.path ?? null));
+      app = { kind: "app", name: appName, description: "", files: edited, entry: appEntry ?? edited[0]?.path };
+    } else {
+      const code = edited[0]?.content ?? "";
+      setAppCode(code);
+      app = { kind: "app", name: appName, description: "", code };
+    }
+    setAppVer((n) => n + 1);
+    setAppView("preview");
+    await supabase.from("projects").update({ schema: app, updated_at: new Date().toISOString() }).eq("id", projectId);
+    toast.success("Código aplicado e executado");
+  }
+
   function handleAppError(message: string) {
     // Máx. 2 correções automáticas por sessão para evitar loop.
     if (autoFixCount.current >= 2) return;
@@ -462,14 +491,44 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
         <div className="min-w-0 flex-1">
           {mode === "app" ? (
-            <AppRunner
-              code={appCode ?? ""}
-              files={appFiles}
-              entry={appEntry}
-              version={appVer}
-              engineMode={engineMode}
-              onError={handleAppError}
-            />
+            <div className="flex h-full flex-col">
+              <div className="flex items-center gap-1 border-b px-3 py-1.5">
+                <div className="inline-flex rounded-lg border p-0.5 text-xs">
+                  <button
+                    onClick={() => setAppView("preview")}
+                    className={cn(
+                      "rounded-md px-2.5 py-1 font-medium transition-colors",
+                      appView === "preview" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Preview
+                  </button>
+                  <button
+                    onClick={() => setAppView("code")}
+                    className={cn(
+                      "rounded-md px-2.5 py-1 font-medium transition-colors",
+                      appView === "code" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Código{codeFiles.length > 1 ? ` · ${codeFiles.length}` : ""}
+                  </button>
+                </div>
+              </div>
+              <div className="min-h-0 flex-1">
+                {appView === "code" && codeFiles.length ? (
+                  <CodePanel files={codeFiles} entry={appEntry} onApply={handleApplyCode} />
+                ) : (
+                  <AppRunner
+                    code={appCode ?? ""}
+                    files={appFiles}
+                    entry={appEntry}
+                    version={appVer}
+                    engineMode={engineMode}
+                    onError={handleAppError}
+                  />
+                )}
+              </div>
+            </div>
           ) : (
             <PreviewPane
               schema={store.schema}

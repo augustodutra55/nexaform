@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { authorizeProject, rateLimit } from "@/lib/engine/data-guard";
 
 /**
  * Upload de arquivos dos apps gerados. Recebe um arquivo (multipart ou base64),
@@ -30,6 +31,7 @@ function ext(name: string, type: string): string {
 export async function POST(req: NextRequest, { params }: { params: { projectId: string } }) {
   const projectId = params.projectId;
   if (!UUID_RE.test(projectId)) return NextResponse.json({ error: "projectId inválido" }, { status: 400 });
+  if (!rateLimit(`upload:${projectId}`, 30)) return NextResponse.json({ error: "Muitos uploads em pouco tempo. Aguarde." }, { status: 429 });
 
   let bytes: Buffer;
   let contentType = "application/octet-stream";
@@ -61,8 +63,11 @@ export async function POST(req: NextRequest, { params }: { params: { projectId: 
   if (!OK_TYPES.test(contentType))
     return NextResponse.json({ error: `Tipo não permitido: ${contentType}` }, { status: 415 });
 
-  const path = `${projectId}/${crypto.randomUUID()}.${ext(name, contentType)}`;
   const supabase = createClient();
+  const g = await authorizeProject(supabase, projectId, "write");
+  if (!g.allowed) return NextResponse.json({ error: g.error }, { status: g.status });
+
+  const path = `${projectId}/${crypto.randomUUID()}.${ext(name, contentType)}`;
   const { error } = await supabase.storage.from(BUCKET).upload(path, bytes, {
     contentType,
     upsert: false,

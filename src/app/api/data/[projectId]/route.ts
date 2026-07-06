@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { authorizeProject, rateLimit } from "@/lib/engine/data-guard";
 
 /**
  * Backend de dados embutido dos apps gerados pelo AD Studio.
@@ -26,6 +27,8 @@ export async function GET(req: NextRequest, { params }: { params: { projectId: s
   if (!UUID_RE.test(projectId)) return bad("projectId inválido");
   const collection = req.nextUrl.searchParams.get("collection") || "default";
   const supabase = createClient();
+  const g = await authorizeProject(supabase, projectId, "read");
+  if (!g.allowed) return NextResponse.json({ error: g.error }, { status: g.status });
   const { data, error } = await supabase
     .from("app_data")
     .select("id, data, created_at")
@@ -50,8 +53,11 @@ export async function POST(req: NextRequest, { params }: { params: { projectId: 
   const data = body?.data ?? {};
   if (typeof data !== "object" || Array.isArray(data)) return bad("data deve ser um objeto");
   if (JSON.stringify(data).length > MAX_BYTES) return bad("Registro grande demais", 413);
+  if (!rateLimit(`data:${projectId}`)) return bad("Muitas gravações em pouco tempo. Aguarde.", 429);
 
   const supabase = createClient();
+  const g = await authorizeProject(supabase, projectId, "write");
+  if (!g.allowed) return NextResponse.json({ error: g.error }, { status: g.status });
   const { count } = await supabase
     .from("app_data")
     .select("id", { count: "exact", head: true })
@@ -81,8 +87,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { projectId:
   const data = body?.data ?? {};
   if (typeof data !== "object" || Array.isArray(data)) return bad("data deve ser um objeto");
   if (JSON.stringify(data).length > MAX_BYTES) return bad("Registro grande demais", 413);
+  if (!rateLimit(`data:${projectId}`)) return bad("Muitas gravações em pouco tempo. Aguarde.", 429);
 
   const supabase = createClient();
+  const g = await authorizeProject(supabase, projectId, "write");
+  if (!g.allowed) return NextResponse.json({ error: g.error }, { status: g.status });
   const { data: row, error } = await supabase
     .from("app_data")
     .update({ data, updated_at: new Date().toISOString() })
@@ -99,7 +108,10 @@ export async function DELETE(req: NextRequest, { params }: { params: { projectId
   if (!UUID_RE.test(projectId)) return bad("projectId inválido");
   const id = req.nextUrl.searchParams.get("id");
   if (!id) return bad("id obrigatório");
+  if (!rateLimit(`data:${projectId}`)) return bad("Muitas operações em pouco tempo. Aguarde.", 429);
   const supabase = createClient();
+  const g = await authorizeProject(supabase, projectId, "write");
+  if (!g.allowed) return NextResponse.json({ error: g.error }, { status: g.status });
   const { error } = await supabase.from("app_data").delete().eq("project_id", projectId).eq("id", id);
   if (error) return bad(error.message, 500);
   return NextResponse.json({ ok: true });

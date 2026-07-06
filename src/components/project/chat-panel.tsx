@@ -177,8 +177,13 @@ export function ChatPanel({
     const content = text.trim();
     if (!content || generating) return;
 
-    // Decide o modo desta geração
-    const useApp = modeRef.current === "app" || (modeRef.current === "empty" && looksLikeApp(content));
+    // Decide o motor desta geração.
+    // "Geração real" SEMPRE escreve código React de verdade (inclusive landings),
+    // exceto em projetos que já são schema/site (para não sobrescrever o editor visual).
+    // "Template/Schema" usa a heurística: app enlatado ou motor de seções.
+    const useApp =
+      modeRef.current === "app" ||
+      (modeRef.current !== "site" && (genModeRef.current === "real" || looksLikeApp(content)));
 
     setInput("");
     setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", content }]);

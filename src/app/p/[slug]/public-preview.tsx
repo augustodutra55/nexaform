@@ -11,18 +11,20 @@ export function PublicPreview({
   appCode,
   appFiles,
   appEntry,
+  projectId,
 }: {
   schema: AppSchema | null;
   appCode?: string | null;
   appFiles?: AppFile[] | null;
   appEntry?: string | null;
+  projectId?: string | null;
 }) {
   const [pageId, setPageId] = useState<string | null>(schema?.pages[0]?.id ?? null);
 
   if ((appFiles && appFiles.length) || appCode) {
     return (
       <div className="h-[calc(100vh-3rem)]">
-        <AppRunner code={appCode ?? ""} files={appFiles} entry={appEntry} />
+        <AppRunner code={appCode ?? ""} files={appFiles} entry={appEntry} projectId={projectId} />
       </div>
     );
   }

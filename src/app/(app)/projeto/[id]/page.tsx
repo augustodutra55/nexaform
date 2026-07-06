@@ -524,6 +524,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                     entry={appEntry}
                     version={appVer}
                     engineMode={engineMode}
+                    projectId={projectId}
                     onError={handleAppError}
                   />
                 )}

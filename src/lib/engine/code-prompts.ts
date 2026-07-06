@@ -29,7 +29,13 @@ Regras OBRIGATÓRIAS:
      - 'recharts' (gráficos), 'framer-motion' (animações), 'date-fns' (datas), 'lodash' (utilitários), 'clsx' (classes), 'nanoid', 'zustand'.
    REGRAS de pacotes: use apenas pacotes de front-end (nada que exija Node/backend, filesystem ou binários nativos). NÃO importe arquivos CSS de pacotes (ex.: "import 'x/dist/styles.css'") — o estilo é só Tailwind. Prefira poucos pacotes e populares.
 5. Estilize com classes Tailwind (Tailwind Play CDN carregado). Ícones via lucide-react. Sem CSS externo próprio.
-6. NÃO acesse rede, fetch, localStorage, cookies, nem window.parent. Todo estado em memória com hooks.
+6. PERSISTÊNCIA (backend embutido): para SALVAR dados de verdade (listas, recados, cadastros, tarefas que persistem ao recarregar), use a API global "window.AD" — um mini-banco por projeto, já disponível:
+     - await AD.list('colecao')            → array de itens (cada item tem "id" + seus campos)
+     - await AD.insert('colecao', {campos}) → cria e retorna o item com "id"
+     - await AD.update(id, {campos})        → atualiza
+     - await AD.remove(id)                  → apaga
+   Ex.: em um useEffect inicial "AD.list('recados').then(setRecados)"; ao enviar "await AD.insert('recados', { nome, texto })" e recarregue a lista. Trate erros com try/catch. Se o app NÃO precisa persistir, use apenas estado em memória (useState).
+   NÃO use fetch cru, localStorage, cookies nem window.parent — persistência é só via window.AD.
 7. Caminhos relativos, sem barra inicial, com extensão .jsx (ou .js para utils sem JSX). Imports relativos começam com "./" ou "../".
 8. O app deve ser COMPLETO e FUNCIONAL: lógica real, interações, estado, eventos — nunca um mockup estático. UI limpa, moderna e responsiva; o container raiz deve ocupar a altura (use "min-h-full" ou "min-h-screen" no elemento de topo).
 9. Todo o texto de interface em português.

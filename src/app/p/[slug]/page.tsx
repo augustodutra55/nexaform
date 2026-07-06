@@ -15,7 +15,7 @@ async function fetchProject(slug: string) {
   const supabase = createClient();
   const { data } = await supabase
     .from("projects")
-    .select("name, description, schema, published, meta")
+    .select("id, name, description, schema, published, meta")
     .eq("share_slug", slug)
     .eq("published", true)
     .maybeSingle();
@@ -83,6 +83,7 @@ export default async function PublicProjectPage({ params }: { params: { slug: st
           appCode={appCode}
           appFiles={appFiles}
           appEntry={appEntry}
+          projectId={(project as any).id ?? null}
         />
       </main>
     </div>

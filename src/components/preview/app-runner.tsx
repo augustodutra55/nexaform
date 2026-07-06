@@ -16,6 +16,7 @@ import { AlertTriangle, Loader2, Monitor, Smartphone, RefreshCw, Cpu, Layout } f
 import { cn } from "@/lib/utils";
 import type { AppFile, EngineMode } from "@/lib/engine/app-types";
 import { bundleApp, buildBundledSrcDoc } from "@/lib/preview/bundler";
+import { adGlobalScript } from "@/lib/preview/ad-global";
 
 interface AppRunnerProps {
   /** Single-file (legado): código de um componente App. */
@@ -28,15 +29,18 @@ interface AppRunnerProps {
   version?: string | number;
   /** modo do motor que gerou este código (real/template/demo) — exibido no topo. */
   engineMode?: EngineMode | null;
+  /** id do projeto — habilita a camada de dados AD (persistência) no app. */
+  projectId?: string | null;
   /** chamado quando o app dá erro de execução (para auto-correção). */
   onError?: (message: string) => void;
 }
 
-function buildSrcDoc(code: string): string {
+function buildSrcDoc(code: string, projectId?: string | null): string {
   // O código do usuário vai como string JSON e é transpilado em runtime com
   // Babel no modo CLÁSSICO (React.createElement) — sem import de jsx-runtime,
   // que não existe no navegador sem bundler.
   const codeJson = JSON.stringify(code);
+  const adScript = adGlobalScript(projectId);
   return `<!doctype html>
 <html lang="pt-BR">
 <head>
@@ -55,6 +59,7 @@ function buildSrcDoc(code: string): string {
 </head>
 <body>
 <div id="root"></div>
+${adScript}
 <script>
   // Guarda a referência real do topo ANTES de bloquear o acesso do código do usuário,
   // para conseguir reportar erros ao app (auto-correção).
@@ -137,11 +142,12 @@ function detectExternals(files: AppFile[]): string[] {
  * registro de módulos. React/ReactDOM (e libs externas via CDN) são "externals".
  * É como um bundler mínimo rodando no próprio navegador — sem servidor, sem npm.
  */
-function buildSrcDocMulti(files: AppFile[], entry: string): string {
+function buildSrcDocMulti(files: AppFile[], entry: string, projectId?: string | null): string {
   const map: Record<string, string> = {};
   for (const f of files) map[f.path.replace(/^\.?\//, "")] = f.content;
   const filesJson = JSON.stringify(map);
   const entryJson = JSON.stringify(entry.replace(/^\.?\//, ""));
+  const adScript = adGlobalScript(projectId);
   const externals = detectExternals(files);
   const extScripts = externals
     .map((n) => `<script src="${EXTERNAL_LIBS[n].url}" crossorigin></script>`)
@@ -165,6 +171,7 @@ ${extScripts}
 </head>
 <body>
 <div id="root"></div>
+${adScript}
 <script>
   var _nxHost = window.parent;
   var _nxReported = false;
@@ -269,7 +276,7 @@ ${extScripts}
 </html>`;
 }
 
-export function AppRunner({ code, files, entry, version, engineMode, onError }: AppRunnerProps) {
+export function AppRunner({ code, files, entry, version, engineMode, projectId, onError }: AppRunnerProps) {
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
@@ -294,19 +301,19 @@ export function AppRunner({ code, files, entry, version, engineMode, onError }: 
       bundleApp(list, ent)
         .then(({ code: bundled }) => {
           if (cancelled) return;
-          setSrcDoc(buildBundledSrcDoc(bundled));
+          setSrcDoc(buildBundledSrcDoc(bundled, projectId));
         })
         .catch(() => {
           // Fallback resiliente: runtime Babel (React + libs via CDN).
           if (cancelled) return;
-          setSrcDoc(buildSrcDocMulti(list, ent));
+          setSrcDoc(buildSrcDocMulti(list, ent, projectId));
         })
         .finally(() => {
           if (!cancelled) setBundling(false);
         });
     } else if (code) {
       setBundling(false);
-      setSrcDoc(buildSrcDoc(code));
+      setSrcDoc(buildSrcDoc(code, projectId));
     } else {
       setBundling(false);
       setSrcDoc("");
@@ -315,7 +322,7 @@ export function AppRunner({ code, files, entry, version, engineMode, onError }: 
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code, files, entry, version, reloadKey]);
+  }, [code, files, entry, version, reloadKey, projectId]);
 
   // Escuta erros de execução vindos do iframe (para auto-correção).
   useEffect(() => {

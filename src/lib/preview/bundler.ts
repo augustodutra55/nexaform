@@ -13,6 +13,7 @@
  * Babel anterior (multi-arquivo), então o que já funcionava continua funcionando.
  */
 import type { AppFile } from "@/lib/engine/app-types";
+import { adGlobalScript } from "@/lib/preview/ad-global";
 
 const ESBUILD_VERSION = "0.20.2";
 const REACT_VERSION = "18.2.0";
@@ -167,7 +168,8 @@ export async function bundleApp(files: AppFile[], entry: string): Promise<Bundle
 }
 
 /** HTML do iframe: import map (React único) + Tailwind + bundle ESM + ponte de erros. */
-export function buildBundledSrcDoc(bundledCode: string): string {
+export function buildBundledSrcDoc(bundledCode: string, projectId?: string | null): string {
+  const adScript = adGlobalScript(projectId);
   const importMap = {
     imports: {
       react: `https://esm.sh/react@${REACT_VERSION}`,
@@ -194,6 +196,7 @@ export function buildBundledSrcDoc(bundledCode: string): string {
 </head>
 <body>
 <div id="root"></div>
+${adScript}
 <script>
   var _nxHost = window.parent;
   var _nxReported = false;

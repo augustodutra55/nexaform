@@ -6,7 +6,7 @@ import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { AppSchema, GenerationResult, isValidSchema } from "@/lib/engine/types";
-import { AppCode, AppGenerationResult, EngineMode, isAppCode } from "@/lib/engine/app-types";
+import { AppCode, AppFile, AppGenerationResult, EngineMode, isAppCode, isMultiFile } from "@/lib/engine/app-types";
 import { useProjectStore } from "@/lib/store/project";
 import { resolvePlan, isOwner, type AccessProfile } from "@/lib/access";
 import { ProjectMeta, readMeta } from "@/lib/studio";
@@ -45,8 +45,23 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   // Modo do projeto: site (schema) | app (código) | empty
   const [mode, setMode] = useState<ProjectMode>("empty");
   const [appCode, setAppCode] = useState<string | null>(null);
+  const [appFiles, setAppFiles] = useState<AppFile[] | null>(null);
+  const [appEntry, setAppEntry] = useState<string | null>(null);
+  const [appName, setAppName] = useState<string>("App");
   const [appVer, setAppVer] = useState(0);
   const [engineMode, setEngineMode] = useState<EngineMode | null>(null);
+
+  // AppCode atual (multi-arquivo ou single-file legado) para salvar/publicar/exportar.
+  const currentApp = useCallback(
+    (): AppCode | null => {
+      if (appFiles && appFiles.length) {
+        return { kind: "app", name: appName, description: "", files: appFiles, entry: appEntry ?? appFiles[0].path };
+      }
+      if (appCode) return { kind: "app", name: appName, description: "", code: appCode };
+      return null;
+    },
+    [appFiles, appEntry, appCode, appName]
+  );
   const [meta, setMeta] = useState<ProjectMeta>({});
   const metaRef = useRef<ProjectMeta>({});
   metaRef.current = meta;
@@ -74,7 +89,16 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       store.reset();
       if (isAppCode(proj.schema)) {
         setMode("app");
-        setAppCode(proj.schema.code);
+        setAppName(proj.schema.name ?? "App");
+        if (isMultiFile(proj.schema)) {
+          setAppFiles(proj.schema.files);
+          setAppEntry(proj.schema.entry);
+          setAppCode(null);
+        } else {
+          setAppCode(proj.schema.code ?? null);
+          setAppFiles(null);
+          setAppEntry(null);
+        }
       } else if (isValidSchema(proj.schema)) {
         setMode("site");
         store.setSchema(proj.schema, { recordHistory: false, dirty: false });
@@ -175,7 +199,16 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const handleAppResult = useCallback(
     async (result: AppGenerationResult) => {
       setMode("app");
-      setAppCode(result.app.code);
+      setAppName(result.app.name ?? "App");
+      if (isMultiFile(result.app)) {
+        setAppFiles(result.app.files);
+        setAppEntry(result.app.entry);
+        setAppCode(null);
+      } else {
+        setAppCode(result.app.code ?? null);
+        setAppFiles(null);
+        setAppEntry(null);
+      }
       setAppVer((n) => n + 1);
       // salva o AppCode no campo schema (jsonb)
       await supabase.from("projects").update({ schema: result.app, updated_at: new Date().toISOString() }).eq("id", projectId);
@@ -208,7 +241,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   }
 
   async function handleSaveVersion(label: string) {
-    const payload = mode === "app" ? { kind: "app", name: project?.name, code: appCode } : store.schema;
+    const payload = mode === "app" ? currentApp() : store.schema;
     if (!payload) {
       toast.error("Nada para salvar ainda");
       return;
@@ -223,13 +256,14 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
   async function handlePublish(): Promise<string | null> {
     if (!project) return null;
-    const hasContent = mode === "app" ? !!appCode : !!store.schema;
+    const appPayload = currentApp();
+    const hasContent = mode === "app" ? !!appPayload : !!store.schema;
     if (!hasContent) {
       toast.error("Nada para publicar ainda", { description: "Gere a primeira versão pelo chat." });
       return null;
     }
     const slug = project.share_slug ?? nanoid(10);
-    const payload = mode === "app" ? { kind: "app", name: project.name, description: "", code: appCode } : store.schema;
+    const payload = mode === "app" ? appPayload : store.schema;
     const { error } = await supabase.from("projects").update({ published: true, share_slug: slug, schema: payload }).eq("id", project.id);
     if (error) {
       toast.error("Não foi possível publicar");
@@ -239,7 +273,29 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     return slug;
   }
 
-  function handleExport() {
+  function downloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  /** Carrega o JSZip via CDN (sem inflar o bundle) para exportar projeto multi-arquivo. */
+  function loadJSZip(): Promise<any> {
+    const w = window as any;
+    if (w.JSZip) return Promise.resolve(w.JSZip);
+    return new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+      s.onload = () => resolve((window as any).JSZip);
+      s.onerror = () => reject(new Error("Falha ao carregar o compactador."));
+      document.head.appendChild(s);
+    });
+  }
+
+  async function handleExport() {
     const plan = resolvePlan(access);
     if (!plan.canExport) {
       toast.error("Exportação disponível no plano Pro", {
@@ -248,18 +304,52 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       });
       return;
     }
+    const safeName = (project?.name ?? "projeto").replace(/[^\w.-]+/g, "-").slice(0, 60) || "projeto";
+
+    // Multi-arquivo real → .zip com a árvore de arquivos + package.json + README.
+    if (mode === "app" && appFiles && appFiles.length) {
+      try {
+        const JSZip = await loadJSZip();
+        const zip = new JSZip();
+        const root = zip.folder(safeName)!;
+        for (const f of appFiles) root.file(f.path, f.content);
+        root.file(
+          "package.json",
+          JSON.stringify(
+            {
+              name: safeName.toLowerCase(),
+              private: true,
+              version: "0.1.0",
+              description: `Exportado do AD Studio — entry: ${appEntry ?? appFiles[0].path}`,
+              dependencies: { react: "^18.2.0", "react-dom": "^18.2.0" },
+            },
+            null,
+            2
+          )
+        );
+        root.file(
+          "README.md",
+          `# ${project?.name ?? "Projeto"}\n\nProjeto React multi-arquivo gerado pelo AD Studio.\n\n- Arquivo de entrada: \`${appEntry ?? appFiles[0].path}\`\n- ${appFiles.length} arquivo(s)\n- Estilização: Tailwind CSS (via CDN no preview)\n`
+        );
+        const blob = await zip.generateAsync({ type: "blob" });
+        downloadBlob(blob, `${safeName}.zip`);
+        toast.success("Exportado como .zip (multi-arquivo)");
+      } catch (e: any) {
+        toast.error("Não foi possível gerar o .zip", { description: e?.message });
+      }
+      return;
+    }
+
+    // Single-file (legado) → .jsx; site → .json.
     const content = mode === "app" ? appCode ?? "" : JSON.stringify(store.schema, null, 2);
     if (!content) {
       toast.error("Nada para exportar ainda");
       return;
     }
-    const blob = new Blob([content], { type: mode === "app" ? "text/plain" : "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = mode === "app" ? `${project?.name ?? "app"}.jsx` : `${project?.name ?? "projeto"}.adstudio.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(
+      new Blob([content], { type: mode === "app" ? "text/plain" : "application/json" }),
+      mode === "app" ? `${safeName}.jsx` : `${safeName}.adstudio.json`
+    );
     toast.success("Exportado");
   }
 
@@ -274,7 +364,16 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   function handleRestoreVersion(v: VersionRow) {
     if (isAppCode(v.schema)) {
       setMode("app");
-      setAppCode(v.schema.code);
+      setAppName(v.schema.name ?? "App");
+      if (isMultiFile(v.schema)) {
+        setAppFiles(v.schema.files);
+        setAppEntry(v.schema.entry);
+        setAppCode(null);
+      } else {
+        setAppCode(v.schema.code ?? null);
+        setAppFiles(null);
+        setAppEntry(null);
+      }
       setAppVer((n) => n + 1);
       supabase.from("projects").update({ schema: v.schema }).eq("id", projectId);
     } else if (isValidSchema(v.schema)) {
@@ -337,6 +436,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
             mode={mode}
             schema={store.schema}
             code={appCode}
+            files={appFiles}
             projectName={project.name}
             starterPrompt={starter}
             autoFixError={autoFixError}
@@ -350,7 +450,14 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
         <div className="min-w-0 flex-1">
           {mode === "app" ? (
-            <AppRunner code={appCode ?? ""} version={appVer} engineMode={engineMode} onError={handleAppError} />
+            <AppRunner
+              code={appCode ?? ""}
+              files={appFiles}
+              entry={appEntry}
+              version={appVer}
+              engineMode={engineMode}
+              onError={handleAppError}
+            />
           ) : (
             <PreviewPane
               schema={store.schema}

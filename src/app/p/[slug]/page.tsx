@@ -51,7 +51,10 @@ export default async function PublicProjectPage({ params }: { params: { slug: st
   const project = await fetchProject(params.slug);
   if (!project || (!isValidSchema(project.schema) && !isAppCode(project.schema))) notFound();
 
-  const appCode = isAppCode(project.schema) ? project.schema.code : null;
+  const app = isAppCode(project.schema) ? project.schema : null;
+  const appCode = app?.code ?? null;
+  const appFiles = app?.files ?? null;
+  const appEntry = app?.entry ?? null;
   const meta = readMeta(project.meta);
   const whitelabel = !!meta.whitelabel;
   const brandName = meta.client || project.name;
@@ -75,7 +78,12 @@ export default async function PublicProjectPage({ params }: { params: { slug: st
         )}
       </header>
       <main className="min-h-0 flex-1">
-        <PublicPreview schema={isValidSchema(project.schema) ? project.schema : null} appCode={appCode} />
+        <PublicPreview
+          schema={isValidSchema(project.schema) ? project.schema : null}
+          appCode={appCode}
+          appFiles={appFiles}
+          appEntry={appEntry}
+        />
       </main>
     </div>
   );

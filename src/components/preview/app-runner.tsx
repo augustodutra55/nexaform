@@ -14,10 +14,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Loader2, Monitor, Smartphone, RefreshCw, Cpu, Layout } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { EngineMode } from "@/lib/engine/app-types";
+import type { AppFile, EngineMode } from "@/lib/engine/app-types";
 
 interface AppRunnerProps {
-  code: string;
+  /** Single-file (legado): código de um componente App. */
+  code?: string;
+  /** Multi-arquivo: vários módulos com imports reais. Tem prioridade sobre code. */
+  files?: AppFile[] | null;
+  /** Arquivo de entrada do projeto multi-arquivo. */
+  entry?: string | null;
   /** chave para forçar recarregamento quando o código muda */
   version?: string | number;
   /** modo do motor que gerou este código (real/template/demo) — exibido no topo. */
@@ -92,7 +97,103 @@ function buildSrcDoc(code: string): string {
 </html>`;
 }
 
-export function AppRunner({ code, version, engineMode, onError }: AppRunnerProps) {
+/**
+ * Runtime multi-arquivo: cada arquivo vira um módulo CommonJS (Babel), com um
+ * `require` que resolve imports relativos (./ ../, extensões, /index) contra um
+ * registro de módulos. React/ReactDOM são "externals". É como um bundler mínimo
+ * rodando no próprio navegador — sem servidor, sem npm install.
+ */
+function buildSrcDocMulti(files: AppFile[], entry: string): string {
+  const map: Record<string, string> = {};
+  for (const f of files) map[f.path.replace(/^\.?\//, "")] = f.content;
+  const filesJson = JSON.stringify(map);
+  const entryJson = JSON.stringify(entry.replace(/^\.?\//, ""));
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  html,body,#root{height:100%;margin:0}
+  body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#0b1020;color:#0f172a}
+  #root{background:#ffffff}
+  .nx-error{padding:20px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#b91c1c;background:#fef2f2;white-space:pre-wrap;height:100%;box-sizing:border-box;overflow:auto;font-size:13px;line-height:1.5}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+  var _nxHost = window.parent;
+  var _nxReported = false;
+  function nxReport(msg){ if(_nxReported) return; _nxReported=true; try{ _nxHost.postMessage({ __nx_error:String(msg).slice(0,800) }, '*'); }catch(e){} }
+  try { Object.defineProperty(window, 'parent', { get: function(){ return window; } }); } catch(e){}
+  try { Object.defineProperty(window, 'top', { get: function(){ return window; } }); } catch(e){}
+  window.addEventListener('error', function(e){ showError(e.message); nxReport(e.message); });
+  window.addEventListener('unhandledrejection', function(e){ var m=(e.reason && e.reason.message) || String(e.reason); showError(m); nxReport(m); });
+  function showError(msg){ var r=document.getElementById('root'); if(r) r.innerHTML='<div class="nx-error">⚠ Erro ao executar o app:\\n\\n'+String(msg).replace(/</g,'&lt;')+'</div>'; }
+</script>
+<script>
+  (function(){
+    var FILES = ${filesJson};
+    var ENTRY = ${entryJson};
+    var __src = {};
+    try {
+      Object.keys(FILES).forEach(function(p){
+        __src[p] = Babel.transform(FILES[p], {
+          presets: [['react', { runtime: 'classic' }], 'typescript'],
+          plugins: ['transform-modules-commonjs'],
+          filename: p
+        }).code;
+      });
+    } catch(e){ var mc='Erro de compilação: '+((e && e.message) || e); showError(mc); nxReport(mc); return; }
+
+    var __cache = {};
+    function norm(path){
+      var parts=path.split('/'), out=[];
+      for(var i=0;i<parts.length;i++){ var s=parts[i]; if(s===''||s==='.')continue; if(s==='..')out.pop(); else out.push(s); }
+      return out.join('/');
+    }
+    function candidates(base){
+      return [base, base+'.jsx', base+'.tsx', base+'.js', base+'.ts', base+'/index.jsx', base+'/index.tsx', base+'/index.js', base+'/index.ts'];
+    }
+    function resolve(from, spec){
+      var target;
+      if(spec.charAt(0)==='.'){ var dir = from.indexOf('/')>=0 ? from.replace(/\\/[^/]*$/,'') : ''; target = norm((dir?dir+'/':'')+spec); }
+      else { target = spec; }
+      var cand = candidates(target);
+      for(var i=0;i<cand.length;i++){ if(__src[cand[i]]!=null) return cand[i]; }
+      return null;
+    }
+    function req(from, spec){
+      if(spec==='react') return React;
+      if(spec==='react-dom'||spec==='react-dom/client') return ReactDOM;
+      var key = resolve(from, spec);
+      if(!key) throw new Error('Módulo não encontrado: "'+spec+'" (importado de '+(from||'entry')+')');
+      if(__cache[key]) return __cache[key].exports;
+      var module = { exports: {} };
+      __cache[key] = module;
+      var factory = new Function('module','exports','require','React','ReactDOM',
+        'var {useState,useEffect,useRef,useMemo,useCallback,useReducer,useContext,createContext,Fragment}=React;\\n' + __src[key]);
+      factory(module, module.exports, function(s){ return req(key, s); }, React, ReactDOM);
+      return module.exports;
+    }
+    try {
+      var mod = req('', ENTRY);
+      var App = mod && (mod.default || mod.App);
+      if(typeof App !== 'function'){ var m2='O arquivo de entrada ('+ENTRY+') precisa ter um export default de um componente React.'; showError(m2); nxReport(m2); return; }
+      ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+    } catch(err){ var m=(err && err.message) || String(err); showError(m); nxReport(m); }
+  })();
+</script>
+</body>
+</html>`;
+}
+
+export function AppRunner({ code, files, entry, version, engineMode, onError }: AppRunnerProps) {
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
@@ -100,7 +201,13 @@ export function AppRunner({ code, version, engineMode, onError }: AppRunnerProps
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
 
-  const srcDoc = useMemo(() => (code ? buildSrcDoc(code) : ""), [code, version, reloadKey]);
+  const hasFiles = Array.isArray(files) && files.length > 0;
+  const srcDoc = useMemo(
+    () => (hasFiles ? buildSrcDocMulti(files!, entry || files![0].path) : code ? buildSrcDoc(code) : ""),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [code, files, entry, version, reloadKey]
+  );
+  const hasContent = hasFiles || !!code;
 
   useEffect(() => {
     setLoading(true);
@@ -177,7 +284,7 @@ export function AppRunner({ code, version, engineMode, onError }: AppRunnerProps
       </div>
 
       <div className="relative flex-1 overflow-auto bg-secondary/40 p-4">
-        {!code ? (
+        {!hasContent ? (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <AlertTriangle className="mb-3 h-6 w-6 text-muted-foreground" />
             <p className="text-sm text-muted-foreground">Descreva o app no chat para gerar e executar o código.</p>

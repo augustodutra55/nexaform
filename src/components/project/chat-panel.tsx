@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout, Mic, Square, Cpu, FileCode2, AlertTriangle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AppSchema, GenerationResult } from "@/lib/engine/types";
-import { AppGenerationResult, CodeStats, EngineMode, looksLikeApp } from "@/lib/engine/app-types";
+import { AppFile, AppGenerationResult, CodeStats, EngineMode, looksLikeApp } from "@/lib/engine/app-types";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,8 @@ interface ChatPanelProps {
   mode: ProjectMode;
   schema: AppSchema | null;
   code: string | null;
+  /** Arquivos do projeto multi-arquivo (para refinamento incremental). */
+  files?: AppFile[] | null;
   projectName: string;
   starterPrompt?: string | null;
   /** Mensagem de erro para auto-correção (disparada pelo preview). */
@@ -68,6 +70,7 @@ export function ChatPanel({
   mode,
   schema,
   code,
+  files,
   projectName,
   starterPrompt,
   autoFixError,
@@ -147,6 +150,8 @@ export function ChatPanel({
   schemaRef.current = schema;
   const codeRef = useRef(code);
   codeRef.current = code;
+  const filesRef = useRef(files);
+  filesRef.current = files;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -201,6 +206,7 @@ export function ChatPanel({
             projectId,
             message: content,
             currentCode: codeRef.current,
+            currentFiles: filesRef.current ?? null,
             name: projectName,
             userKey: localStorage.getItem("nexaform:ai-key") || null,
             userProvider: localStorage.getItem("nexaform:ai-provider") || null,
@@ -351,6 +357,7 @@ export function ChatPanel({
           {lastGen.stats && (
             <span className="flex items-center gap-1 opacity-80">
               <FileCode2 className="h-3 w-3" />
+              {lastGen.stats.files > 1 ? `${lastGen.stats.files} arquivos · ` : ""}
               {lastGen.stats.lines} linhas · {lastGen.stats.components} comp. · {lastGen.stats.hooks} hooks ·{" "}
               {lastGen.stats.handlers} eventos
             </span>

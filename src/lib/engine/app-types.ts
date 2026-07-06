@@ -20,14 +20,32 @@ export type Provider = "template" | "demo" | "claude" | "openrouter";
  */
 export type EngineMode = "real" | "template" | "demo";
 
+/** Um arquivo do projeto multi-arquivo (ex.: components/Header.jsx). */
+export interface AppFile {
+  path: string;
+  content: string;
+}
+
 export interface AppCode {
   kind: "app";
   name: string;
   description: string;
-  /** Código-fonte de um componente React chamado `App` (JSX/TSX). */
-  code: string;
+  /**
+   * Single-file (legado): código de um componente React `App`.
+   * Continua suportado; se `files` estiver presente, ele tem prioridade.
+   */
+  code?: string;
+  /** Multi-arquivo real: vários módulos com imports entre si. */
+  files?: AppFile[];
+  /** Arquivo de entrada do projeto multi-arquivo (default export = App). */
+  entry?: string;
   /** Provedor que gerou o código. */
   provider?: Provider;
+}
+
+/** true se o AppCode é um projeto multi-arquivo (com imports reais). */
+export function isMultiFile(app: AppCode | null | undefined): app is AppCode & { files: AppFile[]; entry: string } {
+  return !!app && Array.isArray(app.files) && app.files.length > 0 && typeof app.entry === "string";
 }
 
 /** Métricas do código gerado — prova técnica de que há código real. */
@@ -36,6 +54,8 @@ export interface CodeStats {
   components: number;
   hooks: number;
   handlers: number;
+  /** Nº de arquivos (1 para single-file). */
+  files: number;
 }
 
 export interface AppGenerationResult {
@@ -54,10 +74,13 @@ export interface AppGenerationResult {
 }
 
 export function isAppCode(value: any): value is AppCode {
-  return value && value.kind === "app" && typeof value.code === "string" && value.code.length > 0;
+  if (!value || value.kind !== "app") return false;
+  const hasCode = typeof value.code === "string" && value.code.length > 0;
+  const hasFiles = Array.isArray(value.files) && value.files.length > 0;
+  return hasCode || hasFiles;
 }
 
-/** Extrai métricas do código-fonte gerado (linhas, componentes, hooks, handlers). */
+/** Extrai métricas de um trecho de código (linhas, componentes, hooks, handlers). */
 export function codeStats(code: string): CodeStats {
   const lines = code.trim() ? code.trim().split(/\r?\n/).length : 0;
   const components =
@@ -65,7 +88,24 @@ export function codeStats(code: string): CodeStats {
     (code.match(/const\s+[A-Z]\w*\s*=\s*(?:\([^)]*\)|[A-Za-z0-9_]+)\s*=>/g) || []).length;
   const hooks = (code.match(/\buse[A-Z]\w*\s*\(/g) || []).length;
   const handlers = (code.match(/\bon[A-Z]\w*\s*[=:]/g) || []).length;
-  return { lines, components: Math.max(components, 1), hooks, handlers };
+  return { lines, components: Math.max(components, 1), hooks, handlers, files: 1 };
+}
+
+/** Métricas somadas de um projeto multi-arquivo. */
+export function projectStats(app: AppCode): CodeStats {
+  if (isMultiFile(app)) {
+    const acc: CodeStats = { lines: 0, components: 0, hooks: 0, handlers: 0, files: app.files.length };
+    for (const f of app.files) {
+      const s = codeStats(f.content);
+      acc.lines += s.lines;
+      acc.components += s.components;
+      acc.hooks += s.hooks;
+      acc.handlers += s.handlers;
+    }
+    acc.components = Math.max(acc.components, 1);
+    return acc;
+  }
+  return codeStats(app.code ?? "");
 }
 
 /**

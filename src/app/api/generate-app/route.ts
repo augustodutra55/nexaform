@@ -26,7 +26,8 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Corpo inválido." }, { status: 400 });
   }
-  const { projectId, message, currentCode, name, userKey, userProvider, costMode, forceReal, allowTemplate } = body ?? {};
+  const { projectId, message, currentCode, currentFiles, name, userKey, userProvider, costMode, forceReal, allowTemplate } =
+    body ?? {};
   if (!projectId || typeof message !== "string" || !message.trim()) {
     return NextResponse.json({ error: "Requisição incompleta." }, { status: 400 });
   }
@@ -54,6 +55,7 @@ export async function POST(req: NextRequest) {
   const result = await generateAppWithProviders({
     message,
     currentCode: typeof currentCode === "string" ? currentCode : null,
+    currentFiles: Array.isArray(currentFiles) ? currentFiles : null,
     name: typeof name === "string" ? name : "App",
     userKey: typeof userKey === "string" ? userKey : null,
     userProvider: userProvider ?? null,

@@ -2,16 +2,27 @@
 
 import { useState } from "react";
 import { AppSchema } from "@/lib/engine/types";
+import { AppFile } from "@/lib/engine/app-types";
 import { PreviewPane } from "@/components/preview/preview-pane";
 import { AppRunner } from "@/components/preview/app-runner";
 
-export function PublicPreview({ schema, appCode }: { schema: AppSchema | null; appCode?: string | null }) {
+export function PublicPreview({
+  schema,
+  appCode,
+  appFiles,
+  appEntry,
+}: {
+  schema: AppSchema | null;
+  appCode?: string | null;
+  appFiles?: AppFile[] | null;
+  appEntry?: string | null;
+}) {
   const [pageId, setPageId] = useState<string | null>(schema?.pages[0]?.id ?? null);
 
-  if (appCode) {
+  if ((appFiles && appFiles.length) || appCode) {
     return (
       <div className="h-[calc(100vh-3rem)]">
-        <AppRunner code={appCode} />
+        <AppRunner code={appCode ?? ""} files={appFiles} entry={appEntry} />
       </div>
     );
   }

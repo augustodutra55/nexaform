@@ -5,14 +5,16 @@
  * Com roteamento de modelo (econômico/premium) e captura de custo real, para
  * o Studio operar barato.
  */
-import { AppGenerationResult, codeStats } from "./app-types";
+import { AppFile, AppGenerationResult, codeStats, projectStats } from "./app-types";
 import { CODE_SYSTEM_PROMPT, buildCodeUserPrompt } from "./code-prompts";
 import { matchTemplate } from "./code-templates";
 import { CostMode, pickTier, modelFor, estimateCost } from "./models";
 
 interface Args {
   message: string;
-  currentCode: string | null;
+  /** Projeto atual: multi-arquivo (preferido) ou código single-file legado. */
+  currentFiles?: AppFile[] | null;
+  currentCode?: string | null;
   name: string;
   userKey?: string | null;
   userProvider?: "claude" | "openrouter" | "local" | null;
@@ -21,6 +23,19 @@ interface Args {
   forceReal?: boolean;
   /** Permite template enlatado / demo (só quando o usuário aceitar). */
   allowTemplate?: boolean;
+}
+
+/** Normaliza e valida os arquivos devolvidos pelo modelo. */
+function normalizeFiles(rawFiles: any): AppFile[] | null {
+  if (!Array.isArray(rawFiles)) return null;
+  const files: AppFile[] = [];
+  for (const f of rawFiles) {
+    if (!f || typeof f.path !== "string" || typeof f.content !== "string") continue;
+    const path = f.path.replace(/^\.?\//, "").trim();
+    if (!path || !f.content.trim()) continue;
+    files.push({ path, content: f.content });
+  }
+  return files.length ? files : null;
 }
 
 function parse(
@@ -32,20 +47,53 @@ function parse(
   try {
     const raw = text.replace(/^```(?:json)?/m, "").replace(/```\s*$/m, "").trim();
     const j = JSON.parse(raw);
-    if (typeof j.code !== "string" || !j.code.includes("function App")) return null;
-    return {
-      provider,
-      engineMode: "real",
-      stats: codeStats(j.code),
-      reply: String(j.reply ?? "Pronto! App atualizado."),
-      plan: Array.isArray(j.plan) ? j.plan.map(String) : [],
-      app: { kind: "app", name: j.name || "App", description: "", code: j.code, provider },
-      cost,
-      model,
-    };
+
+    // Caminho preferido: projeto multi-arquivo com imports reais.
+    const files = normalizeFiles(j.files);
+    if (files) {
+      // Descobre o entry: campo entry válido, ou App.jsx, ou o 1º arquivo.
+      let entry: string =
+        typeof j.entry === "string" ? j.entry.replace(/^\.?\//, "").trim() : "";
+      if (!files.some((f) => f.path === entry)) {
+        entry =
+          files.find((f) => /(^|\/)App\.(jsx|tsx|js|ts)$/.test(f.path))?.path ?? files[0].path;
+      }
+      const app = { kind: "app" as const, name: j.name || "App", description: "", files, entry, provider };
+      return {
+        provider,
+        engineMode: "real",
+        stats: projectStats(app),
+        reply: String(j.reply ?? "Pronto! Projeto atualizado."),
+        plan: Array.isArray(j.plan) ? j.plan.map(String) : [],
+        app,
+        cost,
+        model,
+      };
+    }
+
+    // Compatibilidade: single-file legado.
+    if (typeof j.code === "string" && j.code.includes("function App")) {
+      return {
+        provider,
+        engineMode: "real",
+        stats: codeStats(j.code),
+        reply: String(j.reply ?? "Pronto! App atualizado."),
+        plan: Array.isArray(j.plan) ? j.plan.map(String) : [],
+        app: { kind: "app", name: j.name || "App", description: "", code: j.code, provider },
+        cost,
+        model,
+      };
+    }
+    return null;
   } catch {
     return null;
   }
+}
+
+/** Estado atual do projeto para o prompt: multi-arquivo (preferido) ou single-file. */
+function currentOf(a: Args): AppFile[] | string | null {
+  if (a.currentFiles && a.currentFiles.length) return a.currentFiles;
+  return a.currentCode ?? null;
 }
 
 async function callClaude(apiKey: string, a: Args, model: string): Promise<AppGenerationResult | null> {
@@ -55,9 +103,9 @@ async function callClaude(apiKey: string, a: Args, model: string): Promise<AppGe
       headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
         model,
-        max_tokens: 16000,
+        max_tokens: 24000,
         system: CODE_SYSTEM_PROMPT,
-        messages: [{ role: "user", content: buildCodeUserPrompt(a.message, a.currentCode) }],
+        messages: [{ role: "user", content: buildCodeUserPrompt(a.message, currentOf(a)) }],
       }),
       signal: AbortSignal.timeout(120_000),
     });
@@ -78,11 +126,11 @@ async function callOpenRouter(apiKey: string, a: Args, model: string): Promise<A
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
-        max_tokens: 16000,
+        max_tokens: 24000,
         usage: { include: true },
         messages: [
           { role: "system", content: CODE_SYSTEM_PROMPT },
-          { role: "user", content: buildCodeUserPrompt(a.message, a.currentCode) },
+          { role: "user", content: buildCodeUserPrompt(a.message, currentOf(a)) },
         ],
       }),
       signal: AbortSignal.timeout(120_000),
@@ -130,7 +178,8 @@ function App(){
 }
 
 export async function generateAppWithProviders(a: Args): Promise<AppGenerationResult> {
-  const tier = pickTier(a.costMode ?? "auto", { isApp: true, isRefinement: !!a.currentCode, message: a.message });
+  const isRefinement = !!(a.currentFiles?.length || a.currentCode);
+  const tier = pickTier(a.costMode ?? "auto", { isApp: true, isRefinement, message: a.message });
 
   // 1) chave do usuário
   if (a.userKey && a.userProvider === "claude") {
@@ -162,7 +211,7 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
   }
 
   // 4) template enlatado (só na primeira geração, quando permitido)
-  if (!a.currentCode && a.allowTemplate) {
+  if (!isRefinement && a.allowTemplate) {
     const t = matchTemplate(a.message);
     if (t) {
       return {

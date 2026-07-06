@@ -316,17 +316,17 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
         const zip = new JSZip();
         const root = zip.folder(safeName)!;
         for (const f of appFiles) root.file(f.path, f.content);
-        // detecta libs externas usadas para declarar no package.json
+        // detecta TODOS os pacotes npm importados para declarar no package.json
         const allSrc = appFiles.map((f) => f.content).join("\n");
         const deps: Record<string, string> = { react: "^18.2.0", "react-dom": "^18.2.0" };
-        const versions: Record<string, string> = {
-          "lucide-react": "^0.400.0",
-          recharts: "^2.12.0",
-          lodash: "^4.17.21",
-          clsx: "^2.1.0",
-        };
-        for (const lib of Object.keys(versions)) {
-          if (new RegExp(`from\\s+['"]${lib}['"]`).test(allSrc)) deps[lib] = versions[lib];
+        const importRe = /from\s+['"]([^'".][^'"]*)['"]/g;
+        let m: RegExpExecArray | null;
+        while ((m = importRe.exec(allSrc))) {
+          const spec = m[1];
+          if (spec.startsWith("react")) continue;
+          // nome do pacote (respeita escopo @org/pkg), ignora subcaminhos
+          const pkg = spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0];
+          if (pkg && !deps[pkg]) deps[pkg] = "latest";
         }
         root.file(
           "package.json",

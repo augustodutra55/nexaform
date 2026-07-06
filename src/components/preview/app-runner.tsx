@@ -11,10 +11,11 @@
  * O iframe roda com sandbox="allow-scripts" (sem allow-same-origin), então
  * o código do usuário fica isolado da app e dos cookies/sessão.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Loader2, Monitor, Smartphone, RefreshCw, Cpu, Layout } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AppFile, EngineMode } from "@/lib/engine/app-types";
+import { bundleApp, buildBundledSrcDoc } from "@/lib/preview/bundler";
 
 interface AppRunnerProps {
   /** Single-file (legado): código de um componente App. */
@@ -272,21 +273,49 @@ export function AppRunner({ code, files, entry, version, engineMode, onError }: 
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
+  const [srcDoc, setSrcDoc] = useState("");
+  const [bundling, setBundling] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
 
   const hasFiles = Array.isArray(files) && files.length > 0;
-  const srcDoc = useMemo(
-    () => (hasFiles ? buildSrcDocMulti(files!, entry || files![0].path) : code ? buildSrcDoc(code) : ""),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [code, files, entry, version, reloadKey]
-  );
   const hasContent = hasFiles || !!code;
 
+  // Monta o preview: multi-arquivo passa pelo bundler esbuild (npm arbitrário via
+  // esm.sh); se o esbuild falhar, cai no runtime Babel. Single-file legado usa Babel.
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-  }, [srcDoc]);
+    if (hasFiles) {
+      setBundling(true);
+      const list = files!;
+      const ent = entry || list[0].path;
+      bundleApp(list, ent)
+        .then(({ code: bundled }) => {
+          if (cancelled) return;
+          setSrcDoc(buildBundledSrcDoc(bundled));
+        })
+        .catch(() => {
+          // Fallback resiliente: runtime Babel (React + libs via CDN).
+          if (cancelled) return;
+          setSrcDoc(buildSrcDocMulti(list, ent));
+        })
+        .finally(() => {
+          if (!cancelled) setBundling(false);
+        });
+    } else if (code) {
+      setBundling(false);
+      setSrcDoc(buildSrcDoc(code));
+    } else {
+      setBundling(false);
+      setSrcDoc("");
+    }
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code, files, entry, version, reloadKey]);
 
   // Escuta erros de execução vindos do iframe (para auto-correção).
   useEffect(() => {
@@ -371,9 +400,10 @@ export function AppRunner({ code, files, entry, version, engineMode, onError }: 
               device === "mobile" ? "max-w-[390px]" : "max-w-5xl"
             )}
           >
-            {loading && (
-              <div className="absolute inset-0 z-10 flex items-center justify-center bg-secondary/40">
+            {(loading || bundling) && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-secondary/40">
                 <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                {bundling && <span className="text-xs text-muted-foreground">Empacotando (npm)…</span>}
               </div>
             )}
             <iframe

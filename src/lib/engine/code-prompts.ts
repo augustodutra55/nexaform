@@ -24,13 +24,11 @@ Regras OBRIGATÓRIAS:
 2. MÓDULOS ES REAIS: use import/export entre os arquivos. Ex.: em App.jsx "import Header from './components/Header'"; em Header.jsx "export default function Header(){...}". Pode usar named exports também ("export function util(){}", "import { util } from '../utils/x'").
 3. O arquivo "entry" (ex.: App.jsx) DEVE ter "export default" do componente raiz.
 4. React vem do pacote 'react': "import React, { useState, useEffect, useRef, useMemo } from 'react';" no topo de cada arquivo que usa JSX/hooks.
-   BIBLIOTECAS PERMITIDAS (já disponíveis, pode importar normalmente):
-     - 'react' e 'react-dom'
-     - 'lucide-react' para ícones. Ex.: "import { Camera, ArrowRight } from 'lucide-react';" e use <Camera size={20} className="..." />.
-     - 'recharts' para gráficos. Ex.: "import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';".
-     - 'lodash' (utilitários) e 'clsx' (classes condicionais).
-   NÃO importe NENHUM outro pacote além desses — não existe npm install. Nada de axios, framer-motion, react-router, etc.
-5. Estilize SOMENTE com classes Tailwind (Tailwind Play CDN carregado). Ícones via lucide-react. Sem CSS externo, sem styled-components, sem UI kits.
+   PACOTES NPM: você PODE importar qualquer pacote npm de JavaScript puro — ele é resolvido automaticamente por um bundler no navegador (esbuild + esm.sh), sem npm install. Exemplos comuns e recomendados:
+     - 'lucide-react' (ícones): "import { Camera } from 'lucide-react';" → <Camera size={20} />
+     - 'recharts' (gráficos), 'framer-motion' (animações), 'date-fns' (datas), 'lodash' (utilitários), 'clsx' (classes), 'nanoid', 'zustand'.
+   REGRAS de pacotes: use apenas pacotes de front-end (nada que exija Node/backend, filesystem ou binários nativos). NÃO importe arquivos CSS de pacotes (ex.: "import 'x/dist/styles.css'") — o estilo é só Tailwind. Prefira poucos pacotes e populares.
+5. Estilize com classes Tailwind (Tailwind Play CDN carregado). Ícones via lucide-react. Sem CSS externo próprio.
 6. NÃO acesse rede, fetch, localStorage, cookies, nem window.parent. Todo estado em memória com hooks.
 7. Caminhos relativos, sem barra inicial, com extensão .jsx (ou .js para utils sem JSX). Imports relativos começam com "./" ou "../".
 8. O app deve ser COMPLETO e FUNCIONAL: lógica real, interações, estado, eventos — nunca um mockup estático. UI limpa, moderna e responsiva; o container raiz deve ocupar a altura (use "min-h-full" ou "min-h-screen" no elemento de topo).

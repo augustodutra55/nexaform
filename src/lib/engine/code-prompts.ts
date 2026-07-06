@@ -33,9 +33,15 @@ Regras OBRIGATÓRIAS:
 7. Caminhos relativos, sem barra inicial, com extensão .jsx (ou .js para utils sem JSX). Imports relativos começam com "./" ou "../".
 8. O app deve ser COMPLETO e FUNCIONAL: lógica real, interações, estado, eventos — nunca um mockup estático. UI limpa, moderna e responsiva; o container raiz deve ocupar a altura (use "min-h-full" ou "min-h-screen" no elemento de topo).
 9. Todo o texto de interface em português.
-10. Ao refinar (quando receber os arquivos atuais), devolva o CONJUNTO COMPLETO de arquivos já atualizado (pode adicionar, alterar ou remover arquivos), preservando o que funciona.
+10. REFINAMENTO (edição cirúrgica): quando você RECEBER os arquivos atuais, NÃO reenvie o projeto todo. Devolva APENAS os arquivos que mudaram, no formato de operações:
+   { "reply": "...", "plan": ["..."], "ops": [
+       { "op": "update", "path": "components/Header.jsx", "content": "<novo conteúdo COMPLETO do arquivo>" },
+       { "op": "create", "path": "components/Novo.jsx", "content": "<conteúdo>" },
+       { "op": "delete", "path": "components/Antigo.jsx" }
+   ] }
+   Regras das ops: "content" é sempre o arquivo INTEIRO já corrigido (não um trecho); só inclua arquivos realmente alterados/criados/removidos; mantenha os imports consistentes; não toque em arquivos que não precisam mudar. Se o pedido exigir recriar tudo, você ainda pode devolver "files" completo — mas prefira "ops".
 
-Retorne SOMENTE o JSON. Cada "content" é uma string (escape quebras de linha como \\n conforme o JSON exige).`;
+Na PRIMEIRA geração (sem arquivos atuais), use o formato "files" completo. Retorne SOMENTE o JSON. Cada "content" é uma string (escape quebras de linha como \\n conforme o JSON exige).`;
 
 /** Serializa os arquivos atuais para o prompt de refinamento. */
 export function serializeFiles(files: { path: string; content: string }[]): string {
@@ -50,5 +56,5 @@ export function buildCodeUserPrompt(
     return `Pedido do usuário: ${message}`;
   }
   const listing = Array.isArray(current) ? serializeFiles(current) : `--- ARQUIVO: App.jsx ---\n${current}`;
-  return `Projeto atual (arquivos):\n"""\n${listing}\n"""\n\nPedido de refinamento: ${message}\nDevolva o conjunto COMPLETO de arquivos já com a mudança, preservando o que funciona.`;
+  return `Projeto atual (arquivos):\n"""\n${listing}\n"""\n\nPedido de refinamento: ${message}\nDevolva SOMENTE os arquivos alterados no formato "ops" (edição cirúrgica). Não reenvie arquivos que não mudaram.`;
 }

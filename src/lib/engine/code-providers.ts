@@ -38,15 +38,58 @@ function normalizeFiles(rawFiles: any): AppFile[] | null {
   return files.length ? files : null;
 }
 
+/** Aplica ops de edição cirúrgica sobre os arquivos atuais. */
+function applyOps(current: AppFile[], ops: any[]): AppFile[] | null {
+  const map = new Map<string, string>();
+  for (const f of current) map.set(f.path.replace(/^\.?\//, ""), f.content);
+  let touched = 0;
+  for (const o of ops) {
+    if (!o || typeof o.path !== "string") continue;
+    const path = o.path.replace(/^\.?\//, "").trim();
+    if (!path) continue;
+    const op = o.op || (o.content != null ? "update" : "delete");
+    if (op === "delete") {
+      if (map.delete(path)) touched++;
+    } else {
+      if (typeof o.content !== "string") continue;
+      map.set(path, o.content);
+      touched++;
+    }
+  }
+  if (!touched || map.size === 0) return null;
+  return Array.from(map.entries()).map(([path, content]) => ({ path, content }));
+}
+
 function parse(
   text: string,
   provider: "claude" | "openrouter",
   cost: number,
-  model: string
+  model: string,
+  current?: AppFile[] | null
 ): AppGenerationResult | null {
   try {
     const raw = text.replace(/^```(?:json)?/m, "").replace(/```\s*$/m, "").trim();
     const j = JSON.parse(raw);
+
+    // Edição cirúrgica: aplica ops sobre os arquivos atuais (refinamento).
+    if (Array.isArray(j.ops) && current && current.length) {
+      const merged = applyOps(current, j.ops);
+      if (merged) {
+        let entry =
+          merged.find((f) => /(^|\/)App\.(jsx|tsx|js|ts)$/.test(f.path))?.path ?? merged[0].path;
+        const app = { kind: "app" as const, name: j.name || "App", description: "", files: merged, entry, provider };
+        return {
+          provider,
+          engineMode: "real",
+          stats: projectStats(app),
+          reply: String(j.reply ?? "Pronto! Arquivos atualizados."),
+          plan: Array.isArray(j.plan) ? j.plan.map(String) : [],
+          app,
+          cost,
+          model,
+        };
+      }
+    }
 
     // Caminho preferido: projeto multi-arquivo com imports reais.
     const files = normalizeFiles(j.files);
@@ -113,7 +156,7 @@ async function callClaude(apiKey: string, a: Args, model: string): Promise<AppGe
     const data = await res.json();
     const text = data?.content?.[0]?.text;
     const cost = estimateCost(model, data?.usage?.input_tokens ?? 0, data?.usage?.output_tokens ?? 0);
-    return text ? parse(text, "claude", cost, model) : null;
+    return text ? parse(text, "claude", cost, model, a.currentFiles ?? null) : null;
   } catch {
     return null;
   }
@@ -143,7 +186,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string): Promise<A
       typeof data?.usage?.cost === "number"
         ? data.usage.cost
         : estimateCost(model, data?.usage?.prompt_tokens ?? 0, data?.usage?.completion_tokens ?? 0);
-    return text ? parse(text, "openrouter", cost, model) : null;
+    return text ? parse(text, "openrouter", cost, model, a.currentFiles ?? null) : null;
   } catch {
     return null;
   }

@@ -18,18 +18,19 @@ create index if not exists app_data_project_idx on public.app_data (project_id, 
 
 alter table public.app_data enable row level security;
 
--- Apps publicados são públicos e não têm sessão do AD Studio, então o acesso é
--- pelo papel anon. A API server-side impõe o escopo por project_id e os limites.
-drop policy if exists "app_data anon read" on public.app_data;
-drop policy if exists "app_data anon write" on public.app_data;
-drop policy if exists "app_data anon update" on public.app_data;
-drop policy if exists "app_data anon delete" on public.app_data;
+-- Acesso pelo papel público (anon E authenticated): o preview roda com a sessão
+-- do dono (authenticated) e o app publicado sem sessão (anon). A API server-side
+-- impõe o escopo por project_id e os limites de tamanho/linhas.
+drop policy if exists "app_data read" on public.app_data;
+drop policy if exists "app_data write" on public.app_data;
+drop policy if exists "app_data update" on public.app_data;
+drop policy if exists "app_data delete" on public.app_data;
 
-create policy "app_data anon read"   on public.app_data for select to anon using (true);
-create policy "app_data anon write"  on public.app_data for insert to anon with check (true);
-create policy "app_data anon update" on public.app_data for update to anon using (true) with check (true);
-create policy "app_data anon delete" on public.app_data for delete to anon using (true);
+create policy "app_data read"   on public.app_data for select to public using (true);
+create policy "app_data write"  on public.app_data for insert to public with check (true);
+create policy "app_data update" on public.app_data for update to public using (true) with check (true);
+create policy "app_data delete" on public.app_data for delete to public using (true);
 
-grant select, insert, update, delete on public.app_data to anon;
+grant select, insert, update, delete on public.app_data to anon, authenticated;
 
 select 'migracao 0004 aplicada' as resultado;

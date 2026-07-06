@@ -33,9 +33,9 @@ export function SiteFooter() {
         <div className="space-y-3">
           <Logo />
           <p className="text-sm text-muted-foreground">
-            Do prompt ao produto.
+            Onde ideias viram produtos.
           </p>
-          <p className="text-xs text-muted-foreground">© {new Date().getFullYear()} Nexaform. Todos os direitos reservados.</p>
+          <p className="text-xs text-muted-foreground">© {new Date().getFullYear()} AD Studio. Todos os direitos reservados.</p>
         </div>
         {[
           { title: "Produto", links: [["Como funciona", "/#como-funciona"], ["Recursos", "/#recursos"], ["Preços", "/pricing"], ["Exemplos", "/#exemplos"]] },

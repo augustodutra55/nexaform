@@ -1,5 +1,5 @@
 /**
- * Component tree do Nexaform.
+ * Component tree do AD Studio.
  *
  * Em vez de gerar código a cada prompt, a IA gera/edita um schema JSON
  * (AppSchema). O preview é renderizado a partir dele e refinamentos são

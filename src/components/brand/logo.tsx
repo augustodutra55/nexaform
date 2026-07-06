@@ -2,26 +2,36 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 
 /**
- * Marca "Nexaform" — monograma geométrico em N contido num frame de app
- * cuja cauda o transforma, sutilmente, num balão de conversa: software
- * que nasce de um diálogo. Vetorial, flat, sem clichês de IA.
+ * Marca "AD Studio" — monograma AD em tile premium com gradiente indigo→violeta.
+ * Um selo sólido e sofisticado, igual em qualquer fundo: cara de estúdio digital
+ * de criação, não de plataforma genérica. Vetorial, flat, memorável.
  *
  * Assets estáticos: /public/brand/{logo,logo-mark,favicon,app-icon}.svg
  */
 export function LogoMark({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 32 32" fill="none" className={cn("h-6 w-6", className)} aria-hidden>
+    <svg viewBox="0 0 32 32" fill="none" className={cn("h-7 w-7", className)} aria-hidden>
+      <defs>
+        <linearGradient id="adMarkGrad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#6D5DF6" />
+          <stop offset="1" stopColor="#A855F7" />
+        </linearGradient>
+      </defs>
+      <rect width="32" height="32" rx="9" fill="url(#adMarkGrad)" />
+      {/* Monograma AD: "A" em chevron com travessão + "D" com haste e bojo */}
       <path
-        d="M10 4H22C25.3137 4 28 6.68629 28 10V18C28 21.3137 25.3137 24 22 24H15L10 28.5V24C6.68629 24 4 21.3137 4 18V10C4 6.68629 6.68629 4 10 4Z"
-        stroke="currentColor"
-        strokeOpacity="0.55"
-        strokeWidth="2.2"
+        d="M9.4 22.5L12.9 9.8H15.1L18.6 22.5"
+        stroke="#fff"
+        strokeWidth="2.1"
+        strokeLinecap="round"
         strokeLinejoin="round"
       />
+      <path d="M11 18.2H17" stroke="#fff" strokeWidth="2.1" strokeLinecap="round" />
       <path
-        d="M12 19V9.5L20 19V9.5"
-        stroke="#635BFF"
-        strokeWidth="2.6"
+        d="M21.3 9.8V22.5M21.3 9.8C24.9 9.8 26.6 12.4 26.6 16.15C26.6 19.9 24.9 22.5 21.3 22.5"
+        stroke="#fff"
+        strokeOpacity="0.92"
+        strokeWidth="2.1"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -33,7 +43,9 @@ export function Logo({ href = "/", className }: { href?: string; className?: str
   return (
     <Link href={href} className={cn("flex items-center gap-2.5 font-semibold tracking-tight", className)}>
       <LogoMark />
-      <span className="text-[17px] leading-none">Nexaform</span>
+      <span className="text-[17px] leading-none">
+        AD <span className="font-medium text-muted-foreground">Studio</span>
+      </span>
     </Link>
   );
 }

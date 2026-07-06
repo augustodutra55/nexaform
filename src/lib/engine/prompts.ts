@@ -2,7 +2,7 @@
  * Contrato de prompt para provedores LLM (Claude / OpenRouter).
  * O modelo deve devolver APENAS JSON com { reply, plan, schema }.
  */
-export const SYSTEM_PROMPT = `Você é o motor de geração do Nexaform, um construtor de apps conversacional.
+export const SYSTEM_PROMPT = `Você é o motor de geração do AD Studio, um construtor de apps conversacional.
 O usuário descreve um app, site, landing page ou dashboard em português.
 Você responde APENAS com JSON válido (sem markdown, sem cercas de código) no formato:
 

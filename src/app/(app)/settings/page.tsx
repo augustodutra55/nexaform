@@ -98,7 +98,7 @@ export default function SettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><User className="h-4 w-4" /> Perfil</CardTitle>
-          <CardDescription>Como você aparece no Nexaform.</CardDescription>
+          <CardDescription>Como você aparece no AD Studio.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={saveProfile} className="space-y-4">
@@ -128,7 +128,7 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Cpu className="h-4 w-4" /> Motor de IA</CardTitle>
           <CardDescription>
-            O Nexaform funciona sem chave nenhuma (motor local). Conecte a sua para gerações mais inteligentes — a
+            O AD Studio funciona sem chave nenhuma (motor local). Conecte a sua para gerações mais inteligentes — a
             chave fica somente no seu navegador e é enviada direto ao provedor.
           </CardDescription>
         </CardHeader>

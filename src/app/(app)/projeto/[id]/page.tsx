@@ -256,7 +256,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = mode === "app" ? `${project?.name ?? "app"}.jsx` : `${project?.name ?? "projeto"}.nexaform.json`;
+    a.download = mode === "app" ? `${project?.name ?? "app"}.jsx` : `${project?.name ?? "projeto"}.adstudio.json`;
     a.click();
     URL.revokeObjectURL(url);
     toast.success("Exportado");

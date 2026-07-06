@@ -27,7 +27,7 @@ const steps = [
   {
     icon: Eye,
     title: "Assista à construção",
-    text: "O Nexaform interpreta a intenção, estrutura páginas e componentes e renderiza o preview na hora, em desktop e mobile.",
+    text: "O AD Studio interpreta a intenção, estrutura páginas e componentes e renderiza o preview na hora, em desktop e mobile.",
   },
   {
     icon: Rocket,
@@ -80,16 +80,16 @@ const examples = [
 
 const faqs = [
   {
-    q: "Preciso saber programar para usar o Nexaform?",
-    a: "Não. Você descreve o que quer em linguagem natural e o Nexaform cuida da estrutura, do visual e do conteúdo. Se você programa, exporte o projeto e continue no seu editor.",
+    q: "Preciso saber programar para usar o AD Studio?",
+    a: "Não. Você descreve o que quer em linguagem natural e o AD Studio cuida da estrutura, do visual e do conteúdo. Se você programa, exporte o projeto e continue no seu editor.",
   },
   {
     q: "Como funciona a geração por baixo dos panos?",
-    a: "Cada pedido vira um schema estruturado — uma árvore de páginas, seções e componentes. O preview é renderizado a partir desse schema e refinamentos alteram apenas as partes necessárias. É o que torna o Nexaform rápido e previsível.",
+    a: "Cada pedido vira um schema estruturado — uma árvore de páginas, seções e componentes. O preview é renderizado a partir desse schema e refinamentos alteram apenas as partes necessárias. É o que torna o AD Studio rápido e previsível.",
   },
   {
     q: "Posso usar minha própria chave de IA?",
-    a: "Sim. Nas configurações você conecta sua chave da Anthropic ou OpenRouter — ela fica apenas no seu navegador. Sem chave, o motor local do Nexaform gera tudo em modo demo, sem custo.",
+    a: "Sim. Nas configurações você conecta sua chave da Anthropic ou OpenRouter — ela fica apenas no seu navegador. Sem chave, o motor local do AD Studio gera tudo em modo demo, sem custo.",
   },
   {
     q: "O que acontece quando atinjo o limite do plano Free?",
@@ -97,7 +97,7 @@ const faqs = [
   },
   {
     q: "Consigo exportar o que eu criar?",
-    a: "No plano Pro você exporta o schema completo do projeto em JSON, pronto para renderizar fora do Nexaform — além do link publicado, disponível em todos os planos.",
+    a: "No plano Pro você exporta o schema completo do projeto em JSON, pronto para renderizar fora do AD Studio — além do link publicado, disponível em todos os planos.",
   },
 ];
 
@@ -112,16 +112,17 @@ export default function LandingPage() {
           <div className="pointer-events-none absolute left-1/2 top-[-8rem] h-[24rem] w-[42rem] -translate-x-1/2 rounded-full bg-brand-500/15 blur-[120px]" />
           <div className="container relative flex flex-col items-center py-24 text-center md:py-32">
             <Badge className="mb-6 animate-fade-up border border-brand-500/20">
-              Engenharia de produto conduzida por conversa
+              O estúdio digital de criação de produtos
             </Badge>
             <h1 className="max-w-3xl animate-fade-up font-display text-4xl font-bold tracking-tight md:text-[4.25rem] md:leading-[1.05]">
-              Do prompt ao produto.
+              Onde ideias
               <br />
-              <span className="text-brand">Em minutos.</span>
+              <span className="text-brand">viram produtos.</span>
             </h1>
             <p className="mt-6 max-w-xl animate-fade-up text-lg text-muted-foreground">
-              O Nexaform transforma linguagem natural em apps, sites e dashboards completos —
+              O AD Studio transforma linguagem natural em apps, sites e dashboards completos —
               com preview instantâneo, refinamento por chat e controle total de versões.
+              Criar, aprender e construir, num só lugar.
             </p>
             <div className="mt-8 flex animate-fade-up flex-col gap-3 sm:flex-row">
               <Button size="lg" variant="brand" asChild>
@@ -143,7 +144,7 @@ export default function LandingPage() {
                 <span className="h-2.5 w-2.5 rounded-full bg-border" />
                 <span className="h-2.5 w-2.5 rounded-full bg-border" />
                 <span className="h-2.5 w-2.5 rounded-full bg-border" />
-                <span className="ml-3 text-xs text-muted-foreground">nexaform · atlas-agendamentos</span>
+                <span className="ml-3 text-xs text-muted-foreground">ad studio · atlas-agendamentos</span>
               </div>
               <div className="grid gap-2 p-2 md:grid-cols-[1fr_1.6fr]">
                 <div className="space-y-2 rounded-lg bg-secondary/50 p-3 text-left">
@@ -210,9 +211,9 @@ export default function LandingPage() {
           <div className="container">
             <div className="grid gap-10 lg:grid-cols-[1fr_1.8fr]">
               <div>
-                <p className="text-sm font-medium uppercase tracking-widest text-brand-400">Por que Nexaform</p>
+                <p className="text-sm font-medium uppercase tracking-widest text-brand-400">Por que AD Studio</p>
                 <h2 className="mt-3 font-display text-3xl font-bold tracking-tight md:text-4xl">
-                  Construído para quem leva produto a sério
+                  Um estúdio para quem leva produto a sério
                 </h2>
                 <p className="mt-4 text-muted-foreground">
                   Não é um gerador de mockups. É uma plataforma de construção: schema estruturado,
@@ -237,7 +238,7 @@ export default function LandingPage() {
           <div className="container">
             <p className="text-center text-sm font-medium uppercase tracking-widest text-brand-400">Exemplos</p>
             <h2 className="mt-3 text-center font-display text-3xl font-bold tracking-tight md:text-4xl">
-              O que nasce no Nexaform
+              O que nasce no AD Studio
             </h2>
             <p className="mx-auto mt-3 max-w-lg text-center text-muted-foreground">
               Cada um destes começou com uma única mensagem no chat.

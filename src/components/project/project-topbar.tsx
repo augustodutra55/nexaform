@@ -284,7 +284,7 @@ export function ProjectTopbar({
             <div className="flex items-center justify-between rounded-lg border p-3">
               <div>
                 <p className="text-sm font-medium">Entrega white-label</p>
-                <p className="text-xs text-muted-foreground">Publicar sem a marca Nexaform, como entrega do cliente.</p>
+                <p className="text-xs text-muted-foreground">Publicar sem a marca AD Studio, como entrega do cliente.</p>
               </div>
               <Switch
                 checked={!!meta.whitelabel}

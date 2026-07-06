@@ -2,7 +2,7 @@
 
 /**
  * Renderiza uma Section do component tree.
- * Todo o estilo respeita o ThemeConfig do schema (não o tema do Nexaform),
+ * Todo o estilo respeita o ThemeConfig do schema (não o tema do AD Studio),
  * para que o preview seja fiel ao produto sendo criado.
  */
 import { Zap, Shield, Sparkles, Layers, Clock, Heart, Check, ArrowUpRight, ArrowDownRight } from "lucide-react";

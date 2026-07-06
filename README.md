@@ -1,6 +1,6 @@
-# Nexaform — do prompt ao produto
+# AD Studio — onde ideias viram produtos
 
-Plataforma de IA que transforma **linguagem natural em apps, sites e dashboards**: o usuário descreve o que quer em um chat, o sistema interpreta o pedido, gera a estrutura em um schema de componentes e renderiza o **preview em tempo real**, com refinamento incremental, versões, publicação e exportação.
+Estúdio digital de IA para **criar, aprender e construir produtos**: o usuário descreve o que quer em um chat, o sistema interpreta o pedido, gera a estrutura em um schema de componentes e renderiza o **preview em tempo real**, com refinamento incremental, versões, publicação e exportação. Do prompt à entrega — apps, sites e dashboards.
 
 Brand assets em `public/brand/`: `logo.svg` (lockup), `logo-mark.svg` (monograma), `favicon.svg`, `app-icon.svg`.
 

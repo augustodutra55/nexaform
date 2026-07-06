@@ -3,8 +3,8 @@
 @tailwind utilities;
 
 /* ═════════════════════════════════════════════════════════════
-   Nexaform · brand tokens
-   fundo #0B1020 · primária #635BFF · apoio #8B5CF6
+   AD Studio · brand tokens
+   tinta #0B1020 · primária #6D5DF6 · apoio #A855F7
    neutros #F8FAFC / #94A3B8
    ═════════════════════════════════════════════════════════════ */
 
@@ -16,19 +16,19 @@
     --card-foreground: 227 49% 8%;
     --popover: 0 0% 100%;
     --popover-foreground: 227 49% 8%;
-    --primary: 243 100% 68%;            /* #635BFF */
+    --primary: 246 89% 66%;             /* #6D5DF6 */
     --primary-foreground: 0 0% 100%;
     --secondary: 214 32% 94%;
     --secondary-foreground: 227 40% 14%;
     --muted: 214 32% 94%;
     --muted-foreground: 215 20% 47%;
-    --accent: 243 100% 96%;
-    --accent-foreground: 243 70% 45%;
+    --accent: 246 100% 96%;
+    --accent-foreground: 246 72% 46%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
     --border: 214 32% 89%;
     --input: 214 32% 86%;
-    --ring: 243 100% 68%;
+    --ring: 246 89% 66%;
     --radius: 0.625rem;
     --font-sans: "Inter", ui-sans-serif;
     --font-display: "Inter", ui-sans-serif;
@@ -41,19 +41,19 @@
     --card-foreground: 210 40% 98%;
     --popover: 227 46% 10%;
     --popover-foreground: 210 40% 98%;
-    --primary: 243 100% 68%;            /* #635BFF */
+    --primary: 246 89% 66%;             /* #6D5DF6 */
     --primary-foreground: 0 0% 100%;
     --secondary: 227 36% 15%;
     --secondary-foreground: 210 40% 96%;
     --muted: 227 36% 14%;
     --muted-foreground: 215 20% 65%;    /* #94A3B8 */
-    --accent: 243 60% 20%;
-    --accent-foreground: 243 100% 84%;
+    --accent: 246 58% 21%;
+    --accent-foreground: 250 100% 85%;
     --destructive: 0 65% 48%;
     --destructive-foreground: 0 0% 100%;
     --border: 227 30% 18%;
     --input: 227 30% 21%;
-    --ring: 243 100% 68%;
+    --ring: 246 89% 66%;
   }
 
   * {
@@ -66,20 +66,20 @@
   }
 
   ::selection {
-    background: hsl(243 100% 68% / 0.3);
+    background: hsl(246 89% 66% / 0.3);
   }
 }
 
 @layer utilities {
-  /* Assinatura tipográfica da marca: indigo → violeta, contido e preciso */
+  /* Assinatura tipográfica AD Studio: indigo → violeta, contido e preciso */
   .text-brand {
-    @apply bg-gradient-to-r from-brand-500 to-violet-500 bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-brand-500 to-purple-500 bg-clip-text text-transparent;
   }
   .bg-brand-gradient {
-    @apply bg-gradient-to-br from-brand-500 to-violet-500;
+    @apply bg-gradient-to-br from-brand-500 to-purple-500;
   }
   .glow-brand {
-    box-shadow: 0 0 70px -16px rgba(99, 91, 255, 0.45);
+    box-shadow: 0 0 70px -16px rgba(109, 93, 246, 0.5);
   }
   .shadow-elevated {
     box-shadow:

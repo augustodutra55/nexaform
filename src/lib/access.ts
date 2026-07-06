@@ -1,5 +1,5 @@
 /**
- * Controle de acesso central do Nexaform.
+ * Controle de acesso central do AD Studio.
  *
  * Regra: usuários com role `owner` (ou cujo email bate com OWNER_EMAIL /
  * NEXT_PUBLIC_OWNER_EMAIL) têm acesso total a todos os recursos de Pro e

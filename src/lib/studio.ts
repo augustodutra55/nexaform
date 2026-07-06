@@ -12,7 +12,7 @@ export interface ProjectMeta {
   template?: boolean;
   /** Cliente/rótulo do projeto (opcional). */
   client?: string;
-  /** Entrega white-label: publicação sem a marca Nexaform. */
+  /** Entrega white-label: publicação sem a marca AD Studio. */
   whitelabel?: boolean;
 }
 

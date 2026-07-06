@@ -29,14 +29,14 @@ export async function generateMetadata({ params }: { params: { slug: string } })
   const meta = readMeta(project.meta);
   const description =
     project.description?.slice(0, 160) ||
-    (meta.whitelabel ? project.name : `${project.name} — publicado com Nexaform.`);
-  // white-label: título absoluto, sem o sufixo "· Nexaform".
+    (meta.whitelabel ? project.name : `${project.name} — publicado com AD Studio.`);
+  // white-label: título absoluto, sem o sufixo "· AD Studio".
   const title = meta.whitelabel ? { absolute: project.name } : project.name;
   return {
     title,
     description,
-    // white-label não anuncia o Nexaform nos metadados
-    applicationName: meta.whitelabel ? project.name : "Nexaform",
+    // white-label não anuncia o AD Studio nos metadados
+    applicationName: meta.whitelabel ? project.name : "AD Studio",
     openGraph: {
       title,
       description,
@@ -60,7 +60,7 @@ export default async function PublicProjectPage({ params }: { params: { slug: st
     <div className="flex min-h-screen flex-col">
       <header className="flex h-12 items-center justify-between border-b px-4">
         {whitelabel ? (
-          // Entrega white-label: só o nome do cliente/projeto, sem marca Nexaform.
+          // Entrega white-label: só o nome do cliente/projeto, sem marca AD Studio.
           <span className="text-sm font-semibold">{brandName}</span>
         ) : (
           <div className="flex items-center gap-3">
@@ -70,7 +70,7 @@ export default async function PublicProjectPage({ params }: { params: { slug: st
         )}
         {!whitelabel && (
           <Button variant="brand" size="sm" asChild>
-            <Link href="/cadastro">Construa o seu com o Nexaform</Link>
+            <Link href="/cadastro">Construa o seu com o AD Studio</Link>
           </Button>
         )}
       </header>

@@ -3,7 +3,7 @@
  * O modelo escreve um componente React funcional completo que o AppRunner
  * executa no navegador (React 18 UMD + Babel + Tailwind via CDN).
  */
-export const CODE_SYSTEM_PROMPT = `Você é o motor de geração do Nexaform, um construtor de aplicativos por IA (estilo Lovable).
+export const CODE_SYSTEM_PROMPT = `Você é o motor de geração do AD Studio, um construtor de aplicativos por IA (estilo Lovable).
 O usuário descreve um app, ferramenta, jogo ou interface em português. Você ESCREVE CÓDIGO React real e funcional.
 
 Responda APENAS com JSON válido (sem markdown, sem cercas de código):

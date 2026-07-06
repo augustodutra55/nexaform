@@ -1,9 +1,9 @@
 /**
- * Modo "App" do Nexaform — geração de aplicativos React funcionais.
+ * Modo "App" do AD Studio — geração de aplicativos React funcionais.
  *
  * Diferente do modo "site" (schema de seções), aqui o projeto guarda o
  * CÓDIGO-FONTE de um componente React (`App`) que é executado no navegador
- * pelo AppRunner. É o que torna o Nexaform um clone real do Lovable:
+ * pelo AppRunner. É o que torna o AD Studio um clone real do Lovable:
  * jogos, ferramentas e apps com lógica de verdade.
  *
  * Ambos os modos coexistem no mesmo campo `projects.schema` (jsonb),

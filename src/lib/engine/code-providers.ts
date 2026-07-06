@@ -100,9 +100,9 @@ function demoFallback(message: string): AppGenerationResult {
 function App(){
   const [n, setN] = useState(0);
   return React.createElement('div',{className:'min-h-full flex flex-col items-center justify-center gap-5 p-8 bg-slate-900 text-white text-center'},
-    React.createElement('div',{className:'text-xs uppercase tracking-widest text-indigo-400'},'Nexaform · modo demo'),
+    React.createElement('div',{className:'text-xs uppercase tracking-widest text-indigo-400'},'AD Studio · modo demo'),
     React.createElement('h1',{className:'text-2xl font-bold max-w-md'},'Para gerar QUALQUER app a partir do seu texto, conecte uma chave de IA em Configurações'),
-    React.createElement('p',{className:'text-slate-400 max-w-md text-sm'},'Sem chave, o Nexaform executa apps prontos (jogo da velha, calculadora, lista de tarefas, pomodoro) e este exemplo abaixo.'),
+    React.createElement('p',{className:'text-slate-400 max-w-md text-sm'},'Sem chave, o AD Studio executa apps prontos (jogo da velha, calculadora, lista de tarefas, pomodoro) e este exemplo abaixo.'),
     React.createElement('div',{className:'mt-2 flex items-center gap-3'},
       React.createElement('button',{onClick:function(){setN(n-1);},className:'w-10 h-10 rounded-lg bg-slate-700 hover:bg-slate-600 text-xl'},'-'),
       React.createElement('span',{className:'text-4xl font-bold tabular-nums w-16'},String(n)),

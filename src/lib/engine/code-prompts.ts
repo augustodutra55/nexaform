@@ -30,12 +30,13 @@ Regras OBRIGATÓRIAS:
    REGRAS de pacotes: use apenas pacotes de front-end (nada que exija Node/backend, filesystem ou binários nativos). NÃO importe arquivos CSS de pacotes (ex.: "import 'x/dist/styles.css'") — o estilo é só Tailwind. Prefira poucos pacotes e populares.
 5. Estilize com classes Tailwind (Tailwind Play CDN carregado). Ícones via lucide-react. Sem CSS externo próprio.
 6. PERSISTÊNCIA (backend embutido): para SALVAR dados de verdade (listas, recados, cadastros, tarefas que persistem ao recarregar), use a API global "window.AD" — um mini-banco por projeto, já disponível:
-     - await AD.list('colecao')            → array de itens (cada item tem "id" + seus campos)
+     - await AD.list('colecao')            → array de itens (cada item tem "id", seus campos e "_createdAt" ISO)
      - await AD.insert('colecao', {campos}) → cria e retorna o item com "id"
      - await AD.update(id, {campos})        → atualiza
      - await AD.remove(id)                  → apaga
-   Ex.: em um useEffect inicial "AD.list('recados').then(setRecados)"; ao enviar "await AD.insert('recados', { nome, texto })" e recarregue a lista. Trate erros com try/catch. Se o app NÃO precisa persistir, use apenas estado em memória (useState).
-   NÃO use fetch cru, localStorage, cookies nem window.parent — persistência é só via window.AD.
+     - await AD.upload(file)                → envia um File/Blob (imagem, pdf ≤5MB) e retorna a URL pública (use em <img src={url}> ou salve com AD.insert)
+   Ex.: em um useEffect inicial "AD.list('recados').then(setRecados)"; ao enviar "await AD.insert('recados', { nome, texto })" e recarregue a lista. Para avatar/foto: "const url = await AD.upload(file); await AD.insert('perfis', { nome, foto: url })". Para datas use item._createdAt. Trate erros com try/catch. Se o app NÃO precisa persistir, use apenas estado em memória (useState).
+   NÃO use fetch cru, localStorage, cookies nem window.parent — persistência e upload são só via window.AD.
 7. Caminhos relativos, sem barra inicial, com extensão .jsx (ou .js para utils sem JSX). Imports relativos começam com "./" ou "../".
 8. O app deve ser COMPLETO e FUNCIONAL: lógica real, interações, estado, eventos — nunca um mockup estático. UI limpa, moderna e responsiva; o container raiz deve ocupar a altura (use "min-h-full" ou "min-h-screen" no elemento de topo).
 9. Todo o texto de interface em português.

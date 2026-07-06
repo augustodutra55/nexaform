@@ -25,7 +25,15 @@ export function adGlobalScript(projectId?: string | null): string {
     list: function(collection){ return req('GET', { qs:'?collection=' + encodeURIComponent(collection||'default') }).then(function(r){ return r.items || []; }); },
     insert: function(collection, data){ return req('POST', { body:{ collection: collection||'default', data: data||{} } }).then(function(r){ return r.item; }); },
     update: function(id, data){ return req('PATCH', { body:{ id: id, data: data||{} } }).then(function(r){ return r.item; }); },
-    remove: function(id){ return req('DELETE', { qs:'?id=' + encodeURIComponent(id) }).then(function(){ return true; }); }
+    remove: function(id){ return req('DELETE', { qs:'?id=' + encodeURIComponent(id) }).then(function(){ return true; }); },
+    // Upload de arquivo/imagem (File ou Blob) → devolve a URL pública.
+    upload: function(file){
+      var fd = new FormData();
+      fd.append('file', file);
+      return fetch('/api/upload/' + PID, { method:'POST', body: fd })
+        .then(function(r){ if(!r.ok) return r.json().then(function(e){ throw new Error(e.error||('upload '+r.status)); }); return r.json(); })
+        .then(function(r){ return r.url; });
+    }
   };
 })();
 </script>`;

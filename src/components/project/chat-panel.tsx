@@ -27,6 +27,9 @@ interface ChatPanelProps {
   code: string | null;
   projectName: string;
   starterPrompt?: string | null;
+  /** Mensagem de erro para auto-correção (disparada pelo preview). */
+  autoFixError?: string | null;
+  onAutoFixHandled?: () => void;
   onSiteResult: (result: GenerationResult) => void;
   onAppResult: (result: AppGenerationResult) => void;
   onGeneratingChange?: (generating: boolean) => void;
@@ -54,6 +57,8 @@ export function ChatPanel({
   code,
   projectName,
   starterPrompt,
+  autoFixError,
+  onAutoFixHandled,
   onSiteResult,
   onAppResult,
   onGeneratingChange,
@@ -126,6 +131,15 @@ export function ChatPanel({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [starterPrompt]);
+
+  // Auto-correção: ao receber um erro do preview, pede à IA para corrigir.
+  useEffect(() => {
+    if (!autoFixError || generating) return;
+    const msg = `⚙️ Correção automática: o app apresentou este erro ao executar:\n"${autoFixError}"\nReescreva o componente App corrigindo esse erro e mantendo toda a funcionalidade.`;
+    onAutoFixHandled?.();
+    send(msg);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFixError]);
 
   async function persist(role: "user" | "assistant", content: string) {
     await supabase.from("chat_messages").insert({ thread_id: threadId, role, content });

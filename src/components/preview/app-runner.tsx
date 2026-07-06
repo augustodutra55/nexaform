@@ -19,6 +19,8 @@ interface AppRunnerProps {
   code: string;
   /** chave para forçar recarregamento quando o código muda */
   version?: string | number;
+  /** chamado quando o app dá erro de execução (para auto-correção). */
+  onError?: (message: string) => void;
 }
 
 function buildSrcDoc(code: string): string {
@@ -45,11 +47,19 @@ function buildSrcDoc(code: string): string {
 <body>
 <div id="root"></div>
 <script>
+  // Guarda a referência real do topo ANTES de bloquear o acesso do código do usuário,
+  // para conseguir reportar erros ao app (auto-correção).
+  var _nxHost = window.parent;
+  var _nxReported = false;
+  function nxReport(msg){
+    if (_nxReported) return; _nxReported = true;
+    try { _nxHost.postMessage({ __nx_error: String(msg).slice(0, 800) }, '*'); } catch(e){}
+  }
   // Proteção: impede o código do preview de tocar na página pai / storage do app.
   try { Object.defineProperty(window, 'parent', { get: function(){ return window; } }); } catch(e){}
   try { Object.defineProperty(window, 'top', { get: function(){ return window; } }); } catch(e){}
-  window.addEventListener('error', function(e){ showError(e.message); });
-  window.addEventListener('unhandledrejection', function(e){ showError((e.reason && e.reason.message) || String(e.reason)); });
+  window.addEventListener('error', function(e){ showError(e.message); nxReport(e.message); });
+  window.addEventListener('unhandledrejection', function(e){ var m=(e.reason && e.reason.message) || String(e.reason); showError(m); nxReport(m); });
   function showError(msg){
     var r = document.getElementById('root');
     if(r) r.innerHTML = '<div class="nx-error">⚠ Erro ao executar o app:\\n\\n' + String(msg).replace(/</g,'&lt;') + '</div>';
@@ -67,10 +77,11 @@ function buildSrcDoc(code: string): string {
         'var {useState,useEffect,useRef,useMemo,useCallback,useReducer,useContext,createContext,Fragment} = React;'
         + out + '\\n; return typeof App !== "undefined" ? App : null;');
       var App = factory(React, ReactDOM);
-      if (!App) { showError('O código não definiu um componente App.'); return; }
+      if (!App) { showError('O código não definiu um componente App.'); nxReport('O código não definiu um componente App.'); return; }
       ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
     } catch (err) {
-      showError((err && err.message) || String(err));
+      var m = (err && err.message) || String(err);
+      showError(m); nxReport(m);
     }
   })();
 </script>
@@ -78,17 +89,30 @@ function buildSrcDoc(code: string): string {
 </html>`;
 }
 
-export function AppRunner({ code, version }: AppRunnerProps) {
+export function AppRunner({ code, version, onError }: AppRunnerProps) {
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
 
   const srcDoc = useMemo(() => (code ? buildSrcDoc(code) : ""), [code, version, reloadKey]);
 
   useEffect(() => {
     setLoading(true);
   }, [srcDoc]);
+
+  // Escuta erros de execução vindos do iframe (para auto-correção).
+  useEffect(() => {
+    function onMsg(e: MessageEvent) {
+      if (e?.data && typeof e.data === "object" && typeof e.data.__nx_error === "string") {
+        onErrorRef.current?.(e.data.__nx_error);
+      }
+    }
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
 
   return (
     <div className="flex h-full flex-col">

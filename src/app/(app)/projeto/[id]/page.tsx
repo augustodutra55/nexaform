@@ -50,6 +50,9 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const metaRef = useRef<ProjectMeta>({});
   metaRef.current = meta;
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+  // Auto-correção de erros do app
+  const [autoFixError, setAutoFixError] = useState<string | null>(null);
+  const autoFixCount = useRef(0);
 
   /* ── Carregamento ─────────────────────────────────────────── */
   useEffect(() => {
@@ -259,6 +262,14 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     toast.success("Exportado");
   }
 
+  function handleAppError(message: string) {
+    // Máx. 2 correções automáticas por sessão para evitar loop.
+    if (autoFixCount.current >= 2) return;
+    autoFixCount.current += 1;
+    toast.info("Corrigindo o erro automaticamente…", { description: "Reenviando para a IA ajustar o código." });
+    setAutoFixError(message);
+  }
+
   function handleRestoreVersion(v: VersionRow) {
     if (isAppCode(v.schema)) {
       setMode("app");
@@ -327,6 +338,8 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
             code={appCode}
             projectName={project.name}
             starterPrompt={starter}
+            autoFixError={autoFixError}
+            onAutoFixHandled={() => setAutoFixError(null)}
             onSiteResult={handleSiteResult}
             onAppResult={handleAppResult}
             onGeneratingChange={setGenerating}
@@ -335,7 +348,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
         <div className="min-w-0 flex-1">
           {mode === "app" ? (
-            <AppRunner code={appCode ?? ""} version={appVer} />
+            <AppRunner code={appCode ?? ""} version={appVer} onError={handleAppError} />
           ) : (
             <PreviewPane
               schema={store.schema}

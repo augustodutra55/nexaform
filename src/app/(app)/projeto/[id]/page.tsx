@@ -6,7 +6,7 @@ import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { AppSchema, GenerationResult, isValidSchema } from "@/lib/engine/types";
-import { AppCode, AppGenerationResult, isAppCode } from "@/lib/engine/app-types";
+import { AppCode, AppGenerationResult, EngineMode, isAppCode } from "@/lib/engine/app-types";
 import { useProjectStore } from "@/lib/store/project";
 import { resolvePlan, isOwner, type AccessProfile } from "@/lib/access";
 import { ProjectMeta, readMeta } from "@/lib/studio";
@@ -46,6 +46,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [mode, setMode] = useState<ProjectMode>("empty");
   const [appCode, setAppCode] = useState<string | null>(null);
   const [appVer, setAppVer] = useState(0);
+  const [engineMode, setEngineMode] = useState<EngineMode | null>(null);
   const [meta, setMeta] = useState<ProjectMeta>({});
   const metaRef = useRef<ProjectMeta>({});
   metaRef.current = meta;
@@ -343,12 +344,13 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
             onSiteResult={handleSiteResult}
             onAppResult={handleAppResult}
             onGeneratingChange={setGenerating}
+            onEngineMode={setEngineMode}
           />
         </aside>
 
         <div className="min-w-0 flex-1">
           {mode === "app" ? (
-            <AppRunner code={appCode ?? ""} version={appVer} onError={handleAppError} />
+            <AppRunner code={appCode ?? ""} version={appVer} engineMode={engineMode} onError={handleAppError} />
           ) : (
             <PreviewPane
               schema={store.schema}

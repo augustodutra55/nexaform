@@ -12,13 +12,16 @@
  * o código do usuário fica isolado da app e dos cookies/sessão.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Loader2, Monitor, Smartphone, RefreshCw } from "lucide-react";
+import { AlertTriangle, Loader2, Monitor, Smartphone, RefreshCw, Cpu, Layout } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { EngineMode } from "@/lib/engine/app-types";
 
 interface AppRunnerProps {
   code: string;
   /** chave para forçar recarregamento quando o código muda */
   version?: string | number;
+  /** modo do motor que gerou este código (real/template/demo) — exibido no topo. */
+  engineMode?: EngineMode | null;
   /** chamado quando o app dá erro de execução (para auto-correção). */
   onError?: (message: string) => void;
 }
@@ -89,7 +92,7 @@ function buildSrcDoc(code: string): string {
 </html>`;
 }
 
-export function AppRunner({ code, version, onError }: AppRunnerProps) {
+export function AppRunner({ code, version, engineMode, onError }: AppRunnerProps) {
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
@@ -120,6 +123,33 @@ export function AppRunner({ code, version, onError }: AppRunnerProps) {
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="flex h-2 w-2 rounded-full bg-emerald-500" />
           App em execução
+          {engineMode && (
+            <span
+              className={cn(
+                "ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                engineMode === "real"
+                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300"
+                  : engineMode === "template"
+                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-300"
+                  : "bg-red-500/15 text-red-600 dark:text-red-300"
+              )}
+              title="Modo do motor que gerou este código"
+            >
+              {engineMode === "real" ? (
+                <>
+                  <Cpu className="h-3 w-3" /> Código real
+                </>
+              ) : engineMode === "template" ? (
+                <>
+                  <Layout className="h-3 w-3" /> Template
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="h-3 w-3" /> Demo
+                </>
+              )}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <button

@@ -16,6 +16,8 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
+  const [magicLoading, setMagicLoading] = useState(false);
+  const [email, setEmail] = useState("");
   const next = searchParams.get("next") ?? "/dashboard";
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -34,8 +36,28 @@ function LoginForm() {
       });
       return;
     }
-    router.push(searchParams.get("next") ?? "/dashboard");
+    router.push(next);
     router.refresh();
+  }
+
+  // Link mágico: entra sem senha — recebe um link por email e clica.
+  async function sendMagicLink() {
+    if (!email.trim()) {
+      toast.error("Informe seu email", { description: "Digite o email para receber o link de acesso." });
+      return;
+    }
+    setMagicLoading(true);
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
+    });
+    setMagicLoading(false);
+    if (error) {
+      toast.error("Não foi possível enviar o link", { description: error.message });
+      return;
+    }
+    toast.success("Link enviado!", { description: `Abra o email em ${email.trim()} e clique no link para entrar.` });
   }
 
   return (
@@ -54,7 +76,16 @@ function LoginForm() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
-            <Input id="email" name="email" type="email" placeholder="voce@email.com" required autoComplete="email" />
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              placeholder="voce@email.com"
+              required
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
           </div>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -70,6 +101,16 @@ function LoginForm() {
             Entrar
           </Button>
         </form>
+        <Button
+          type="button"
+          variant="ghost"
+          className="mt-2 w-full text-sm"
+          onClick={sendMagicLink}
+          disabled={magicLoading}
+        >
+          {magicLoading && <Loader2 className="animate-spin" />}
+          Entrar sem senha (link por email)
+        </Button>
         <p className="mt-4 text-center text-sm text-muted-foreground">
           Ainda não tem conta?{" "}
           <Link href="/cadastro" className="text-primary underline-offset-4 hover:underline">

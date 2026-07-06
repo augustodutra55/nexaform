@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout, Mic, Square } from "lucide-react";
+import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout, Mic, Square, Cpu, FileCode2, AlertTriangle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AppSchema, GenerationResult } from "@/lib/engine/types";
-import { AppGenerationResult, looksLikeApp } from "@/lib/engine/app-types";
+import { AppGenerationResult, CodeStats, EngineMode, looksLikeApp } from "@/lib/engine/app-types";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,17 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+}
+
+/** Geração de código: REAL (IA escreve) ou TEMPLATE (enlatado/demo permitido). */
+type GenMode = "real" | "template";
+
+interface GenEvidence {
+  engineMode: EngineMode;
+  provider: string;
+  model?: string;
+  stats?: CodeStats;
+  cost?: number;
 }
 
 export type ProjectMode = "empty" | "site" | "app";
@@ -33,6 +44,8 @@ interface ChatPanelProps {
   onSiteResult: (result: GenerationResult) => void;
   onAppResult: (result: AppGenerationResult) => void;
   onGeneratingChange?: (generating: boolean) => void;
+  /** Informa o modo do motor da última geração (real/template/demo) ao pai. */
+  onEngineMode?: (mode: EngineMode | null) => void;
 }
 
 const SITE_SUGGESTIONS = [
@@ -62,6 +75,7 @@ export function ChatPanel({
   onSiteResult,
   onAppResult,
   onGeneratingChange,
+  onEngineMode,
 }: ChatPanelProps) {
   const supabase = useMemo(() => createClient(), []);
   const [messages, setMessages] = useState<Message[]>(initialMessages);
@@ -73,6 +87,20 @@ export function ChatPanel({
   const [projectCost, setProjectCost] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const startedRef = useRef(false);
+
+  // ── Modo de geração de código: REAL (IA escreve) vs TEMPLATE (enlatado/demo) ──
+  const [genMode, setGenMode] = useState<GenMode>("real");
+  const genModeRef = useRef<GenMode>("real");
+  genModeRef.current = genMode;
+  const [lastGen, setLastGen] = useState<GenEvidence | null>(null);
+  useEffect(() => {
+    const s = localStorage.getItem("adstudio:gen-mode");
+    if (s === "real" || s === "template") setGenMode(s);
+  }, []);
+  function chooseMode(m: GenMode) {
+    setGenMode(m);
+    localStorage.setItem("adstudio:gen-mode", m);
+  }
 
   // ── Comando por voz (Web Speech API — grátis, roda no navegador) ──
   const [listening, setListening] = useState(false);
@@ -172,6 +200,8 @@ export function ChatPanel({
             userKey: localStorage.getItem("nexaform:ai-key") || null,
             userProvider: localStorage.getItem("nexaform:ai-provider") || null,
             costMode,
+            forceReal: genModeRef.current === "real",
+            allowTemplate: genModeRef.current === "template",
           }
         : {
             projectId,
@@ -203,8 +233,23 @@ export function ChatPanel({
       if (typeof data.cost === "number") setLastCost(data.cost);
       if (typeof data.projectCost === "number") setProjectCost(data.projectCost);
 
-      if (useApp) onAppResult(data as AppGenerationResult);
-      else onSiteResult(data as GenerationResult);
+      if (useApp) {
+        const ev: GenEvidence = {
+          engineMode: (data.engineMode as EngineMode) ?? "real",
+          provider: String(data.provider ?? "?"),
+          model: data.model,
+          stats: data.stats,
+          cost: typeof data.cost === "number" ? data.cost : undefined,
+        };
+        setLastGen(ev);
+        onEngineMode?.(ev.engineMode);
+        onAppResult(data as AppGenerationResult);
+      } else {
+        // Modo site = motor de schema/seções (não é geração de código real).
+        setLastGen({ engineMode: "template", provider: "schema" });
+        onEngineMode?.("template");
+        onSiteResult(data as GenerationResult);
+      }
     } catch (err: any) {
       const msg = err?.message ?? "Algo deu errado.";
       toast.error("Geração falhou", { description: msg });
@@ -237,6 +282,79 @@ export function ChatPanel({
           {generating ? "Construindo…" : "Pronto"}
         </span>
       </div>
+
+      {/* Seletor de modo do motor — deixa explícito real vs template/demo */}
+      <div className="flex items-center gap-2 border-b px-4 py-2">
+        <span className="text-[11px] font-medium text-muted-foreground">Motor:</span>
+        <div className="inline-flex rounded-lg border p-0.5">
+          <button
+            type="button"
+            onClick={() => chooseMode("real")}
+            title="A IA escreve código React de verdade a partir do seu pedido"
+            className={cn(
+              "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+              genMode === "real" ? "bg-emerald-500 text-white" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Cpu className="h-3 w-3" /> Geração real
+          </button>
+          <button
+            type="button"
+            onClick={() => chooseMode("template")}
+            title="Permite template pronto / demo quando não houver IA — nunca vendido como geração real"
+            className={cn(
+              "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+              genMode === "template" ? "bg-amber-500 text-white" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Layout className="h-3 w-3" /> Template/Demo
+          </button>
+        </div>
+      </div>
+
+      {/* Barra de evidências da última geração — prova técnica do modo */}
+      {lastGen && (
+        <div
+          className={cn(
+            "flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-2 text-[11px]",
+            lastGen.engineMode === "real"
+              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+              : lastGen.engineMode === "template"
+              ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+              : "bg-red-500/10 text-red-700 dark:text-red-300"
+          )}
+        >
+          <span className="flex items-center gap-1 font-semibold">
+            {lastGen.engineMode === "real" ? (
+              <>
+                <Cpu className="h-3 w-3" /> GERAÇÃO REAL
+              </>
+            ) : lastGen.engineMode === "template" ? (
+              <>
+                <Layout className="h-3 w-3" /> TEMPLATE/SCHEMA
+              </>
+            ) : (
+              <>
+                <AlertTriangle className="h-3 w-3" /> MODO DEMO
+              </>
+            )}
+          </span>
+          <span className="opacity-80">
+            {lastGen.provider}
+            {lastGen.model && lastGen.model !== "template" && lastGen.model !== "demo" ? ` · ${lastGen.model}` : ""}
+          </span>
+          {lastGen.stats && (
+            <span className="flex items-center gap-1 opacity-80">
+              <FileCode2 className="h-3 w-3" />
+              {lastGen.stats.lines} linhas · {lastGen.stats.components} comp. · {lastGen.stats.hooks} hooks ·{" "}
+              {lastGen.stats.handlers} eventos
+            </span>
+          )}
+          {typeof lastGen.cost === "number" && lastGen.cost > 0 && (
+            <span className="tabular-nums opacity-80">${lastGen.cost.toFixed(4)}</span>
+          )}
+        </div>
+      )}
 
       <div className="flex-1 space-y-4 overflow-y-auto p-4 scrollbar-thin">
         {messages.length === 0 && !generating && (

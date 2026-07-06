@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Corpo inválido." }, { status: 400 });
   }
-  const { projectId, message, currentCode, name, userKey, userProvider, costMode } = body ?? {};
+  const { projectId, message, currentCode, name, userKey, userProvider, costMode, forceReal, allowTemplate } = body ?? {};
   if (!projectId || typeof message !== "string" || !message.trim()) {
     return NextResponse.json({ error: "Requisição incompleta." }, { status: 400 });
   }
@@ -58,7 +58,22 @@ export async function POST(req: NextRequest) {
     userKey: typeof userKey === "string" ? userKey : null,
     userProvider: userProvider ?? null,
     costMode: costMode ?? "auto",
+    forceReal: forceReal !== false, // padrão: geração REAL
+    allowTemplate: allowTemplate === true,
   });
+
+  // Modo real exigido, mas nenhuma IA respondeu: erro claro, sem demo disfarçado.
+  if (forceReal !== false && result.engineMode !== "real") {
+    return NextResponse.json(
+      {
+        error:
+          "Modo de geração real ativo, mas nenhuma IA está conectada — não vou te entregar um demo disfarçado. Conecte uma chave de IA em Configurações (ou troque para o modo Template/Demo explicitamente).",
+        needsKey: true,
+        engineMode: result.engineMode,
+      },
+      { status: 422 }
+    );
+  }
 
   await supabase.from("generations").insert({
     user_id: user.id,

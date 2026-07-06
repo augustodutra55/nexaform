@@ -5,7 +5,7 @@
  * Com roteamento de modelo (econômico/premium) e captura de custo real, para
  * o Studio operar barato.
  */
-import { AppGenerationResult } from "./app-types";
+import { AppGenerationResult, codeStats } from "./app-types";
 import { CODE_SYSTEM_PROMPT, buildCodeUserPrompt } from "./code-prompts";
 import { matchTemplate } from "./code-templates";
 import { CostMode, pickTier, modelFor, estimateCost } from "./models";
@@ -17,6 +17,10 @@ interface Args {
   userKey?: string | null;
   userProvider?: "claude" | "openrouter" | "local" | null;
   costMode?: CostMode;
+  /** Modo real forçado: nunca cai em template/demo — falha claro se não houver IA. */
+  forceReal?: boolean;
+  /** Permite template enlatado / demo (só quando o usuário aceitar). */
+  allowTemplate?: boolean;
 }
 
 function parse(
@@ -31,6 +35,8 @@ function parse(
     if (typeof j.code !== "string" || !j.code.includes("function App")) return null;
     return {
       provider,
+      engineMode: "real",
+      stats: codeStats(j.code),
       reply: String(j.reply ?? "Pronto! App atualizado."),
       plan: Array.isArray(j.plan) ? j.plan.map(String) : [],
       app: { kind: "app", name: j.name || "App", description: "", code: j.code, provider },
@@ -111,13 +117,15 @@ function App(){
   );
 }`;
   return {
-    provider: "template",
+    provider: "demo",
+    engineMode: "demo",
+    stats: codeStats(code),
     reply:
-      "Sem uma chave de IA configurada, só consigo executar apps prontos ou este exemplo. Conecte uma chave em Configurações para eu escrever qualquer app.",
-    plan: ["Verificar provedor de IA", "Nenhuma chave encontrada", "Carregar app de demonstração"],
-    app: { kind: "app", name: message.slice(0, 40) || "App", description: "", code, provider: "template" },
+      "⚠️ MODO DEMO — nenhuma IA está conectada, então este NÃO é código gerado a partir do seu pedido: é um app de demonstração fixo. Conecte uma chave de IA em Configurações para gerar de verdade.",
+    plan: ["Verificar provedor de IA", "Nenhuma chave encontrada", "Carregar app de DEMONSTRAÇÃO (não é geração real)"],
+    app: { kind: "app", name: message.slice(0, 40) || "App", description: "", code, provider: "demo" },
     cost: 0,
-    model: "template",
+    model: "demo",
   };
 }
 
@@ -147,13 +155,21 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
     const r = await callOpenRouter(process.env.OPENROUTER_API_KEY, a, modelFor(tier, "openrouter"));
     if (r) return r;
   }
-  // 4) template gratuito (só na primeira geração)
-  if (!a.currentCode) {
+  // Em MODO REAL forçado, nunca entregamos template/demo disfarçado:
+  // devolvemos o demo explícito e a rota converte em erro claro (needsKey).
+  if (a.forceReal) {
+    return demoFallback(a.message);
+  }
+
+  // 4) template enlatado (só na primeira geração, quando permitido)
+  if (!a.currentCode && a.allowTemplate) {
     const t = matchTemplate(a.message);
     if (t) {
       return {
         provider: "template",
-        reply: t.reply,
+        engineMode: "template",
+        stats: codeStats(t.code),
+        reply: `📦 TEMPLATE PRONTO (não é geração por IA): ${t.reply}`,
         plan: t.plan,
         app: { kind: "app", name: t.name, description: "", code: t.code, provider: "template" },
         cost: 0,

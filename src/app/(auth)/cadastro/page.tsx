@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { GoogleButton } from "@/components/auth/google-button";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -50,6 +51,12 @@ export default function SignupPage() {
         <CardDescription>Seu primeiro produto fica de pé hoje. Sem cartão de crédito.</CardDescription>
       </CardHeader>
       <CardContent>
+        <GoogleButton next="/onboarding" label="Cadastrar com Google" />
+        <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground">
+          <span className="h-px flex-1 bg-border" />
+          ou com email
+          <span className="h-px flex-1 bg-border" />
+        </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="name">Nome</Label>

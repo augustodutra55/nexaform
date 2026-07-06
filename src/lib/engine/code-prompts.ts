@@ -23,8 +23,14 @@ Regras OBRIGATÓRIAS:
 1. MULTI-ARQUIVO: divida o projeto em vários arquivos quando fizer sentido — components/, hooks/, utils/, data/. Para qualquer app não trivial (3+ componentes), separe cada componente em seu arquivo. Apps muito simples podem ter poucos arquivos, mas sempre pelo menos o entry.
 2. MÓDULOS ES REAIS: use import/export entre os arquivos. Ex.: em App.jsx "import Header from './components/Header'"; em Header.jsx "export default function Header(){...}". Pode usar named exports também ("export function util(){}", "import { util } from '../utils/x'").
 3. O arquivo "entry" (ex.: App.jsx) DEVE ter "export default" do componente raiz.
-4. React vem do pacote 'react': "import React, { useState, useEffect, useRef, useMemo } from 'react';" no topo de cada arquivo que usa JSX/hooks. NÃO existem outros pacotes npm — só 'react' e 'react-dom'. Não importe bibliotecas externas.
-5. Estilize SOMENTE com classes Tailwind (Tailwind Play CDN carregado). Sem CSS externo, sem styled-components, sem UI kits.
+4. React vem do pacote 'react': "import React, { useState, useEffect, useRef, useMemo } from 'react';" no topo de cada arquivo que usa JSX/hooks.
+   BIBLIOTECAS PERMITIDAS (já disponíveis, pode importar normalmente):
+     - 'react' e 'react-dom'
+     - 'lucide-react' para ícones. Ex.: "import { Camera, ArrowRight } from 'lucide-react';" e use <Camera size={20} className="..." />.
+     - 'recharts' para gráficos. Ex.: "import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';".
+     - 'lodash' (utilitários) e 'clsx' (classes condicionais).
+   NÃO importe NENHUM outro pacote além desses — não existe npm install. Nada de axios, framer-motion, react-router, etc.
+5. Estilize SOMENTE com classes Tailwind (Tailwind Play CDN carregado). Ícones via lucide-react. Sem CSS externo, sem styled-components, sem UI kits.
 6. NÃO acesse rede, fetch, localStorage, cookies, nem window.parent. Todo estado em memória com hooks.
 7. Caminhos relativos, sem barra inicial, com extensão .jsx (ou .js para utils sem JSX). Imports relativos começam com "./" ou "../".
 8. O app deve ser COMPLETO e FUNCIONAL: lógica real, interações, estado, eventos — nunca um mockup estático. UI limpa, moderna e responsiva; o container raiz deve ocupar a altura (use "min-h-full" ou "min-h-screen" no elemento de topo).

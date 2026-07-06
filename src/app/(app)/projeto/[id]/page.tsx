@@ -313,6 +313,18 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
         const zip = new JSZip();
         const root = zip.folder(safeName)!;
         for (const f of appFiles) root.file(f.path, f.content);
+        // detecta libs externas usadas para declarar no package.json
+        const allSrc = appFiles.map((f) => f.content).join("\n");
+        const deps: Record<string, string> = { react: "^18.2.0", "react-dom": "^18.2.0" };
+        const versions: Record<string, string> = {
+          "lucide-react": "^0.400.0",
+          recharts: "^2.12.0",
+          lodash: "^4.17.21",
+          clsx: "^2.1.0",
+        };
+        for (const lib of Object.keys(versions)) {
+          if (new RegExp(`from\\s+['"]${lib}['"]`).test(allSrc)) deps[lib] = versions[lib];
+        }
         root.file(
           "package.json",
           JSON.stringify(
@@ -321,7 +333,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
               private: true,
               version: "0.1.0",
               description: `Exportado do AD Studio — entry: ${appEntry ?? appFiles[0].path}`,
-              dependencies: { react: "^18.2.0", "react-dom": "^18.2.0" },
+              dependencies: deps,
             },
             null,
             2

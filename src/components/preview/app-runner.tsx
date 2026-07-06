@@ -98,16 +98,53 @@ function buildSrcDoc(code: string): string {
 }
 
 /**
+ * Bibliotecas externas suportadas via CDN (UMD/global), sem npm install.
+ * Detectamos quais são importadas e injetamos SÓ essas — mantém o preview leve.
+ * `deps` são carregadas antes (ex.: recharts precisa de prop-types).
+ */
+const EXTERNAL_LIBS: Record<string, { url: string; deps?: string[] }> = {
+  "prop-types": { url: "https://unpkg.com/prop-types@15/prop-types.min.js" },
+  recharts: { url: "https://unpkg.com/recharts@2/umd/Recharts.js", deps: ["prop-types"] },
+  lodash: { url: "https://unpkg.com/lodash@4/lodash.min.js" },
+  clsx: { url: "https://unpkg.com/clsx@2/dist/clsx.min.js" },
+  "lucide-react": { url: "https://unpkg.com/lucide@latest/dist/umd/lucide.js" },
+};
+
+/** Detecta imports de libs externas conhecidas no código dos arquivos. */
+function detectExternals(files: AppFile[]): string[] {
+  const all = files.map((f) => f.content).join("\n");
+  const found = new Set<string>();
+  for (const name of Object.keys(EXTERNAL_LIBS)) {
+    if (name === "prop-types") continue; // só como dependência
+    const re = new RegExp(`from\\s+['"]${name.replace(/[/-]/g, "\\$&")}['"]`);
+    if (re.test(all)) found.add(name);
+  }
+  // adiciona dependências (ex.: prop-types p/ recharts), preservando ordem (deps antes)
+  const ordered: string[] = [];
+  const add = (n: string) => {
+    if (ordered.includes(n)) return;
+    (EXTERNAL_LIBS[n].deps ?? []).forEach(add);
+    ordered.push(n);
+  };
+  found.forEach(add);
+  return ordered;
+}
+
+/**
  * Runtime multi-arquivo: cada arquivo vira um módulo CommonJS (Babel), com um
  * `require` que resolve imports relativos (./ ../, extensões, /index) contra um
- * registro de módulos. React/ReactDOM são "externals". É como um bundler mínimo
- * rodando no próprio navegador — sem servidor, sem npm install.
+ * registro de módulos. React/ReactDOM (e libs externas via CDN) são "externals".
+ * É como um bundler mínimo rodando no próprio navegador — sem servidor, sem npm.
  */
 function buildSrcDocMulti(files: AppFile[], entry: string): string {
   const map: Record<string, string> = {};
   for (const f of files) map[f.path.replace(/^\.?\//, "")] = f.content;
   const filesJson = JSON.stringify(map);
   const entryJson = JSON.stringify(entry.replace(/^\.?\//, ""));
+  const externals = detectExternals(files);
+  const extScripts = externals
+    .map((n) => `<script src="${EXTERNAL_LIBS[n].url}" crossorigin></script>`)
+    .join("\n");
   return `<!doctype html>
 <html lang="pt-BR">
 <head>
@@ -117,6 +154,7 @@ function buildSrcDocMulti(files: AppFile[], entry: string): string {
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
 <script src="https://cdn.tailwindcss.com"></script>
+${extScripts}
 <style>
   html,body,#root{height:100%;margin:0}
   body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#0b1020;color:#0f172a}
@@ -152,6 +190,40 @@ function buildSrcDocMulti(files: AppFile[], entry: string): string {
     } catch(e){ var mc='Erro de compilação: '+((e && e.message) || e); showError(mc); nxReport(mc); return; }
 
     var __cache = {};
+
+    // ── Bibliotecas externas (CDN globals) ────────────────────────────────
+    var __lucideCache = null;
+    function lucideShim(){
+      if(__lucideCache) return __lucideCache;
+      var L = window.lucide;
+      var out = {};
+      function make(node){
+        return function(props){
+          props = props || {};
+          var kids = (node||[]).map(function(n,i){ return React.createElement(n[0], Object.assign({key:i}, n[1])); });
+          return React.createElement('svg', {
+            xmlns:'http://www.w3.org/2000/svg', width:props.size||24, height:props.size||24,
+            viewBox:'0 0 24 24', fill:'none', stroke:props.color||'currentColor',
+            strokeWidth:props.strokeWidth||2, strokeLinecap:'round', strokeLinejoin:'round',
+            className:props.className, style:props.style, onClick:props.onClick
+          }, kids);
+        };
+      }
+      if(L && L.icons){ Object.keys(L.icons).forEach(function(name){ out[name] = make(L.icons[name]); }); }
+      __lucideCache = out;
+      return out;
+    }
+    function external(spec){
+      if(spec==='react') return React;
+      if(spec==='react-dom'||spec==='react-dom/client') return ReactDOM;
+      if(spec==='recharts') return window.Recharts;
+      if(spec==='lodash') return window._;
+      if(spec==='clsx') return window.clsx;
+      if(spec==='prop-types') return window.PropTypes;
+      if(spec==='lucide-react') return lucideShim();
+      return undefined;
+    }
+
     function norm(path){
       var parts=path.split('/'), out=[];
       for(var i=0;i<parts.length;i++){ var s=parts[i]; if(s===''||s==='.')continue; if(s==='..')out.pop(); else out.push(s); }
@@ -169,10 +241,13 @@ function buildSrcDocMulti(files: AppFile[], entry: string): string {
       return null;
     }
     function req(from, spec){
-      if(spec==='react') return React;
-      if(spec==='react-dom'||spec==='react-dom/client') return ReactDOM;
+      var ex = external(spec);
+      if(ex !== undefined){
+        if(ex === null) throw new Error('A biblioteca "'+spec+'" não carregou (CDN). Tente recarregar o preview.');
+        return ex;
+      }
       var key = resolve(from, spec);
-      if(!key) throw new Error('Módulo não encontrado: "'+spec+'" (importado de '+(from||'entry')+')');
+      if(!key) throw new Error('Módulo não encontrado: "'+spec+'" (só são suportados imports relativos e as libs: react, react-dom, recharts, lucide-react, lodash, clsx).');
       if(__cache[key]) return __cache[key].exports;
       var module = { exports: {} };
       __cache[key] = module;

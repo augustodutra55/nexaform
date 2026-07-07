@@ -55,6 +55,16 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [appVer, setAppVer] = useState(0);
   const [engineMode, setEngineMode] = useState<EngineMode | null>(null);
   const [appView, setAppView] = useState<"preview" | "code" | "data">("preview");
+  const [views, setViews] = useState<number | null>(null);
+
+  // Visitas do site publicado (analytics agregado). Só busca quando publicado.
+  useEffect(() => {
+    if (!project?.published || !projectId) return;
+    fetch(`/api/view/${projectId}`)
+      .then((r) => r.json())
+      .then((d) => setViews(typeof d?.views === "number" ? d.views : 0))
+      .catch(() => {});
+  }, [project?.published, projectId]);
 
   // AppCode atual (multi-arquivo ou single-file legado) para salvar/publicar/exportar.
   const currentApp = useCallback(
@@ -551,6 +561,15 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                     Dados
                   </button>
                 </div>
+                {project?.published && views !== null && (
+                  <span
+                    className="ml-auto inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground"
+                    title="Visitas do site publicado"
+                  >
+                    <span aria-hidden>👁</span>
+                    {views.toLocaleString("pt-BR")} {views === 1 ? "visita" : "visitas"}
+                  </span>
+                )}
               </div>
               <div className="min-h-0 flex-1">
                 {appView === "data" ? (

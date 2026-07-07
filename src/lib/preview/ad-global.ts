@@ -43,6 +43,15 @@ export function adGlobalScript(projectId?: string | null): string {
     }
   };
 
+  // ── Analytics de visita (só no site PUBLICADO, marcado por __AD_PUBLISHED) ──
+  // Conta uma visita por carregamento. Agregado e anônimo. No preview do editor
+  // o marcador não existe, então não conta.
+  try {
+    if (window.__AD_PUBLISHED && PID) {
+      fetch('/api/view/' + PID, { method: 'POST', keepalive: true }).catch(function(){});
+    }
+  } catch(e){}
+
   // ── Login de usuário final (window.AD.auth) ──────────────────────────
   var TKEY = 'adstudio:app-token:' + PID;
   function getTok(){ try { return localStorage.getItem(TKEY) || null; } catch(e){ return window.__adTok || null; } }

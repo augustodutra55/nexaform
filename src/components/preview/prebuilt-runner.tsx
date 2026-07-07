@@ -11,7 +11,10 @@ import { buildBundledSrcDoc } from "@/lib/preview/bundler";
  * bundle salvo; caso contrário a página pública cai no AppRunner (fallback).
  */
 export function PrebuiltRunner({ bundle, projectId }: { bundle: string; projectId?: string | null }) {
-  const srcDoc = useMemo(() => buildBundledSrcDoc(bundle, projectId ?? null), [bundle, projectId]);
+  const srcDoc = useMemo(
+    () => buildBundledSrcDoc(bundle, projectId ?? null, { published: true }),
+    [bundle, projectId]
+  );
   return (
     <iframe
       title="App publicado"

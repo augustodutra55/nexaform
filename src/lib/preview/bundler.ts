@@ -168,8 +168,14 @@ export async function bundleApp(files: AppFile[], entry: string): Promise<Bundle
 }
 
 /** HTML do iframe: import map (React único) + Tailwind + bundle ESM + ponte de erros. */
-export function buildBundledSrcDoc(bundledCode: string, projectId?: string | null): string {
+export function buildBundledSrcDoc(
+  bundledCode: string,
+  projectId?: string | null,
+  opts?: { published?: boolean }
+): string {
   const adScript = adGlobalScript(projectId);
+  // Marcador só no site publicado: liga o analytics de visita do runtime (window.AD).
+  const publishedMark = opts?.published ? `<script>window.__AD_PUBLISHED=1</script>` : "";
   const importMap = {
     imports: {
       react: `https://esm.sh/react@${REACT_VERSION}`,
@@ -196,6 +202,7 @@ export function buildBundledSrcDoc(bundledCode: string, projectId?: string | nul
 </head>
 <body>
 <div id="root"></div>
+${publishedMark}
 ${adScript}
 <script>
   var _nxHost = window.parent;

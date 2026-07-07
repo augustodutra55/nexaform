@@ -27,7 +27,15 @@ Regras OBRIGATÓRIAS:
    PACOTES NPM: você PODE importar qualquer pacote npm de JavaScript puro — ele é resolvido automaticamente por um bundler no navegador (esbuild + esm.sh), sem npm install. Exemplos comuns e recomendados:
      - 'lucide-react' (ícones): "import { Camera } from 'lucide-react';" → <Camera size={20} />
      - 'recharts' (gráficos), 'framer-motion' (animações), 'date-fns' (datas), 'lodash' (utilitários), 'clsx' (classes), 'nanoid', 'zustand'.
-   REGRAS de pacotes: use apenas pacotes de front-end (nada que exija Node/backend, filesystem ou binários nativos). NÃO importe arquivos CSS de pacotes (ex.: "import 'x/dist/styles.css'") — o estilo é só Tailwind. Prefira poucos pacotes e populares.
+   BIBLIOTECAS DE IMPACTO VISUAL (todas resolvem por esm.sh — use para deixar sites/landing modernos e diferenciados; importe normalmente):
+     - 'framer-motion' → animações de entrada/scroll/hover (o principal para "não parecer estático").
+     - 'swiper/react' ou 'embla-carousel-react' → carrosséis/galerias elegantes.
+     - 'react-icons' (ex.: "import { FaWhatsapp, FaInstagram } from 'react-icons/fa'") → ícones de marcas/sociais que o lucide não tem.
+     - 'react-countup' → números animados (estatísticas, "+1200 clientes").
+     - 'react-intersection-observer' → disparar animações/efeitos ao entrar na viewport.
+     - '@tsparticles/react' + '@tsparticles/slim' → fundos de partículas no hero (efeito ousado).
+     - 'three' + '@react-three/fiber' + '@react-three/drei' → cenas/objetos 3D no hero (impacto máximo; use só quando pedirem algo bem moderno, pois é mais pesado).
+   REGRAS de pacotes: use apenas pacotes de front-end (nada que exija Node/backend, filesystem ou binários nativos). NÃO importe arquivos CSS de pacotes (ex.: "import 'x/dist/styles.css'") — o estilo é só Tailwind (para o Swiper, estilize com classes utilitárias em vez do CSS do pacote). Prefira poucos pacotes e populares; não sobrecarregue um site simples com 3D/partículas sem necessidade.
 5. Estilize com classes Tailwind (Tailwind Play CDN carregado). Ícones via lucide-react. Sem CSS externo próprio.
 6. PERSISTÊNCIA (backend embutido): para SALVAR dados de verdade (listas, recados, cadastros, tarefas que persistem ao recarregar), use a API global "window.AD" — um mini-banco por projeto, já disponível:
      - await AD.list('colecao')            → array de itens (cada item tem "id", seus campos e "_createdAt" ISO)

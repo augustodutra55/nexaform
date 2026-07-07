@@ -36,5 +36,38 @@ export function adGlobalScript(projectId?: string | null): string {
     }
   };
 })();
+</script>
+<script>
+/* Guard de navegação — impede o app gerado de "escapar" do preview.
+   Sem isto, um <a href="/rota"> ou react-router faz o iframe carregar o
+   próprio AD Studio (o app pai) no lugar do app. Aqui interceptamos:
+   - cliques em links relativos / mesma-origem → bloqueados (SPA deve usar estado);
+     links "#âncora" viram troca de hash (mantém no iframe);
+   - links externos http(s) de outra origem → abrem em nova aba;
+   - submit de formulários sem URL externa → default prevenido (nada de reload);
+   - history.pushState/replaceState em srcdoc (origin null) → erro engolido. */
+(function(){
+  function isExternalHttp(u){ try { var url = new URL(u, location.href); return /^https?:$/.test(url.protocol) && url.origin !== location.origin; } catch(e){ return false; } }
+  document.addEventListener('click', function(e){
+    var a = e.target && e.target.closest ? e.target.closest('a') : null;
+    if(!a) return;
+    var href = a.getAttribute('href');
+    if(href == null) return;
+    if(href === '' || href === '#'){ e.preventDefault(); return; }
+    if(/^(mailto:|tel:|sms:|whatsapp:)/i.test(href)) return;           // protocolos: deixa
+    if(isExternalHttp(href)){ if(!a.target) a.target = '_blank'; return; } // externo → nova aba
+    e.preventDefault();                                                 // relativo/mesma-origem → bloqueia navegação
+    if(href.charAt(0) === '#'){ try { location.hash = href; } catch(_){ } } // hash → mantém SPA
+  }, true);
+  document.addEventListener('submit', function(e){
+    var form = e.target;
+    var action = (form && form.getAttribute) ? (form.getAttribute('action') || '') : '';
+    if(!isExternalHttp(action)) e.preventDefault(); // evita reload/navegação; o onSubmit do React ainda roda
+  }, true);
+  ['pushState','replaceState'].forEach(function(m){
+    var orig = history[m];
+    if(orig) history[m] = function(){ try { return orig.apply(history, arguments); } catch(err){ /* srcdoc origin null: ignora */ } };
+  });
+})();
 </script>`;
 }

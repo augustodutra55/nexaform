@@ -12,7 +12,7 @@
  * o código do usuário fica isolado da app e dos cookies/sessão.
  */
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Loader2, Monitor, Smartphone, RefreshCw, Cpu, Layout } from "lucide-react";
+import { AlertTriangle, Loader2, Monitor, Smartphone, RefreshCw, Cpu, Layout, Maximize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AppFile, EngineMode } from "@/lib/engine/app-types";
 import { bundleApp, buildBundledSrcDoc } from "@/lib/preview/bundler";
@@ -391,6 +391,19 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
           >
             <Smartphone className="h-4 w-4" />
           </button>
+          <button
+            onClick={() => {
+              const el = iframeRef.current as any;
+              if (!el) return;
+              const req = el.requestFullscreen || el.webkitRequestFullscreen || el.webkitEnterFullscreen;
+              if (req) req.call(el);
+            }}
+            aria-label="Tela cheia"
+            title="Ver em tela cheia"
+            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          >
+            <Maximize2 className="h-4 w-4" />
+          </button>
         </div>
       </div>
 
@@ -420,6 +433,7 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
               sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-modals"
               srcDoc={srcDoc}
               onLoad={() => setLoading(false)}
+              allowFullScreen
               className="h-full w-full border-0 bg-white"
             />
           </div>

@@ -35,6 +35,25 @@ export function adGlobalScript(projectId?: string | null): string {
         .then(function(r){ return r.url; });
     }
   };
+
+  // ── Login de usuário final (window.AD.auth) ──────────────────────────
+  var TKEY = 'adstudio:app-token:' + PID;
+  function getTok(){ try { return localStorage.getItem(TKEY) || null; } catch(e){ return window.__adTok || null; } }
+  function setTok(t){ try { if(t) localStorage.setItem(TKEY, t); else localStorage.removeItem(TKEY); } catch(e){ window.__adTok = t; } }
+  function authFetch(opts){
+    opts = opts || {};
+    var h = { 'content-type':'application/json' };
+    var tok = getTok(); if(tok) h['authorization'] = 'Bearer ' + tok;
+    return fetch('/api/app-auth/' + PID + (opts.qs||''), { method: opts.method||'POST', headers: h, body: opts.body ? JSON.stringify(opts.body) : undefined })
+      .then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error(j.error || ('auth '+r.status)); return j; }); });
+  }
+  window.AD.auth = {
+    signUp: function(email, password, name){ return authFetch({ body:{ action:'signup', email:email, password:password, name:name } }).then(function(j){ setTok(j.token); return j.user; }); },
+    signIn: function(email, password){ return authFetch({ body:{ action:'login', email:email, password:password } }).then(function(j){ setTok(j.token); return j.user; }); },
+    signOut: function(){ return authFetch({ body:{ action:'logout' } }).catch(function(){}).then(function(){ setTok(null); return true; }); },
+    me: function(){ if(!getTok()) return Promise.resolve(null); return authFetch({ method:'GET', qs:'?me=1' }).then(function(j){ return j.user; }).catch(function(){ return null; }); },
+    token: getTok
+  };
 })();
 </script>
 <script>

@@ -134,20 +134,24 @@ export function adGlobalScript(projectId?: string | null): string {
 (function(){
   function revealStuck(){
     try{
-      var els = document.querySelectorAll('[style]');
+      var els = document.querySelectorAll('section,div,article,h1,h2,h3,p,span,img,ul,li,a,button');
       for(var i=0;i<els.length;i++){
-        var el = els[i], s = el.getAttribute('style') || '';
-        var m = /(?:^|;)\\s*opacity:\\s*([0-9.]+)/.exec(s);
-        if(m && parseFloat(m[1]) < 0.35){
-          var cs = window.getComputedStyle(el);
-          if(cs.position === 'fixed') continue;              // não revela modais/overlays fixos
+        var el = els[i];
+        var cs = window.getComputedStyle(el);
+        if(cs.position === 'fixed') continue;                // não revela modais/overlays fixos
+        if(parseFloat(cs.opacity) < 0.35){                   // opacity baixa (inline OU via Web Animations)
           var r = el.getBoundingClientRect();
-          if(r.width > 100 && r.height > 36){ el.style.opacity = '1'; el.style.transform = 'none'; }
+          if(r.width > 100 && r.height > 36){
+            // framer-motion segura a opacity via Web Animations API — cancela a animação travada
+            if(el.getAnimations){ try { el.getAnimations().forEach(function(a){ a.cancel(); }); } catch(e){} }
+            el.style.opacity = '1';
+            el.style.transform = 'none';
+          }
         }
       }
     }catch(e){}
   }
-  function schedule(){ [700,1500,2600,4200].forEach(function(t){ setTimeout(revealStuck, t); }); }
+  function schedule(){ [700,1400,2400,3600,5200].forEach(function(t){ setTimeout(revealStuck, t); }); }
   if(document.readyState === 'complete') schedule(); else window.addEventListener('load', schedule);
 })();
 </script>`;

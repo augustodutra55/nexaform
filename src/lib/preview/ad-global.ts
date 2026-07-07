@@ -10,7 +10,7 @@ export function adGlobalScript(projectId?: string | null): string {
 (function(){
   var PID = ${pid};
   function noop(){ return Promise.resolve(); }
-  if(!PID){ window.AD = { list:function(){return Promise.resolve([]);}, insert:noop, update:noop, remove:noop, enabled:false }; return; }
+  if(!PID){ window.AD = { list:function(){return Promise.resolve([]);}, insert:noop, update:noop, remove:noop, email:noop, enabled:false }; return; }
   var base = '/api/data/' + PID;
   function req(method, opts){
     opts = opts || {};
@@ -33,6 +33,13 @@ export function adGlobalScript(projectId?: string | null): string {
       return fetch('/api/upload/' + PID, { method:'POST', body: fd })
         .then(function(r){ if(!r.ok) return r.json().then(function(e){ throw new Error(e.error||('upload '+r.status)); }); return r.json(); })
         .then(function(r){ return r.url; });
+    },
+    // Formulário de contato: salva a mensagem no painel de Dados (coleção 'contatos')
+    // e, se houver provedor de e-mail configurado, avisa o dono por e-mail.
+    // Ex.: await AD.email({ name, email, subject, message }) → { ok, saved, emailed }
+    email: function(payload){
+      return fetch('/api/email/' + PID, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload||{}) })
+        .then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error(j.error||('email '+r.status)); return j; }); });
     }
   };
 

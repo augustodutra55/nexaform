@@ -124,5 +124,31 @@ export function adGlobalScript(projectId?: string | null): string {
     if(orig) history[m] = function(){ try { return orig.apply(history, arguments); } catch(err){ /* srcdoc origin null: ignora */ } };
   });
 })();
+</script>
+<script>
+/* Rede de segurança de animações: o framer-motion "whileInView" (anima ao rolar)
+   NÃO dispara em about:srcdoc (origem opaca), então seções inteiras ficariam
+   invisíveis (presas em opacity 0). Aqui, após dar tempo às animações de montagem
+   (que funcionam), revelamos qualquer elemento em fluxo que ficou preso em opacity
+   baixa — sem tocar em overlays fixos (modais). Garante que nada suma. */
+(function(){
+  function revealStuck(){
+    try{
+      var els = document.querySelectorAll('[style]');
+      for(var i=0;i<els.length;i++){
+        var el = els[i], s = el.getAttribute('style') || '';
+        var m = /(?:^|;)\\s*opacity:\\s*([0-9.]+)/.exec(s);
+        if(m && parseFloat(m[1]) < 0.35){
+          var cs = window.getComputedStyle(el);
+          if(cs.position === 'fixed') continue;              // não revela modais/overlays fixos
+          var r = el.getBoundingClientRect();
+          if(r.width > 100 && r.height > 36){ el.style.opacity = '1'; el.style.transform = 'none'; }
+        }
+      }
+    }catch(e){}
+  }
+  function schedule(){ [700,1500,2600,4200].forEach(function(t){ setTimeout(revealStuck, t); }); }
+  if(document.readyState === 'complete') schedule(); else window.addEventListener('load', schedule);
+})();
 </script>`;
 }

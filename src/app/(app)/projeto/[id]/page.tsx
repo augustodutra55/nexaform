@@ -13,6 +13,7 @@ import { ProjectMeta, readMeta } from "@/lib/studio";
 import { cn } from "@/lib/utils";
 import { ChatPanel, ProjectMode } from "@/components/project/chat-panel";
 import { CodePanel } from "@/components/project/code-panel";
+import { DataPanel } from "@/components/project/data-panel";
 import { EditorPanel } from "@/components/project/editor-panel";
 import { ProjectTopbar, VersionRow } from "@/components/project/project-topbar";
 import { PreviewPane } from "@/components/preview/preview-pane";
@@ -52,7 +53,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [appName, setAppName] = useState<string>("App");
   const [appVer, setAppVer] = useState(0);
   const [engineMode, setEngineMode] = useState<EngineMode | null>(null);
-  const [appView, setAppView] = useState<"preview" | "code">("preview");
+  const [appView, setAppView] = useState<"preview" | "code" | "data">("preview");
 
   // AppCode atual (multi-arquivo ou single-file legado) para salvar/publicar/exportar.
   const currentApp = useCallback(
@@ -512,10 +513,22 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                   >
                     Código{codeFiles.length > 1 ? ` · ${codeFiles.length}` : ""}
                   </button>
+                  <button
+                    onClick={() => setAppView("data")}
+                    title="Gerencie os dados do app (produtos, cadastros…) — o app lê via AD.list"
+                    className={cn(
+                      "rounded-md px-2.5 py-1 font-medium transition-colors",
+                      appView === "data" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Dados
+                  </button>
                 </div>
               </div>
               <div className="min-h-0 flex-1">
-                {appView === "code" && codeFiles.length ? (
+                {appView === "data" ? (
+                  <DataPanel projectId={projectId} />
+                ) : appView === "code" && codeFiles.length ? (
                   <CodePanel files={codeFiles} entry={appEntry} onApply={handleApplyCode} />
                 ) : (
                   <AppRunner

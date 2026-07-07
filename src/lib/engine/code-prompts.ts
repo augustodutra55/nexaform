@@ -36,7 +36,8 @@ Regras OBRIGATÓRIAS:
      - '@tsparticles/react' + '@tsparticles/slim' → fundos de partículas no hero (efeito ousado).
      - 'three' + '@react-three/fiber' + '@react-three/drei' → cenas/objetos 3D no hero (impacto máximo; use só quando pedirem algo bem moderno, pois é mais pesado).
    REGRAS de pacotes: use apenas pacotes de front-end (nada que exija Node/backend, filesystem ou binários nativos). NÃO importe arquivos CSS de pacotes (ex.: "import 'x/dist/styles.css'") — o estilo é só Tailwind (para o Swiper, estilize com classes utilitárias em vez do CSS do pacote). Prefira poucos pacotes e populares; não sobrecarregue um site simples com 3D/partículas sem necessidade.
-5. Estilize com classes Tailwind (Tailwind Play CDN carregado). Ícones via lucide-react. Sem CSS externo próprio.
+5. Estilize com classes Tailwind (Tailwind Play CDN carregado). Ícones de interface via lucide-react. Sem CSS externo próprio.
+   ATENÇÃO — ÍCONES DE MARCA/REDES SOCIAIS: o lucide-react NÃO possui ícones de marcas (Facebook, Instagram, WhatsApp, YouTube, TikTok, LinkedIn, X/Twitter etc.) — importar isso do lucide QUEBRA o app. Para redes sociais/marcas use SEMPRE 'react-icons' (ex.: "import { FaInstagram, FaFacebookF, FaWhatsapp, FaYoutube, FaTiktok, FaLinkedinIn } from 'react-icons/fa';" ou 'react-icons/fa6'). Só importe do lucide-react nomes de ícones genéricos que você tem certeza que existem.
 6. PERSISTÊNCIA (backend embutido): para SALVAR dados de verdade (listas, recados, cadastros, tarefas que persistem ao recarregar), use a API global "window.AD" — um mini-banco por projeto, já disponível:
      - await AD.list('colecao')            → array de itens (cada item tem "id", seus campos e "_createdAt" ISO)
      - await AD.insert('colecao', {campos}) → cria e retorna o item com "id"

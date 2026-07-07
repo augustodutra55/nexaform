@@ -67,6 +67,26 @@ export function adGlobalScript(projectId?: string | null): string {
    - history.pushState/replaceState em srcdoc (origin null) → erro engolido. */
 (function(){
   function isExternalHttp(u){ try { var url = new URL(u, location.href); return /^https?:$/.test(url.protocol) && url.origin !== location.origin; } catch(e){ return false; } }
+  // ── Correção de submit em about:srcdoc (origem opaca "null") ──────────
+  // No preview o app roda em about:srcdoc, cuja origem é opaca; o navegador
+  // BLOQUEIA a submissão nativa de formulários (o evento 'submit' nem dispara),
+  // deixando botões de login/cadastro/contato inertes. Aqui, SOMENTE no preview
+  // srcdoc, interceptamos o clique num botão de submit e emitimos um 'submit' que
+  // borbulha — assim o onSubmit do React roda normalmente. Em apps publicados
+  // (origem http real) a submissão nativa funciona e este bloco NÃO é ativado,
+  // evitando qualquer duplicação.
+  var IS_SRCDOC = (location.href === 'about:srcdoc' || location.origin === 'null');
+  if (IS_SRCDOC) {
+    document.addEventListener('click', function(e){
+      var t = e.target;
+      var sb = t && t.closest ? t.closest('button[type="submit"], input[type="submit"], button:not([type])') : null;
+      if(!sb || sb.disabled) return;
+      var form = sb.form || (sb.closest ? sb.closest('form') : null);
+      if(!form) return;
+      e.preventDefault();                                  // a submissão nativa está bloqueada mesmo
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    }, true);
+  }
   document.addEventListener('click', function(e){
     var a = e.target && e.target.closest ? e.target.closest('a') : null;
     if(!a) return;

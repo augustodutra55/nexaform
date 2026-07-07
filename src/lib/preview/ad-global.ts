@@ -151,7 +151,13 @@ export function adGlobalScript(projectId?: string | null): string {
       }
     }catch(e){}
   }
-  function schedule(){ [700,1400,2400,3600,5200].forEach(function(t){ setTimeout(revealStuck, t); }); }
+  function schedule(){
+    [500,1100,1900,3000].forEach(function(t){ setTimeout(revealStuck, t); });
+    // Persistente: o framer-motion re-esconde ao re-renderizar/rolar no srcdoc,
+    // então revarremos por ~15s e também a cada scroll, mantendo tudo visível.
+    var n = 0, iv = setInterval(function(){ revealStuck(); if(++n > 26) clearInterval(iv); }, 600);
+    window.addEventListener('scroll', revealStuck, { passive: true });
+  }
   if(document.readyState === 'complete') schedule(); else window.addEventListener('load', schedule);
 })();
 </script>`;

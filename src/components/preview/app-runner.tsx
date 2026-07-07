@@ -12,7 +12,7 @@
  * o código do usuário fica isolado da app e dos cookies/sessão.
  */
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Loader2, Monitor, Smartphone, RefreshCw, Cpu, Layout, Maximize2 } from "lucide-react";
+import { AlertTriangle, Loader2, Monitor, Smartphone, RefreshCw, Cpu, Layout, Maximize2, Minimize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AppFile, EngineMode } from "@/lib/engine/app-types";
 import { bundleApp, buildBundledSrcDoc } from "@/lib/preview/bundler";
@@ -278,6 +278,7 @@ ${adScript}
 
 export function AppRunner({ code, files, entry, version, engineMode, projectId, onError }: AppRunnerProps) {
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
   const [srcDoc, setSrcDoc] = useState("");
@@ -335,8 +336,15 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
     return () => window.removeEventListener("message", onMsg);
   }, []);
 
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setExpanded(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expanded]);
+
   return (
-    <div className="flex h-full flex-col">
+    <div className={cn("flex flex-col", expanded ? "fixed inset-0 z-50 bg-background" : "h-full")}>
       <div className="flex items-center justify-between border-b px-3 py-2">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="flex h-2 w-2 rounded-full bg-emerald-500" />
@@ -392,17 +400,15 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
             <Smartphone className="h-4 w-4" />
           </button>
           <button
-            onClick={() => {
-              const el = iframeRef.current as any;
-              if (!el) return;
-              const req = el.requestFullscreen || el.webkitRequestFullscreen || el.webkitEnterFullscreen;
-              if (req) req.call(el);
-            }}
-            aria-label="Tela cheia"
-            title="Ver em tela cheia"
-            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            onClick={() => setExpanded((v) => !v)}
+            aria-label={expanded ? "Sair da tela cheia" : "Ver em tela cheia"}
+            title={expanded ? "Sair da tela cheia (Esc)" : "Ver em tela cheia"}
+            className={cn(
+              "rounded-md p-1.5 transition-colors hover:bg-secondary hover:text-foreground",
+              expanded ? "bg-secondary text-foreground" : "text-muted-foreground"
+            )}
           >
-            <Maximize2 className="h-4 w-4" />
+            {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
           </button>
         </div>
       </div>

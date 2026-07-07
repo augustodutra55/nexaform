@@ -18,6 +18,7 @@ import { EditorPanel } from "@/components/project/editor-panel";
 import { ProjectTopbar, VersionRow } from "@/components/project/project-topbar";
 import { PreviewPane } from "@/components/preview/preview-pane";
 import { AppRunner } from "@/components/preview/app-runner";
+import { bundleApp } from "@/lib/preview/bundler";
 import { Skeleton } from "@/components/ui/skeleton";
 
 interface ProjectRow {
@@ -268,7 +269,33 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
     const slug = project.share_slug ?? nanoid(10);
     const payload = mode === "app" ? appPayload : store.schema;
-    const { error } = await supabase.from("projects").update({ published: true, share_slug: slug, schema: payload }).eq("id", project.id);
+
+    // Build de produção: pré-compila o app AGORA (esbuild-wasm já carregado) e
+    // salva o bundle para o site publicado carregar sem Babel/esbuild no visitante.
+    // Se falhar, salva null → a página pública cai no runtime completo (fallback).
+    let buildBundle: string | null = null;
+    if (mode === "app") {
+      try {
+        const files: AppFile[] =
+          appFiles && appFiles.length
+            ? appFiles
+            : appCode
+            ? [{ path: "App.jsx", content: appCode }]
+            : [];
+        const entry = appEntry ?? files[0]?.path;
+        if (files.length && entry) {
+          const { code } = await bundleApp(files, entry);
+          buildBundle = code;
+        }
+      } catch {
+        buildBundle = null; // fallback seguro
+      }
+    }
+
+    const { error } = await supabase
+      .from("projects")
+      .update({ published: true, share_slug: slug, schema: payload, build_bundle: buildBundle })
+      .eq("id", project.id);
     if (error) {
       toast.error("Não foi possível publicar");
       return null;

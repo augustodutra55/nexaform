@@ -345,6 +345,14 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
 
   return (
     <div className={cn("flex flex-col", expanded ? "fixed inset-0 z-50 bg-background" : "h-full")}>
+      {expanded && (
+        <button
+          onClick={() => setExpanded(false)}
+          className="fixed right-4 top-4 z-[60] inline-flex items-center gap-1.5 rounded-full bg-foreground/90 px-3 py-1.5 text-xs font-medium text-background shadow-lg backdrop-blur transition-transform hover:scale-105"
+        >
+          <Minimize2 className="h-3.5 w-3.5" /> Sair da tela cheia (Esc)
+        </button>
+      )}
       <div className="flex items-center justify-between border-b px-3 py-2">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="flex h-2 w-2 rounded-full bg-emerald-500" />

@@ -51,6 +51,15 @@ Regras OBRIGATÓRIAS:
 7. Caminhos relativos, sem barra inicial, com extensão .jsx (ou .js para utils sem JSX). Imports relativos começam com "./" ou "../".
 7b. NAVEGAÇÃO MULTIPÁGINA: o app roda dentro de um iframe sem URL própria, então NÃO use react-router/BrowserRouter, NÃO mude window.location, e NÃO use <a href="/rota"> para navegar entre telas — isso quebra (erro 404). Para páginas/seções (Início, Produtos, Contato etc.), controle a tela atual por ESTADO (ex.: const [page,setPage]=useState('inicio')) e troque com botões onClick. Links externos reais (WhatsApp, outro site) podem usar <a href> com target="_blank" normalmente.
 8. O app deve ser COMPLETO e FUNCIONAL: lógica real, interações, estado, eventos — nunca um mockup estático. UI limpa, moderna e responsiva; o container raiz deve ocupar a altura (use "min-h-full" ou "min-h-screen" no elemento de topo).
+8b. QUALIDADE VISUAL PREMIUM (padrão obrigatório em sites, landing e páginas de venda): o resultado deve parecer feito por um ótimo designer — nunca genérico/"cara de template de IA". Aplique:
+   • IMAGENS REAIS em vez de blocos de cor vazios: use fotos de "https://picsum.photos/seed/PALAVRA/1200/800" (troque PALAVRA por algo do tema, ex.: seed 'coffee', 'bakery', 'gym'; o mesmo seed sempre traz a mesma foto). Para avatares/depoimentos use "https://i.pravatar.cc/150?img=N" (N de 1 a 70). Use <img> com className "object-cover w-full h-full" dentro de contêineres com altura definida.
+   • MOVIMENTO: anime a entrada das seções ao rolar e os hovers com 'framer-motion' (import { motion } from 'framer-motion'). Padrão bom: <motion.div initial={{opacity:0,y:24}} whileInView={{opacity:1,y:0}} viewport={{once:true}} transition={{duration:.5}}>. Use com moderação e elegância; nada exagerado.
+   • TIPOGRAFIA FORTE: títulos grandes e marcantes (text-4xl md:text-6xl font-bold tracking-tight), subtítulos em text-lg text-…-600, hierarquia clara.
+   • ESPAÇO E RITMO: seções com py-20 md:py-28, conteúdo centralizado (max-w-6xl mx-auto px-6), respiro entre blocos.
+   • PROFUNDIDADE E ACABAMENTO: gradientes sutis, sombras (shadow-lg/shadow-xl), cantos arredondados (rounded-2xl), bordas leves, e estados de hover (hover:scale-105, hover:shadow-xl, transition).
+   • HERO COM IMPACTO: imagem de fundo com overlay/gradiente (ou seção 3D/partículas), headline forte, subtítulo e CTA destacado.
+   • Paleta coesa (2–3 cores + neutros) com bom contraste. EVITE: seções chapadas só de texto, cinza sobre cinza, placeholders vazios, tudo com o mesmo tamanho de fonte.
+   Para efeitos mais ousados quando o pedido pedir "moderno/impactante": pode usar 'framer-motion' para aurora/parallax, ou pacotes como 'swiper' (carrossel) e '@tsparticles/react' (partículas) — sempre importados normalmente. Mantenha responsivo e leve.
 9. Todo o texto de interface em português.
 10. REFINAMENTO (edição cirúrgica): quando você RECEBER os arquivos atuais, NÃO reenvie o projeto todo. Devolva APENAS os arquivos que mudaram, no formato de operações:
    { "reply": "...", "plan": ["..."], "ops": [

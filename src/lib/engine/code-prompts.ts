@@ -76,6 +76,12 @@ Regras OBRIGATÓRIAS:
    • COR COM DISCIPLINA: 1 cor de marca + 1 de apoio + neutros; use a de marca com parcimônia (CTAs/destaques). Prefira neutros levemente tingidos (stone/zinc/slate) a cinza puro. Contraste AA sempre.
    • ACABAMENTO: bordas de 1px sutis, sombras suaves EM CAMADAS (não uma sombra dura), raios de canto consistentes, ícones alinhados ao texto, hovers discretos, e UM único "momento de destaque" por seção (uma imagem grande, um número, uma frase forte) — não encha tudo de destaque.
    • MIRE em landing pages premium reais (estúdios de design, SaaS bem-feito): hero editorial com foto/arte forte + tipografia grande + muito espaço. EVITE: hero centralizado com um parágrafo e dois botões; três cards iguais com ícone+título+texto; tudo em text-gray-600.
+8d. DINAMISMO OBRIGATÓRIO (sites/landing NÃO podem ser estáticos — página parada é o que mais dá "cara de IA"). Todo site/landing/página de venda DEVE incluir, de forma elegante e coerente com o tema, NO MÍNIMO os itens (a), (b) e (c):
+   (a) MOVIMENTO CINEMATOGRÁFICO no hero — escolha UM: um <video> mudo em loop de fundo; OU efeito Ken Burns (zoom/pan lento e infinito via framer-motion numa foto); OU gradiente/partículas animadas em <canvas>. Modelo de vídeo de fundo (o dono troca a fonte depois): <video autoPlay muted loop playsInline className="absolute inset-0 w-full h-full object-cover"><source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" type="video/mp4" /></video> com um overlay escuro (div absolute inset-0 bg-black/50) por cima para legibilidade, e o conteúdo do hero em position relative acima.
+   (b) UM CARROSSEL DE VERDADE com swiper — import: import { Swiper, SwiperSlide } from 'swiper/react'; import { Autoplay } from 'swiper/modules'; uso: <Swiper modules={[Autoplay]} autoplay={{ delay: 2500 }} loop spaceBetween={24} slidesPerView={1} breakpoints={{ 768: { slidesPerView: 3 } }}> <SwiperSlide> ...card... </SwiperSlide> ...</Swiper>. Estilize slides só com Tailwind (NÃO importe CSS do swiper). Use para projetos, galeria, depoimentos ou faixa de logos.
+   (c) NÚMEROS ANIMADOS com react-countup numa faixa de estatísticas: import CountUp from 'react-countup'; <CountUp end={1200} duration={2} separator="." />+ (dispare ao montar; não dependa de scroll).
+   (d) DESEJÁVEL: marquee (faixa deslizante infinita de logos/palavras via animação), microinterações fortes em hover (scale/shadow/translate), parallax sutil, tilt nos cards.
+   Nada de efeito gratuito: cada elemento dinâmico tem um propósito. Para APPS utilitários/jogos/ferramentas, ignore esta regra (ela é só para sites/landing).
 9. Todo o texto de interface em português.
 10. REFINAMENTO (edição cirúrgica): quando você RECEBER os arquivos atuais, NÃO reenvie o projeto todo. Devolva APENAS os arquivos que mudaram, no formato de operações:
    { "reply": "...", "plan": ["..."], "ops": [
@@ -92,12 +98,71 @@ export function serializeFiles(files: { path: string; content: string }[]): stri
   return files.map((f) => `--- ARQUIVO: ${f.path} ---\n${f.content}`).join("\n\n");
 }
 
+function pick<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+/**
+ * Briefing de design SORTEADO por geração — o que garante que dois sites nunca
+ * saiam iguais. Combina um arquétipo de hero, uma paleta/mood, um motivo de
+ * layout e um estilo de movimento, todos aleatórios. Injetado no prompt do
+ * usuário só na PRIMEIRA geração de um site (não em refinamentos nem em apps).
+ */
+export function buildDesignBrief(): string {
+  const hero = pick([
+    "SPLIT-SCREEN: headline forte + CTA à esquerda, mídia grande (imagem OU vídeo) ocupando a metade direita inteira.",
+    "FULL-BLEED IMERSIVO: vídeo ou imagem cobrindo a tela toda, overlay escuro, headline gigante ancorada embaixo à esquerda.",
+    "EDITORIAL ASSIMÉTRICO: headline enorme quebrada em 2–3 linhas ocupando a largura, imagem deslocada que vaza a margem e se sobrepõe ao texto.",
+    "BENTO HERO: um mosaico de blocos (headline, foto, número animado, CTA, mini-carrossel) como um grid irregular.",
+    "CARROSSEL DE FUNDO: swiper trocando imagens de tela cheia automaticamente atrás de uma headline fixa.",
+    "TIPOGRAFIA GIGANTE: hero minimalista de texto enorme sobre gradiente/partículas animadas em canvas, quase sem imagem.",
+  ]);
+  const mood = pick([
+    "ESCURO SOFISTICADO: fundo quase-preto (zinc-950) + 1 cor de acento vibrante; muito contraste.",
+    "CLARO PREMIUM: off-white/stone-50 + um tom terroso quente + texto quase-preto; ar de revista.",
+    "OUSADO COLORIDO: uma cor saturada dominante em grandes áreas + neutros; blocos de cor chapada.",
+    "MONOCROMÁTICO EDITORIAL: escala de cinzas/neutros + UM acento neon usado com parcimônia.",
+    "NATURAL ORGÂNICO: verdes/terrosos, bege, madeira; cantos suaves, sensação calma.",
+    "TECH FRIO: azul-marinho profundo + ciano/elétrico; linhas finas, brilhos sutis, vibe de produto.",
+  ]);
+  const layout = pick([
+    "alterne seções esquerda/direita (zig-zag) com imagens grandes.",
+    "use um BENTO GRID em pelo menos uma seção (blocos de tamanhos diferentes).",
+    "grid de 12 colunas assimétrico, com uma coluna dominante.",
+    "listas EDITORIAIS numeradas (01, 02, 03) com tipografia grande.",
+    "elementos que VAZAM a margem e se sobrepõem entre seções.",
+  ]);
+  const motion = pick([
+    "entradas em STAGGER (elementos surgem em cascata) ao montar, com framer-motion.",
+    "PARALLAX sutil e Ken Burns nas imagens.",
+    "microinterações FORTES em hover (scale + shadow + translate) por toda a página.",
+    "revelações com leve BLUR→nítido e slide ao montar.",
+  ]);
+  const accent = pick([
+    "faixa de NÚMEROS ANIMADOS (react-countup).",
+    "MARQUEE infinita de logos/palavras.",
+    "carrossel de DEPOIMENTOS (swiper).",
+    "galeria/portfólio em CARROSSEL (swiper) com autoplay.",
+  ]);
+  return [
+    "\n\n=== DIRETRIZ DE ESTILO SORTEADA (siga à risca se o pedido for um site/landing/página; se for app utilitário ou jogo, ignore) ===",
+    `• ARQUÉTIPO DE HERO: ${hero}`,
+    `• PALETA/MOOD: ${mood} (defina uma paleta coesa a partir disso — nada de roxo/índigo genérico se não combinar com o tema).`,
+    `• LAYOUT: ${layout}`,
+    `• MOVIMENTO: ${motion}`,
+    `• DESTAQUE DINÂMICO OBRIGATÓRIO: inclua uma ${accent}`,
+    "Combine tudo isso com o DINAMISMO OBRIGATÓRIO (regra 8d) e o tema do pedido. O resultado tem que parecer um site AUTORAL específico deste cliente — não um template. Varie de verdade: fuja do hero centralizado com dois botões.",
+  ].join("\n");
+}
+
 export function buildCodeUserPrompt(
   message: string,
   current: string | { path: string; content: string }[] | null
 ): string {
   if (!current || (Array.isArray(current) && current.length === 0)) {
-    return `Pedido do usuário: ${message}`;
+    // Primeira geração: injeta um briefing de design SORTEADO para garantir
+    // variedade real entre projetos e forçar dinamismo (a favor de "não parecer IA").
+    return `Pedido do usuário: ${message}${buildDesignBrief()}`;
   }
   const listing = Array.isArray(current) ? serializeFiles(current) : `--- ARQUIVO: App.jsx ---\n${current}`;
   return `Projeto atual (arquivos):\n"""\n${listing}\n"""\n\nPedido de refinamento: ${message}\nDevolva SOMENTE os arquivos alterados no formato "ops" (edição cirúrgica). Não reenvie arquivos que não mudaram.`;

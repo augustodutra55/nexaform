@@ -71,6 +71,10 @@ export interface AppGenerationResult {
   cost?: number;
   /** Modelo usado (para transparência de custo). */
   model?: string;
+  /** Quando a IA não gerou (demo/template em modo real): motivo técnico real
+   *  da falha (ex.: "modelo X indisponível (404)", "chave rejeitada (401)",
+   *  "tempo esgotado"). Usado para dar um erro honesto ao usuário. */
+  failureReason?: string;
 }
 
 export function isAppCode(value: any): value is AppCode {

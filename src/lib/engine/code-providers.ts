@@ -139,7 +139,30 @@ function currentOf(a: Args): AppFile[] | string | null {
   return a.currentCode ?? null;
 }
 
-async function callClaude(apiKey: string, a: Args, model: string): Promise<AppGenerationResult | null> {
+/** Extrai uma mensagem curta de erro do corpo de resposta de um provedor. */
+async function errDetail(res: Response): Promise<string> {
+  try {
+    const t = await res.text();
+    try {
+      const j = JSON.parse(t);
+      const m = j?.error?.message || j?.error || j?.message;
+      if (m) return String(m).slice(0, 160);
+    } catch {}
+    return t.slice(0, 160);
+  } catch {
+    return "";
+  }
+}
+
+/** Converte uma exceção de fetch em motivo legível. */
+function reasonFromException(provider: string, model: string, e: any): string {
+  const name = e?.name || "";
+  if (name === "TimeoutError" || /timeout|aborted/i.test(String(e?.message)))
+    return `${provider}: modelo ${model} não respondeu a tempo (120s).`;
+  return `${provider}: falha ao chamar ${model} — ${e?.message || "erro de rede"}.`;
+}
+
+async function callClaude(apiKey: string, a: Args, model: string, diag: string[]): Promise<AppGenerationResult | null> {
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -152,17 +175,24 @@ async function callClaude(apiKey: string, a: Args, model: string): Promise<AppGe
       }),
       signal: AbortSignal.timeout(120_000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      diag.push(`Claude: modelo ${model} → HTTP ${res.status}${res.status === 401 ? " (chave rejeitada)" : ""}. ${await errDetail(res)}`);
+      return null;
+    }
     const data = await res.json();
     const text = data?.content?.[0]?.text;
     const cost = estimateCost(model, data?.usage?.input_tokens ?? 0, data?.usage?.output_tokens ?? 0);
-    return text ? parse(text, "claude", cost, model, a.currentFiles ?? null) : null;
-  } catch {
+    if (!text) { diag.push(`Claude: ${model} respondeu vazio.`); return null; }
+    const r = parse(text, "claude", cost, model, a.currentFiles ?? null);
+    if (!r) diag.push(`Claude: resposta de ${model} não pôde ser interpretada como código.`);
+    return r;
+  } catch (e) {
+    diag.push(reasonFromException("Claude", model, e));
     return null;
   }
 }
 
-async function callOpenRouter(apiKey: string, a: Args, model: string): Promise<AppGenerationResult | null> {
+async function callOpenRouter(apiKey: string, a: Args, model: string, diag: string[]): Promise<AppGenerationResult | null> {
   try {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -178,7 +208,15 @@ async function callOpenRouter(apiKey: string, a: Args, model: string): Promise<A
       }),
       signal: AbortSignal.timeout(120_000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const detail = await errDetail(res);
+      const hint =
+        res.status === 404 ? " — modelo indisponível/renomeado no OpenRouter" :
+        res.status === 401 ? " — chave rejeitada" :
+        res.status === 402 ? " — sem crédito/saldo" : "";
+      diag.push(`OpenRouter: modelo ${model} → HTTP ${res.status}${hint}. ${detail}`);
+      return null;
+    }
     const data = await res.json();
     const text = data?.choices?.[0]?.message?.content;
     // OpenRouter devolve usage.cost (USD) quando disponível.
@@ -186,13 +224,17 @@ async function callOpenRouter(apiKey: string, a: Args, model: string): Promise<A
       typeof data?.usage?.cost === "number"
         ? data.usage.cost
         : estimateCost(model, data?.usage?.prompt_tokens ?? 0, data?.usage?.completion_tokens ?? 0);
-    return text ? parse(text, "openrouter", cost, model, a.currentFiles ?? null) : null;
-  } catch {
+    if (!text) { diag.push(`OpenRouter: ${model} respondeu vazio.`); return null; }
+    const r = parse(text, "openrouter", cost, model, a.currentFiles ?? null);
+    if (!r) diag.push(`OpenRouter: resposta de ${model} não pôde ser interpretada como código.`);
+    return r;
+  } catch (e) {
+    diag.push(reasonFromException("OpenRouter", model, e));
     return null;
   }
 }
 
-function demoFallback(message: string): AppGenerationResult {
+function demoFallback(message: string, failureReason?: string): AppGenerationResult {
   const code = `
 function App(){
   const [n, setN] = useState(0);
@@ -217,40 +259,47 @@ function App(){
     app: { kind: "app", name: message.slice(0, 40) || "App", description: "", code, provider: "demo" },
     cost: 0,
     model: "demo",
+    failureReason,
   };
 }
 
 export async function generateAppWithProviders(a: Args): Promise<AppGenerationResult> {
   const isRefinement = !!(a.currentFiles?.length || a.currentCode);
   const tier = pickTier(a.costMode ?? "auto", { isApp: true, isRefinement, message: a.message });
+  // Coletor de motivos técnicos de falha (para dar um erro honesto, não genérico).
+  const diag: string[] = [];
+  const hadKey = !!(a.userKey || process.env.ANTHROPIC_API_KEY || process.env.OPENROUTER_API_KEY);
 
   // 1) chave do usuário
   if (a.userKey && a.userProvider === "claude") {
-    const r = await callClaude(a.userKey, a, modelFor(tier, "claude"));
+    const r = await callClaude(a.userKey, a, modelFor(tier, "claude"), diag);
     if (r) return r;
   }
   if (a.userKey && a.userProvider === "openrouter") {
-    const r = await callOpenRouter(a.userKey, a, modelFor(tier, "openrouter"));
+    const r = await callOpenRouter(a.userKey, a, modelFor(tier, "openrouter"), diag);
     if (r) return r;
     // fallback: tenta o modelo premium se o econômico falhar
     if (tier === "economy") {
-      const r2 = await callOpenRouter(a.userKey, a, modelFor("premium", "openrouter"));
+      const r2 = await callOpenRouter(a.userKey, a, modelFor("premium", "openrouter"), diag);
       if (r2) return r2;
     }
   }
   // 2/3) ambiente
   if (process.env.ANTHROPIC_API_KEY && a.userProvider !== "local") {
-    const r = await callClaude(process.env.ANTHROPIC_API_KEY, a, modelFor(tier, "claude"));
+    const r = await callClaude(process.env.ANTHROPIC_API_KEY, a, modelFor(tier, "claude"), diag);
     if (r) return r;
   }
   if (process.env.OPENROUTER_API_KEY && a.userProvider !== "local") {
-    const r = await callOpenRouter(process.env.OPENROUTER_API_KEY, a, modelFor(tier, "openrouter"));
+    const r = await callOpenRouter(process.env.OPENROUTER_API_KEY, a, modelFor(tier, "openrouter"), diag);
     if (r) return r;
   }
   // Em MODO REAL forçado, nunca entregamos template/demo disfarçado:
   // devolvemos o demo explícito e a rota converte em erro claro (needsKey).
   if (a.forceReal) {
-    return demoFallback(a.message);
+    // Se havia chave mas a IA falhou, o motivo real é a última falha coletada —
+    // não é "nenhuma IA conectada". Se não havia chave, aí sim é falta de chave.
+    const reason = hadKey && diag.length ? diag[diag.length - 1] : undefined;
+    return demoFallback(a.message, reason);
   }
 
   // 4) template enlatado (só na primeira geração, quando permitido)
@@ -269,5 +318,5 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
       };
     }
   }
-  return demoFallback(a.message);
+  return demoFallback(a.message, hadKey && diag.length ? diag[diag.length - 1] : undefined);
 }

@@ -64,15 +64,16 @@ export async function POST(req: NextRequest) {
     allowTemplate: allowTemplate === true,
   });
 
-  // Modo real exigido, mas nenhuma IA respondeu: erro claro, sem demo disfarçado.
+  // Modo real exigido, mas a IA não gerou. Se temos o motivo técnico real
+  // (ex.: modelo 404, chave 401, sem saldo, timeout), mostramos ELE — nada de
+  // "nenhuma IA conectada" genérico quando na verdade a chamada falhou.
   if (forceReal !== false && result.engineMode !== "real") {
+    const reason = (result as any).failureReason as string | undefined;
+    const error = reason
+      ? `A geração real falhou: ${reason} — não vou te entregar um demo disfarçado. Verifique sua chave/modelo em Configurações, ou troque para o modo Template/Demo.`
+      : "Modo de geração real ativo, mas nenhuma IA está conectada — não vou te entregar um demo disfarçado. Conecte uma chave de IA em Configurações (ou troque para o modo Template/Demo explicitamente).";
     return NextResponse.json(
-      {
-        error:
-          "Modo de geração real ativo, mas nenhuma IA está conectada — não vou te entregar um demo disfarçado. Conecte uma chave de IA em Configurações (ou troque para o modo Template/Demo explicitamente).",
-        needsKey: true,
-        engineMode: result.engineMode,
-      },
+      { error, needsKey: !reason, generationFailed: !!reason, engineMode: result.engineMode },
       { status: 422 }
     );
   }

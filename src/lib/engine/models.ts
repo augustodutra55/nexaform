@@ -12,8 +12,10 @@
 export type CostMode = "auto" | "economy" | "premium";
 export type Tier = "economy" | "premium";
 
-/** Modelo OpenRouter barato — bom para copy/estrutura/sites. */
-export const ECON_MODEL_OPENROUTER = process.env.NEXT_PUBLIC_ECON_MODEL || "anthropic/claude-3.5-haiku";
+/** Modelo OpenRouter barato — bom para copy/estrutura/sites.
+ *  (O slug antigo "anthropic/claude-3.5-haiku" foi descontinuado no OpenRouter e
+ *   retornava 404 "No endpoints found", quebrando toda geração de site/landing.) */
+export const ECON_MODEL_OPENROUTER = process.env.NEXT_PUBLIC_ECON_MODEL || "anthropic/claude-haiku-4.5";
 /** Modelo OpenRouter forte — apps, lógica, refinos técnicos. */
 export const PREMIUM_MODEL_OPENROUTER = process.env.NEXT_PUBLIC_PREMIUM_MODEL || "anthropic/claude-sonnet-4.5";
 
@@ -58,6 +60,7 @@ export function modelFor(tier: Tier, provider: "openrouter" | "claude"): string 
 /** Preços de referência (USD por 1M tokens) para estimar custo quando o
  *  provedor não devolve o custo real. Aproximado; o custo real prevalece. */
 const PRICE: Record<string, { in: number; out: number }> = {
+  "anthropic/claude-haiku-4.5": { in: 1, out: 5 },
   "anthropic/claude-3.5-haiku": { in: 0.8, out: 4 },
   "anthropic/claude-sonnet-4.5": { in: 3, out: 15 },
   "claude-3-5-haiku-latest": { in: 0.8, out: 4 },

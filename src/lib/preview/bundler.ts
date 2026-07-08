@@ -192,10 +192,23 @@ export function buildBundledSrcDoc(
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <script type="importmap">${JSON.stringify(importMap)}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
+<script>
+  /* Tipografia premium por padrão: corpo em Inter, títulos com display Sora.
+     Registra as famílias no Tailwind (font-sans / font-display) e aplica em h1-h3
+     sem o app precisar declarar nada — eleva o acabamento de todo site gerado. */
+  window.tailwind = { config: { theme: { extend: { fontFamily: {
+    sans: ['Inter','ui-sans-serif','system-ui','sans-serif'],
+    display: ['Sora','Inter','ui-sans-serif','system-ui','sans-serif']
+  } } } } };
+</script>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   html,body,#root{height:100%;margin:0}
-  body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#0b1020;color:#0f172a}
+  body{font-family:'Inter',ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;background:#0b1020;color:#0f172a}
+  h1,h2,h3,.font-display{font-family:'Sora','Inter',ui-sans-serif,system-ui,sans-serif;letter-spacing:-0.02em}
   #root{background:#ffffff;min-height:100%}
   .nx-error{padding:20px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#b91c1c;background:#fef2f2;white-space:pre-wrap;height:100%;box-sizing:border-box;overflow:auto;font-size:13px;line-height:1.5}
 </style>

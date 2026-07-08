@@ -91,16 +91,19 @@ export function ProjectTopbar({
   const status: ProjectStatus = meta.status ?? "rascunho";
 
   async function handleShare() {
-    let slug = shareSlug;
-    if (!published || !slug) {
-      setPublishing(true);
-      slug = await onPublish();
-      setPublishing(false);
-      if (!slug) return;
-    }
+    // SEMPRE republica o código atual (recompila o build_bundle) — assim as
+    // alterações feitas DEPOIS da 1ª publicação realmente vão pro ar. O slug é
+    // reutilizado, então o link não muda. Antes, quando já publicado, só copiava
+    // o link e a versão no ar ficava velha.
+    setPublishing(true);
+    const slug = await onPublish();
+    setPublishing(false);
+    if (!slug) return;
     const url = `${location.origin}/p/${slug}`;
     await navigator.clipboard.writeText(url);
-    toast.success("Link copiado!", { description: url });
+    toast.success(published ? "Publicação atualizada — link copiado!" : "Publicado — link copiado!", {
+      description: url,
+    });
   }
 
   return (

@@ -51,8 +51,8 @@ function buildSrcDoc(code: string, projectId?: string | null): string {
 <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
-<script>window.tailwind={config:{theme:{extend:{fontFamily:{sans:['Inter','ui-sans-serif','system-ui','sans-serif'],display:['Sora','Inter','ui-sans-serif','system-ui','sans-serif']}}}}};</script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+<script>window.tailwind={config:{theme:{extend:{fontFamily:{sans:['Inter','ui-sans-serif','system-ui','sans-serif'],display:['Sora','Inter','ui-sans-serif','system-ui','sans-serif'],serif:['Fraunces','ui-serif','Georgia','serif'],grotesk:['Space Grotesk','Inter','ui-sans-serif','sans-serif']}}}}};</script>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   html,body,#root{height:100%;margin:0}

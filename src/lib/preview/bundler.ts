@@ -194,14 +194,17 @@ export function buildBundledSrcDoc(
 <script type="importmap">${JSON.stringify(importMap)}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
 <script>
-  /* Tipografia premium por padrão: corpo em Inter, títulos com display Sora.
-     Registra as famílias no Tailwind (font-sans / font-display) e aplica em h1-h3
-     sem o app precisar declarar nada — eleva o acabamento de todo site gerado. */
+  /* Tipografia premium por padrão + PARES DE FONTE para o gerador escolher:
+     font-sans (Inter, corpo), font-display (Sora, títulos sans),
+     font-serif (Fraunces, display serifada elegante), font-grotesk (Space Grotesk, techy).
+     Aplicadas via classe — o site fica com cara autoral, não de template. */
   window.tailwind = { config: { theme: { extend: { fontFamily: {
     sans: ['Inter','ui-sans-serif','system-ui','sans-serif'],
-    display: ['Sora','Inter','ui-sans-serif','system-ui','sans-serif']
+    display: ['Sora','Inter','ui-sans-serif','system-ui','sans-serif'],
+    serif: ['Fraunces','ui-serif','Georgia','serif'],
+    grotesk: ['Space Grotesk','Inter','ui-sans-serif','sans-serif']
   } } } } };
 </script>
 <script src="https://cdn.tailwindcss.com"></script>

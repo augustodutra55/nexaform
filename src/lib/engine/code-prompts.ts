@@ -82,6 +82,14 @@ Regras OBRIGATÓRIAS:
    (c) NÚMEROS ANIMADOS com react-countup numa faixa de estatísticas: import CountUp from 'react-countup'; <CountUp end={1200} duration={2} separator="." />+ (dispare ao montar; não dependa de scroll).
    (d) DESEJÁVEL: marquee (faixa deslizante infinita de logos/palavras via animação), microinterações fortes em hover (scale/shadow/translate), parallax sutil, tilt nos cards.
    Nada de efeito gratuito: cada elemento dinâmico tem um propósito. Para APPS utilitários/jogos/ferramentas, ignore esta regra (ela é só para sites/landing).
+8e. NÍVEL "SITE CARO" (agência premium / $10k) — o que separa um site bom de um site que parece ter custado caro:
+   • MOCKUP EM HTML (o sinal mais forte): em vez de só uma foto, construa um MOCKUP de produto/app/dashboard com HTML+Tailwind — uma "janela" (rounded-xl border border-white/10 bg-zinc-900 shadow-2xl, com 3 bolinhas de semáforo no topo) contendo uma UI fake convincente: cards de métrica, um mini-gráfico feito com <svg> (polyline) ou barras de <div>, uma tabela/lista, um donut com SVG. Dá leve perspetiva/sombra e um glow atrás. Isso vale mais que qualquer stock photo.
+   • GLASSMORPHISM: cards e navbar com bg-white/5 backdrop-blur-xl border border-white/10; funciona lindo sobre gradiente/mesh/foto.
+   • GLOW / AURA: brilho colorido atrás de elementos-chave com box-shadow grande e colorido (ex.: "shadow-[0_0_80px_-20px_theme]") ou um blob absoluto blur-3xl bg-<cor>/30.
+   • GRADIENTE-MESH: 2–3 divs absolutas, arredondadas, bem coloridas e com blur-3xl, posicionadas atrás do conteúdo (-z-10) para um fundo rico e moderno.
+   • PROVA SOCIAL premium: linha de estrelas (★★★★★) + nota (4,9) + "avaliado por N clientes", e uma faixa de LOGOS (podem ser nomes em font-semibold text-white/40) — passa confiança.
+   • FONTES DISPONÍVEIS (já carregadas, use por classe para dar personalidade): font-display (Sora), font-serif (Fraunces, serifada de luxo), font-grotesk (Space Grotesk, techy); corpo padrão Inter. Escolha um PAR coerente com o estilo.
+   Regra de ouro: 1 ideia visual forte + execução impecável (espaço, contraste, alinhamento) vale mais que muitos efeitos. (Só para sites/landing.)
 9. Todo o texto de interface em português.
 10. REFINAMENTO (edição cirúrgica): quando você RECEBER os arquivos atuais, NÃO reenvie o projeto todo. Devolva APENAS os arquivos que mudaram, no formato de operações:
    { "reply": "...", "plan": ["..."], "ops": [
@@ -109,49 +117,43 @@ function pick<T>(arr: T[]): T {
  * usuário só na PRIMEIRA geração de um site (não em refinamentos nem em apps).
  */
 export function buildDesignBrief(): string {
+  // BIBLIOTECA DE ESTILOS NOMEADOS (mini "UI UX Pro Max"): cada estilo tem uma
+  // receita concreta de cor + efeito + vibe. Sorteia 1 → cada site fica autoral.
+  const style = pick([
+    "DARK FINTECH / SAAS COM GLOW: fundo quase-preto (#0a0b0f/#0d0f14), UM acento neon (verde-menta #34e5a3, OU ciano #38bdf8, OU violeta #a78bfa) usado em CTAs e como BRILHO (box-shadow colorido/blur, ex.: shadow-[0_0_60px_-10px_#34e5a3]). Tipografia branca enorme e limpa, muito espaço negativo. Cara de produto de tecnologia caro.",
+    "GLASSMORPHISM PREMIUM: cards de vidro (bg-white/5, backdrop-blur-xl, border border-white/10) sobre um fundo com gradiente rico ou foto; navbar FLUTUANTE de vidro arredondada; brilhos suaves. Elegante e moderno.",
+    "EDITORIAL DE LUXO (revista): fundo creme/off-white (#faf7f2), tipografia SERIFADA display gigante (use a classe font-serif = Fraunces) misturada com Inter no corpo; muito respiro; uma imagem grande tratada; detalhes finos dourados/cobre. Ar sofisticado de marca premium.",
+    "GRADIENTE-MESH VIBRANTE: fundo com malha de gradiente (2–3 blobs coloridos bem desfocados, blur-3xl, em posições absolutas) atrás do conteúdo; cards de vidro; tipografia forte. Vibe de startup moderna.",
+    "TECH ESCURO NEON: preto com um GRID sutil de linhas (via background-image linear-gradient) + acento elétrico; auras/brilhos; estatísticas com glow; use a fonte font-grotesk (Space Grotesk) nos títulos. Cara de ferramenta de dev/IA.",
+    "MINIMAL CLARO SAAS: branco, 1 cor de marca sóbria, seções muito espaçadas, tipografia limpa; foco num MOCKUP de produto; logos de clientes; ícones lineares. Cara de SaaS bem-financiado.",
+    "BOLD BRUTALISTA-EDITORIAL: blocos de cor chapada e contrastante, tipografia MUITO grande que ocupa a largura, bordas grossas, layout em grid assimétrico ousado. Diferentão, memorável.",
+  ]);
+  const pairing = pick([
+    "TÍTULOS em font-display (Sora) + corpo Inter.",
+    "TÍTULOS em font-serif (Fraunces, serifada elegante) + corpo Inter — contraste sofisticado.",
+    "TÍTULOS em font-grotesk (Space Grotesk) + corpo Inter — vibe técnica/moderna.",
+  ]);
   const hero = pick([
-    "SPLIT-SCREEN: headline forte + CTA à esquerda, mídia grande (imagem OU vídeo) ocupando a metade direita inteira.",
-    "FULL-BLEED IMERSIVO: vídeo ou imagem cobrindo a tela toda, overlay escuro, headline gigante ancorada embaixo à esquerda.",
-    "EDITORIAL ASSIMÉTRICO: headline enorme quebrada em 2–3 linhas ocupando a largura, imagem deslocada que vaza a margem e se sobrepõe ao texto.",
-    "BENTO HERO: um mosaico de blocos (headline, foto, número animado, CTA, mini-carrossel) como um grid irregular.",
-    "CARROSSEL DE FUNDO: swiper trocando imagens de tela cheia automaticamente atrás de uma headline fixa.",
-    "TIPOGRAFIA GIGANTE: hero minimalista de texto enorme sobre gradiente/partículas animadas em canvas, quase sem imagem.",
-  ]);
-  const mood = pick([
-    "ESCURO SOFISTICADO: fundo quase-preto (zinc-950) + 1 cor de acento vibrante; muito contraste.",
-    "CLARO PREMIUM: off-white/stone-50 + um tom terroso quente + texto quase-preto; ar de revista.",
-    "OUSADO COLORIDO: uma cor saturada dominante em grandes áreas + neutros; blocos de cor chapada.",
-    "MONOCROMÁTICO EDITORIAL: escala de cinzas/neutros + UM acento neon usado com parcimônia.",
-    "NATURAL ORGÂNICO: verdes/terrosos, bege, madeira; cantos suaves, sensação calma.",
-    "TECH FRIO: azul-marinho profundo + ciano/elétrico; linhas finas, brilhos sutis, vibe de produto.",
-  ]);
-  const layout = pick([
-    "alterne seções esquerda/direita (zig-zag) com imagens grandes.",
-    "use um BENTO GRID em pelo menos uma seção (blocos de tamanhos diferentes).",
-    "grid de 12 colunas assimétrico, com uma coluna dominante.",
-    "listas EDITORIAIS numeradas (01, 02, 03) com tipografia grande.",
-    "elementos que VAZAM a margem e se sobrepõem entre seções.",
+    "HERO SPLIT: headline + CTA à esquerda, à direita um MOCKUP de app/dashboard construído em HTML+Tailwind (não é foto).",
+    "HERO FULL-BLEED: mídia/gradiente cobrindo a tela, overlay, headline gigante ancorada embaixo à esquerda.",
+    "HERO TIPOGRÁFICO: texto gigante sobre fundo com brilho/mesh/partículas, quase sem imagem, CTA em destaque.",
+    "HERO COM MOCKUP CENTRAL: headline centralizada em cima e, logo abaixo, um grande MOCKUP de produto (janela de browser/app estilizada em HTML) com leve perspectiva/sombra.",
+    "HERO EDITORIAL ASSIMÉTRICO: headline quebrada em 2–3 linhas que vaza a margem, imagem deslocada se sobrepondo.",
   ]);
   const motion = pick([
-    "entradas em STAGGER (elementos surgem em cascata) ao montar, com framer-motion.",
-    "PARALLAX sutil e Ken Burns nas imagens.",
-    "microinterações FORTES em hover (scale + shadow + translate) por toda a página.",
-    "revelações com leve BLUR→nítido e slide ao montar.",
-  ]);
-  const accent = pick([
-    "faixa de NÚMEROS ANIMADOS (react-countup).",
-    "MARQUEE infinita de logos/palavras.",
-    "carrossel de DEPOIMENTOS (swiper).",
-    "galeria/portfólio em CARROSSEL (swiper) com autoplay.",
+    "entradas em STAGGER ao montar (framer-motion).",
+    "microinterações FORTES no hover (scale + glow + translate).",
+    "parallax sutil + Ken Burns nas imagens.",
+    "brilhos/auras que pulsam suavemente (animação CSS).",
   ]);
   return [
-    "\n\n=== DIRETRIZ DE ESTILO SORTEADA (siga à risca se o pedido for um site/landing/página; se for app utilitário ou jogo, ignore) ===",
-    `• ARQUÉTIPO DE HERO: ${hero}`,
-    `• PALETA/MOOD: ${mood} (defina uma paleta coesa a partir disso — nada de roxo/índigo genérico se não combinar com o tema).`,
-    `• LAYOUT: ${layout}`,
+    "\n\n=== DIRETRIZ DE DESIGN SORTEADA — mire em site de agência premium ($10k). Siga se for site/landing/página; se for app utilitário/jogo, ignore. ===",
+    `• ESTILO VISUAL (defina a paleta e os efeitos a partir DELE): ${style}`,
+    `• PAR DE FONTES: ${pairing}`,
+    `• HERO: ${hero}`,
     `• MOVIMENTO: ${motion}`,
-    `• DESTAQUE DINÂMICO OBRIGATÓRIO: inclua uma ${accent}`,
-    "Combine tudo isso com o DINAMISMO OBRIGATÓRIO (regra 8d) e o tema do pedido. O resultado tem que parecer um site AUTORAL específico deste cliente — não um template. Varie de verdade: fuja do hero centralizado com dois botões.",
+    "• SINAIS DE 'SITE CARO' — inclua NO MÍNIMO DOIS: (1) um MOCKUP de app/dashboard/produto construído em HTML+Tailwind (janela estilizada com UI dentro: cards, mini-gráfico feito com divs/SVG, tabela) — é o que mais dá cara de $10k; (2) glassmorphism (backdrop-blur) em cards; (3) fundo com gradiente-mesh OU glow colorido; (4) prova social com estrelas (★★★★★ 4,9) + faixa de logos; (5) números animados (react-countup).",
+    "Adapte a paleta ao TEMA do cliente (um café não precisa ser neon), mas mantenha o nível de acabamento. O resultado tem que parecer AUTORAL e caro — nunca template genérico. Fuja do hero centralizado com dois botões e três cards iguais.",
   ].join("\n");
 }
 

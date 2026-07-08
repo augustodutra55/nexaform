@@ -144,19 +144,36 @@ export function adGlobalScript(projectId?: string | null): string {
           if(r.width > 100 && r.height > 36){
             // framer-motion segura a opacity via Web Animations API — cancela a animação travada
             if(el.getAnimations){ try { el.getAnimations().forEach(function(a){ a.cancel(); }); } catch(e){} }
-            el.style.opacity = '1';
-            el.style.transform = 'none';
+            // Usa prioridade !important: o framer-motion re-aplica style.opacity (inline normal)
+            // a cada quadro/scroll; um inline "important" vence isso e mantém a seção visível
+            // para sempre, evitando que conteúdo suma ao rolar.
+            try { el.style.setProperty('opacity','1','important'); el.style.setProperty('transform','none','important'); }
+            catch(e){ el.style.opacity = '1'; el.style.transform = 'none'; }
           }
         }
       }
     }catch(e){}
   }
   function schedule(){
-    [500,1100,1900,3000].forEach(function(t){ setTimeout(revealStuck, t); });
-    // Persistente: o framer-motion re-esconde ao re-renderizar/rolar no srcdoc,
-    // então revarremos por ~15s e também a cada scroll, mantendo tudo visível.
-    var n = 0, iv = setInterval(function(){ revealStuck(); if(++n > 26) clearInterval(iv); }, 600);
-    window.addEventListener('scroll', revealStuck, { passive: true });
+    [300,700,1300,2200,3200].forEach(function(t){ setTimeout(revealStuck, t); });
+    // Passadas iniciais frequentes (~18s) garantem revelar tudo mesmo com montagem lenta.
+    var n = 0, iv = setInterval(function(){ revealStuck(); if(++n > 30) clearInterval(iv); }, 600);
+    // A cada scroll (throttle via rAF) revarremos: como agora fixamos opacity/transform
+    // com !important, o conteúdo revelado NÃO some mais ao rolar.
+    var ticking = false;
+    window.addEventListener('scroll', function(){
+      if(ticking) return; ticking = true;
+      requestAnimationFrame(function(){ revealStuck(); ticking = false; });
+    }, { passive: true });
+    // Rede final: qualquer mudança de estilo no DOM (framer re-escondendo) dispara
+    // uma revarredura throttled — segura casos que o scroll/intervalo não pegariam.
+    try {
+      var moT = null;
+      var mo = new MutationObserver(function(){
+        if(moT) return; moT = setTimeout(function(){ moT = null; revealStuck(); }, 250);
+      });
+      mo.observe(document.body, { attributes:true, subtree:true, attributeFilter:['style'] });
+    } catch(e){}
   }
   if(document.readyState === 'complete') schedule(); else window.addEventListener('load', schedule);
 })();

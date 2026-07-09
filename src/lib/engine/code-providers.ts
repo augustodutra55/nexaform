@@ -68,8 +68,20 @@ function parse(
   current?: AppFile[] | null
 ): AppGenerationResult | null {
   try {
-    const raw = text.replace(/^```(?:json)?/m, "").replace(/```\s*$/m, "").trim();
-    const j = JSON.parse(raw);
+    const cleaned = text.replace(/^```(?:json)?/m, "").replace(/```\s*$/m, "").trim();
+    // Interpretação ROBUSTA: tenta o texto direto; se falhar (o modelo às vezes
+    // manda uma frase antes/depois do JSON, ou cerca a mais), isola do primeiro
+    // "{" até o último "}" e tenta de novo. Assim uma resposta boa não é
+    // descartada só por causa de texto em volta.
+    let j: any;
+    try {
+      j = JSON.parse(cleaned);
+    } catch {
+      const first = cleaned.indexOf("{");
+      const last = cleaned.lastIndexOf("}");
+      if (first < 0 || last <= first) throw new Error("sem objeto JSON");
+      j = JSON.parse(cleaned.slice(first, last + 1));
+    }
 
     // Edição cirúrgica: aplica ops sobre os arquivos atuais (refinamento).
     if (Array.isArray(j.ops) && current && current.length) {
@@ -169,7 +181,7 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
       headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
         model,
-        max_tokens: 32000,
+        max_tokens: 48000,
         system: CODE_SYSTEM_PROMPT,
         messages: [{ role: "user", content: buildCodeUserPrompt(a.message, currentOf(a)) }],
       }),
@@ -199,7 +211,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
-        max_tokens: 32000,
+        max_tokens: 48000,
         usage: { include: true },
         messages: [
           { role: "system", content: CODE_SYSTEM_PROMPT },

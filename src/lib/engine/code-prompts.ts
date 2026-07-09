@@ -98,6 +98,17 @@ Regras OBRIGATÓRIAS:
    • PROVA SOCIAL premium: linha de estrelas (★★★★★) + nota (4,9) + "avaliado por N clientes", e uma faixa de LOGOS (podem ser nomes em font-semibold text-white/40) — passa confiança.
    • FONTES DISPONÍVEIS (já carregadas, use por classe para dar personalidade): font-display (Sora), font-serif (Fraunces, serifada de luxo), font-grotesk (Space Grotesk, techy); corpo padrão Inter. Escolha um PAR coerente com o estilo.
    Regra de ouro: 1 ideia visual forte + execução impecável (espaço, contraste, alinhamento) vale mais que muitos efeitos. (Só para sites/landing.)
+8f. PADRÕES DE NEGÓCIO REAL (BR) — aplique quando o app/site for de uma EMPRESA (clínica, loja, serviço, escritório). É o que faz parecer negócio de verdade, não demo:
+   • RODAPÉ COMPLETO (o que MAIS falta em site de IA — quase obrigatório): marca + frase curta; ENDEREÇO/localização; HORÁRIO de funcionamento; TELEFONE e e-mail; REDES SOCIAIS (ícones via react-icons: FaInstagram, FaFacebookF, FaYoutube, FaWhatsapp); links rápidos; e "© ANO Nome". Um rodapé rico passa seriedade.
+   • BOTÃO FLUTUANTE DE WHATSAPP fixo no canto inferior direito (padrão no Brasil): um <a href="https://wa.me/55DDDNUMERO" target="_blank" rel="noopener"> redondo com FaWhatsapp, verde, sombra e leve pulsar.
+   • FAIXA DE CONFIANÇA no topo do site: 3–4 selos curtos com ícone (ex.: "Atendimento direto", "Curadoria", "Certificação/ANVISA", "Garantia").
+   • CARDS DE OFERTA/PREÇO (vendas/serviços): preço "De R$X" riscado + "R$Y" em destaque, selo de desconto ("50% OFF"), parcelamento ("ou 3x de R$Z"), um benefício ("avaliação inicial gratuita") e CTA claro ("Quero agendar").
+   • GRADE DE CATEGORIAS: cada card com um rótulo de segmento (ex.: "3 a 7 anos", "Autocuidado"), título, descrição curta e "Ver produtos".
+   • PERSONA/ATENDENTE: um hero com uma "atendente virtual" amigável (foto + status "online" + frases do que ela resolve + CTA "Agendar"/"Falar no WhatsApp") humaniza e converte.
+   • APP MOBILE (área logada, portal, jogos): use uma BARRA DE NAVEGAÇÃO INFERIOR fixa (bottom tab bar) com ícones (Início/Loja/Perfil…), estilo aplicativo; no desktop, nav normal no topo.
+   • GAMIFICAÇÃO (apps de engajamento/infantil): pontos/nível ("Nível 1"), missão diária, recompensas — deixa divertido e faz o usuário voltar.
+   • ACESSIBILIDADE: aria-label nos botões só de ícone, link "pular para o conteúdo", contraste AA, foco visível (focus-visible:ring).
+   • LGPD: se guardar dados (login/cadastro/progresso), mostre um aviso curto de privacidade/consentimento na primeira visita.
 9. Todo o texto de interface em português.
 10. REFINAMENTO (edição cirúrgica): quando você RECEBER os arquivos atuais, NÃO reenvie o projeto todo. Devolva APENAS os arquivos que mudaram, no formato de operações:
    { "reply": "...", "plan": ["..."], "ops": [

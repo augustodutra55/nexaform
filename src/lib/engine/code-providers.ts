@@ -181,7 +181,7 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
       headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
         model,
-        max_tokens: 48000,
+        max_tokens: 24000,
         system: CODE_SYSTEM_PROMPT,
         messages: [{ role: "user", content: buildCodeUserPrompt(a.message, currentOf(a)) }],
       }),
@@ -211,7 +211,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
-        max_tokens: 48000,
+        max_tokens: 24000,
         usage: { include: true },
         messages: [
           { role: "system", content: CODE_SYSTEM_PROMPT },

@@ -43,6 +43,8 @@ interface ChatPanelProps {
   /** Mensagem de erro para auto-correção (disparada pelo preview). */
   autoFixError?: string | null;
   onAutoFixHandled?: () => void;
+  /** Disparado quando o usuário envia um pedido MANUAL (para zerar o orçamento de auto-correções). */
+  onUserSend?: () => void;
   onSiteResult: (result: GenerationResult) => void;
   onAppResult: (result: AppGenerationResult) => void;
   onGeneratingChange?: (generating: boolean) => void;
@@ -75,6 +77,7 @@ export function ChatPanel({
   starterPrompt,
   autoFixError,
   onAutoFixHandled,
+  onUserSend,
   onSiteResult,
   onAppResult,
   onGeneratingChange,
@@ -168,9 +171,14 @@ export function ChatPanel({
   // Auto-correção: ao receber um erro do preview, pede à IA para corrigir.
   useEffect(() => {
     if (!autoFixError || generating) return;
-    const msg = `⚙️ Correção automática: o app apresentou este erro ao executar:\n"${autoFixError}"\nReescreva o componente App corrigindo esse erro e mantendo toda a funcionalidade.`;
+    const msg =
+      `⚙️ Correção automática: o app apresentou este erro ao executar:\n"${autoFixError}"\n` +
+      `Corrija a CAUSA desse erro nos arquivos atuais e mantenha TODA a funcionalidade. ` +
+      `Devolva apenas os arquivos alterados no formato "ops" (edição cirúrgica). ` +
+      `Erros comuns: importar de 'lucide-react' um ícone que não existe (use 'react-icons' para marcas), ` +
+      `variável/props indefinida, .map em algo que ainda não é array (inicialize com []), ou await sem async.`;
     onAutoFixHandled?.();
-    send(msg);
+    send(msg, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFixError]);
 
@@ -178,9 +186,13 @@ export function ChatPanel({
     await supabase.from("chat_messages").insert({ thread_id: threadId, role, content });
   }
 
-  async function send(text: string) {
+  async function send(text: string, isAutoFix = false) {
     const content = text.trim();
     if (!content || generating) return;
+    // Cada pedido MANUAL seu zera o contador de auto-correção — assim cada build
+    // ganha um novo orçamento de tentativas (o loop de auto-conserto não trava
+    // a sessão inteira). As correções automáticas NÃO zeram (senão seria infinito).
+    if (!isAutoFix) onUserSend?.();
 
     // Decide o motor desta geração.
     // "Geração real" SEMPRE escreve código React de verdade (inclusive landings),

@@ -432,11 +432,20 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     toast.success("Código aplicado e executado");
   }
 
+  const MAX_AUTOFIX = 3;
   function handleAppError(message: string) {
-    // Máx. 2 correções automáticas por sessão para evitar loop.
-    if (autoFixCount.current >= 2) return;
+    // Loop de auto-conserto: até 3 tentativas POR BUILD (o contador zera a cada
+    // pedido manual seu, via onUserSend). Evita loop infinito mas não trava a sessão.
+    if (autoFixCount.current >= MAX_AUTOFIX) {
+      toast.error("Não consegui corrigir sozinho", {
+        description: "Tentei algumas vezes. Me diga no chat o que o app deveria fazer que eu ajusto.",
+      });
+      return;
+    }
     autoFixCount.current += 1;
-    toast.info("Corrigindo o erro automaticamente…", { description: "Reenviando para a IA ajustar o código." });
+    toast.info(`Corrigindo automaticamente (tentativa ${autoFixCount.current}/${MAX_AUTOFIX})…`, {
+      description: "O motor detectou um erro e está reescrevendo o código pra consertar.",
+    });
     setAutoFixError(message);
   }
 
@@ -520,6 +529,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
             starterPrompt={starter}
             autoFixError={autoFixError}
             onAutoFixHandled={() => setAutoFixError(null)}
+            onUserSend={() => { autoFixCount.current = 0; }}
             onSiteResult={handleSiteResult}
             onAppResult={handleAppResult}
             onGeneratingChange={setGenerating}

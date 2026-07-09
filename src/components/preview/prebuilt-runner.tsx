@@ -18,7 +18,7 @@ export function PrebuiltRunner({ bundle, projectId }: { bundle: string; projectI
   return (
     <iframe
       title="App publicado"
-      sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-modals"
+      sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-popups-to-escape-sandbox allow-modals"
       srcDoc={srcDoc}
       className="h-full w-full border-0 bg-white"
     />

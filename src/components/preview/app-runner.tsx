@@ -449,7 +449,7 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
               key={reloadKey}
               ref={iframeRef}
               title="Preview do app"
-              sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-modals"
+              sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-popups-to-escape-sandbox allow-modals"
               srcDoc={srcDoc}
               onLoad={() => setLoading(false)}
               allowFullScreen

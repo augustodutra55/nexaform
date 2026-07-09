@@ -175,9 +175,26 @@ export async function PATCH(req: NextRequest, { params }: { params: { projectId:
   const supabase = createClient();
   const g = await authorizeProject(supabase, projectId, "write");
   if (!g.allowed) return NextResponse.json({ error: g.error }, { status: g.status });
+
+  // MESCLA por padrão (não substitui o registro inteiro). Assim
+  // AD.update(id, {avisadoEm}) atualiza SÓ esse campo e preserva os demais —
+  // antes, passar um objeto parcial apagava todos os outros campos (perda de dados).
+  // Para substituir tudo de propósito, envie body.replace === true.
+  let finalData = data;
+  if (body?.replace !== true) {
+    const { data: existing } = await supabase
+      .from("app_data")
+      .select("data")
+      .eq("project_id", projectId)
+      .eq("id", id)
+      .maybeSingle();
+    finalData = { ...(existing?.data ?? {}), ...data };
+  }
+  if (JSON.stringify(finalData).length > MAX_BYTES) return bad("Registro grande demais", 413);
+
   const { data: row, error } = await supabase
     .from("app_data")
-    .update({ data, updated_at: new Date().toISOString() })
+    .update({ data: finalData, updated_at: new Date().toISOString() })
     .eq("project_id", projectId)
     .eq("id", id)
     .select("id, data, created_at")

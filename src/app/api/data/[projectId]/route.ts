@@ -22,20 +22,103 @@ function shape(row: any) {
   return { id: row.id, ...(row.data ?? {}), _createdAt: row.created_at };
 }
 
+// Nome de campo seguro para montar caminhos JSONB (data->>campo) sem injeção.
+const FIELD_RE = /^[a-zA-Z0-9_]+$/;
+/** Aplica filtros de igualdade vindos de ?where={"campo":valor,...} sobre o JSONB. */
+function applyWhere(q: any, whereRaw: string | null) {
+  if (!whereRaw) return q;
+  try {
+    const where = JSON.parse(whereRaw);
+    if (where && typeof where === "object" && !Array.isArray(where)) {
+      for (const [k, v] of Object.entries(where)) {
+        if (!FIELD_RE.test(k) || v == null) continue;
+        q = q.eq(`data->>${k}`, String(v));
+      }
+    }
+  } catch {
+    /* where inválido → ignora */
+  }
+  return q;
+}
+
+/**
+ * GET — consulta a coleção. Suporta:
+ *   ?collection=nome            (padrão "default")
+ *   ?id=UUID                    → devolve { item } (um registro) ou null
+ *   ?count=1                    → devolve { count } (aplica os filtros)
+ *   ?where={"campo":"valor"}    → filtros de igualdade (JSONB)
+ *   ?search=termo&searchField=campo → busca textual (ilike) num campo
+ *   ?sort=campo | ?sort=-campo  → ordena asc/desc (use _createdAt para data)
+ *   ?limit=N&offset=M           → paginação (limit até 1000)
+ */
 export async function GET(req: NextRequest, { params }: { params: { projectId: string } }) {
   const projectId = params.projectId;
   if (!UUID_RE.test(projectId)) return bad("projectId inválido");
-  const collection = req.nextUrl.searchParams.get("collection") || "default";
+  const sp = req.nextUrl.searchParams;
+  const collection = sp.get("collection") || "default";
   const supabase = createClient();
   const g = await authorizeProject(supabase, projectId, "read");
   if (!g.allowed) return NextResponse.json({ error: g.error }, { status: g.status });
-  const { data, error } = await supabase
+
+  // Contagem (com filtros): ?count=1
+  if (sp.get("count")) {
+    let cq = supabase
+      .from("app_data")
+      .select("id", { count: "exact", head: true })
+      .eq("project_id", projectId)
+      .eq("collection", collection);
+    cq = applyWhere(cq, sp.get("where"));
+    const { count, error } = await cq;
+    if (error) return bad(error.message, 500);
+    return NextResponse.json({ count: count ?? 0 });
+  }
+
+  // Um registro por id: ?id=UUID
+  const oneId = sp.get("id");
+  if (oneId) {
+    const { data, error } = await supabase
+      .from("app_data")
+      .select("id, data, created_at")
+      .eq("project_id", projectId)
+      .eq("collection", collection)
+      .eq("id", oneId)
+      .maybeSingle();
+    if (error) return bad(error.message, 500);
+    return NextResponse.json({ item: data ? shape(data) : null });
+  }
+
+  // Listagem com filtros/busca/ordenação/paginação.
+  let q = supabase
     .from("app_data")
     .select("id, data, created_at")
     .eq("project_id", projectId)
-    .eq("collection", collection)
-    .order("created_at", { ascending: true })
-    .limit(LIST_LIMIT);
+    .eq("collection", collection);
+  q = applyWhere(q, sp.get("where"));
+
+  const search = sp.get("search");
+  const searchField = sp.get("searchField");
+  if (search && searchField && FIELD_RE.test(searchField)) {
+    q = q.ilike(`data->>${searchField}`, `%${search.slice(0, 100)}%`);
+  }
+
+  const sort = sp.get("sort");
+  if (sort) {
+    const desc = sort.startsWith("-");
+    const field = desc ? sort.slice(1) : sort;
+    if (field === "_createdAt" || field === "created_at") {
+      q = q.order("created_at", { ascending: !desc });
+    } else if (FIELD_RE.test(field)) {
+      q = q.order(`data->>${field}`, { ascending: !desc });
+    }
+  } else {
+    q = q.order("created_at", { ascending: true });
+  }
+
+  const limit = Math.min(parseInt(sp.get("limit") || "", 10) || LIST_LIMIT, LIST_LIMIT);
+  const offset = Math.max(parseInt(sp.get("offset") || "", 10) || 0, 0);
+  q = q.range(offset, offset + limit - 1);
+
+  const { data, error } = await q;
   if (error) return bad(error.message, 500);
   return NextResponse.json({ items: (data ?? []).map(shape) });
 }

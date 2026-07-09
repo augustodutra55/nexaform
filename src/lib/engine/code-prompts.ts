@@ -40,6 +40,9 @@ Regras OBRIGATÓRIAS:
    ATENÇÃO — ÍCONES DE MARCA/REDES SOCIAIS: o lucide-react NÃO possui ícones de marcas (Facebook, Instagram, WhatsApp, YouTube, TikTok, LinkedIn, X/Twitter etc.) — importar isso do lucide QUEBRA o app. Para redes sociais/marcas use SEMPRE 'react-icons' (ex.: "import { FaInstagram, FaFacebookF, FaWhatsapp, FaYoutube, FaTiktok, FaLinkedinIn } from 'react-icons/fa';" ou 'react-icons/fa6'). Só importe do lucide-react nomes de ícones genéricos que você tem certeza que existem.
 6. PERSISTÊNCIA (backend embutido): para SALVAR dados de verdade (listas, recados, cadastros, tarefas que persistem ao recarregar), use a API global "window.AD" — um mini-banco por projeto, já disponível:
      - await AD.list('colecao')            → array de itens (cada item tem "id", seus campos e "_createdAt" ISO)
+     - await AD.list('colecao', { where:{campo:valor}, search:'texto', searchField:'nome', sort:'-preco', limit:20, offset:0 }) → CONSULTA no servidor: filtro por igualdade (where), busca textual (search+searchField), ordenação (sort:'campo' asc ou '-campo' desc; use '_createdAt' para data), e paginação (limit/offset). PREFIRA isto a puxar tudo e filtrar no navegador.
+     - await AD.get('colecao', id)          → um registro pelo id (ou null)
+     - await AD.count('colecao', {campo:valor}) → quantidade de registros (com filtro opcional)
      - await AD.insert('colecao', {campos}) → cria e retorna o item com "id"
      - await AD.update(id, {campos})        → atualiza
      - await AD.remove(id)                  → apaga

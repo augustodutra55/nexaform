@@ -10,7 +10,7 @@ export function adGlobalScript(projectId?: string | null): string {
 (function(){
   var PID = ${pid};
   function noop(){ return Promise.resolve(); }
-  if(!PID){ window.AD = { list:function(){return Promise.resolve([]);}, insert:noop, update:noop, remove:noop, email:noop, enabled:false }; return; }
+  if(!PID){ window.AD = { list:function(){return Promise.resolve([]);}, get:function(){return Promise.resolve(null);}, count:function(){return Promise.resolve(0);}, insert:noop, update:noop, remove:noop, email:noop, enabled:false }; return; }
   var base = '/api/data/' + PID;
   function req(method, opts){
     opts = opts || {};
@@ -20,9 +20,26 @@ export function adGlobalScript(projectId?: string | null): string {
       body: opts.body ? JSON.stringify(opts.body) : undefined
     }).then(function(r){ if(!r.ok) throw new Error('AD data ' + r.status); return r.json(); });
   }
+  // Monta a query string de list/get/count a partir de um objeto de opções.
+  // opts: { where:{campo:valor}, search, searchField, sort:'campo'|'-campo', limit, offset }
+  function buildQs(collection, opts){
+    var qs = '?collection=' + encodeURIComponent(collection||'default');
+    opts = opts || {};
+    if(opts.where && typeof opts.where === 'object') qs += '&where=' + encodeURIComponent(JSON.stringify(opts.where));
+    if(opts.search){ qs += '&search=' + encodeURIComponent(opts.search); if(opts.searchField) qs += '&searchField=' + encodeURIComponent(opts.searchField); }
+    if(opts.sort) qs += '&sort=' + encodeURIComponent(opts.sort);
+    if(opts.limit != null) qs += '&limit=' + encodeURIComponent(opts.limit);
+    if(opts.offset != null) qs += '&offset=' + encodeURIComponent(opts.offset);
+    return qs;
+  }
   window.AD = {
     enabled: true,
-    list: function(collection){ return req('GET', { qs:'?collection=' + encodeURIComponent(collection||'default') }).then(function(r){ return r.items || []; }); },
+    // list(colecao) OU list(colecao, { where, search, searchField, sort, limit, offset })
+    list: function(collection, opts){ return req('GET', { qs: buildQs(collection, opts) }).then(function(r){ return r.items || []; }); },
+    // get(colecao, id) → um registro (ou null)
+    get: function(collection, id){ return req('GET', { qs:'?collection=' + encodeURIComponent(collection||'default') + '&id=' + encodeURIComponent(id) }).then(function(r){ return r.item || null; }); },
+    // count(colecao, where?) → número de registros que batem no filtro
+    count: function(collection, where){ var o = where ? { where: where } : {}; return req('GET', { qs: buildQs(collection, o) + '&count=1' }).then(function(r){ return r.count || 0; }); },
     insert: function(collection, data){ return req('POST', { body:{ collection: collection||'default', data: data||{} } }).then(function(r){ return r.item; }); },
     update: function(id, data){ return req('PATCH', { body:{ id: id, data: data||{} } }).then(function(r){ return r.item; }); },
     remove: function(id){ return req('DELETE', { qs:'?id=' + encodeURIComponent(id) }).then(function(){ return true; }); },

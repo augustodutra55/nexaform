@@ -169,7 +169,7 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
       headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
         model,
-        max_tokens: 24000,
+        max_tokens: 32000,
         system: CODE_SYSTEM_PROMPT,
         messages: [{ role: "user", content: buildCodeUserPrompt(a.message, currentOf(a)) }],
       }),
@@ -199,7 +199,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
-        max_tokens: 24000,
+        max_tokens: 32000,
         usage: { include: true },
         messages: [
           { role: "system", content: CODE_SYSTEM_PROMPT },
@@ -270,27 +270,45 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
   const diag: string[] = [];
   const hadKey = !!(a.userKey || process.env.ANTHROPIC_API_KEY || process.env.OPENROUTER_API_KEY);
 
+  // ── AUTO-CURA (comportamento tipo Lovable) ────────────────────────────────
+  // Para cada provedor, tentamos o modelo escolhido e, se falhar (modelo fora do
+  // ar, resposta truncada, erro transitório), caímos AUTOMATICAMENTE para o
+  // outro modelo — o principal com 1 retry. Assim uma falha pontual vira
+  // conserto automático em vez de um beco sem saída.
+  async function tryChain(
+    provider: "claude" | "openrouter",
+    key: string,
+    call: (k: string, args: Args, model: string, d: string[]) => Promise<AppGenerationResult | null>
+  ): Promise<AppGenerationResult | null> {
+    const primary = modelFor(tier, provider);
+    const secondary = modelFor(tier === "premium" ? "economy" : "premium", provider);
+    const chain = primary === secondary ? [primary] : [primary, secondary];
+    for (let i = 0; i < chain.length; i++) {
+      const attempts = i === 0 ? 2 : 1; // principal: 2 tentativas; fallback: 1
+      for (let t = 0; t < attempts; t++) {
+        const r = await call(key, a, chain[i], diag);
+        if (r) return r;
+      }
+    }
+    return null;
+  }
+
   // 1) chave do usuário
   if (a.userKey && a.userProvider === "claude") {
-    const r = await callClaude(a.userKey, a, modelFor(tier, "claude"), diag);
+    const r = await tryChain("claude", a.userKey, callClaude);
     if (r) return r;
   }
   if (a.userKey && a.userProvider === "openrouter") {
-    const r = await callOpenRouter(a.userKey, a, modelFor(tier, "openrouter"), diag);
+    const r = await tryChain("openrouter", a.userKey, callOpenRouter);
     if (r) return r;
-    // fallback: tenta o modelo premium se o econômico falhar
-    if (tier === "economy") {
-      const r2 = await callOpenRouter(a.userKey, a, modelFor("premium", "openrouter"), diag);
-      if (r2) return r2;
-    }
   }
   // 2/3) ambiente
   if (process.env.ANTHROPIC_API_KEY && a.userProvider !== "local") {
-    const r = await callClaude(process.env.ANTHROPIC_API_KEY, a, modelFor(tier, "claude"), diag);
+    const r = await tryChain("claude", process.env.ANTHROPIC_API_KEY, callClaude);
     if (r) return r;
   }
   if (process.env.OPENROUTER_API_KEY && a.userProvider !== "local") {
-    const r = await callOpenRouter(process.env.OPENROUTER_API_KEY, a, modelFor(tier, "openrouter"), diag);
+    const r = await tryChain("openrouter", process.env.OPENROUTER_API_KEY, callOpenRouter);
     if (r) return r;
   }
   // Em MODO REAL forçado, nunca entregamos template/demo disfarçado:

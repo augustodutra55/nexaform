@@ -4,7 +4,9 @@ import { generateAppWithProviders } from "@/lib/engine/code-providers";
 import { checkRateLimit } from "@/lib/engine/providers";
 import { isOwner, resolvePlan } from "@/lib/access";
 
-export const maxDuration = 120;
+// Apps grandes + auto-cura (retry/fallback) podem passar de 2 min; damos folga
+// para o servidor não cortar a resposta no meio (o que virava "não é JSON válido").
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   const supabase = createClient();

@@ -9,6 +9,15 @@ import type { AppCode } from "@/lib/engine/app-types";
 // para o servidor não cortar a resposta no meio (o que virava "não é JSON válido").
 export const maxDuration = 300;
 
+// TEMPO MÁXIMO da geração antes de cortar com um aviso claro (em vez do erro cru
+// da Vercel). No plano HOBBY a função é cortada em ~60s, então o padrão é 50s.
+// Ao ATIVAR O PLANO PRO (até 300s), basta definir a env GEN_MAX_MS=280000 nas
+// Environment Variables da Vercel — o motor passa a usar quase todo o tempo e as
+// gerações grandes (sites complexos, vídeo/imagens pesadas) completam. Sem tocar
+// no código: é só a chavinha.
+const GEN_MAX_MS = Number(process.env.GEN_MAX_MS) || 50_000;
+const IMG_CEIL_MS = GEN_MAX_MS + 8_000; // janela para gerar imagem por IA depois do código
+
 // ---- Geração de imagens custom (Nano Banana / Gemini Flash Image via OpenRouter) ----
 // O motor pode emitir marcadores  src="ADIMG: descrição em inglês"  onde quiser uma
 // foto sob medida. Aqui, PÓS-geração, trocamos cada marcador por uma imagem gerada
@@ -178,13 +187,13 @@ export async function POST(req: NextRequest) {
       forceReal: forceReal !== false, // padrão: geração REAL
       allowTemplate: allowTemplate === true,
     }),
-    new Promise<typeof DEADLINE>((resolve) => setTimeout(() => resolve(DEADLINE), 50_000)),
+    new Promise<typeof DEADLINE>((resolve) => setTimeout(() => resolve(DEADLINE), GEN_MAX_MS)),
   ]);
   if ((raced as any).__timeout) {
     return NextResponse.json(
       {
         error:
-          "A geração passou de ~50s. No plano atual da Vercel (Hobby) o servidor corta a função em ~60s, então parei antes para te avisar com clareza em vez de um erro quebrado. Tente um pedido menor, use o modo Econômico, ou ative o plano Pro da Vercel (libera até 5 min) para gerações grandes.",
+          `A geração passou do tempo limite (~${Math.round(GEN_MAX_MS / 1000)}s) e parei antes para te dar um aviso claro em vez de um erro quebrado. Tente um pedido menor ou o modo Econômico. Para gerações grandes (sites complexos, vídeo, imagens pesadas), ative o plano Pro da Vercel e defina a env GEN_MAX_MS=280000.`,
         timeout: true,
         engineMode: "template",
       },
@@ -210,7 +219,7 @@ export async function POST(req: NextRequest) {
   // Imagens custom: troca marcadores ADIMG: por fotos geradas por IA (não bloqueia
   // a geração se algo falhar — degrada para fallback).
   let imagesGenerated = 0;
-  const msLeft = 58_000 - (Date.now() - started);
+  const msLeft = IMG_CEIL_MS - (Date.now() - started);
   if (result.engineMode === "real" && result.app && msLeft > 8_000) {
     // Ainda há tempo dentro da janela de ~60s: gera imagem por IA, mas com
     // orçamento de tempo — nunca deixa a soma passar do limite da Vercel.

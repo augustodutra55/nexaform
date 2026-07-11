@@ -106,7 +106,7 @@ async function resolveAiImages(
     t.replace(new RegExp(IMG_MARKER.source, "g"), (_m, p) => map.get(String(p).trim()) || imgFallback(String(p)));
   if (Array.isArray(app.files)) app.files = app.files.map((f) => ({ ...f, content: swap(f.content) }));
   if (typeof app.code === "string") app.code = swap(app.code);
-  return [...map.values()].filter((u) => u && !u.includes("picsum")).length;
+  return Array.from(map.values()).filter((u) => u && !u.includes("picsum")).length;
 }
 // ---- fim da geração de imagens custom ----
 

@@ -38,6 +38,16 @@ function normalizeFiles(rawFiles: any): AppFile[] | null {
   return files.length ? files : null;
 }
 
+/** Dá visibilidade quando o modelo ignora o limite de tamanho, sem bloquear a geração. */
+function warnOversizedFiles(files: AppFile[]): void {
+  for (const file of files) {
+    const lineCount = file.content.split(/\r?\n/).length;
+    if (lineCount > 150) {
+      console.warn(`[code-engine] Arquivo gerado acima de 150 linhas: ${file.path} (${lineCount} linhas).`);
+    }
+  }
+}
+
 /** Aplica ops de edição cirúrgica sobre os arquivos atuais. */
 function applyOps(current: AppFile[], ops: any[]): AppFile[] | null {
   const map = new Map<string, string>();
@@ -87,6 +97,8 @@ function parse(
     if (Array.isArray(j.ops) && current && current.length) {
       const merged = applyOps(current, j.ops);
       if (merged) {
+        const changedFiles = normalizeFiles(j.ops);
+        if (changedFiles) warnOversizedFiles(changedFiles);
         let entry =
           merged.find((f) => /(^|\/)App\.(jsx|tsx|js|ts)$/.test(f.path))?.path ?? merged[0].path;
         const app = { kind: "app" as const, name: j.name || "App", description: "", files: merged, entry, provider };
@@ -106,6 +118,7 @@ function parse(
     // Caminho preferido: projeto multi-arquivo com imports reais.
     const files = normalizeFiles(j.files);
     if (files) {
+      warnOversizedFiles(files);
       // Descobre o entry: campo entry válido, ou App.jsx, ou o 1º arquivo.
       let entry: string =
         typeof j.entry === "string" ? j.entry.replace(/^\.?\//, "").trim() : "";
@@ -128,6 +141,7 @@ function parse(
 
     // Compatibilidade: single-file legado.
     if (typeof j.code === "string" && j.code.includes("function App")) {
+      warnOversizedFiles([{ path: "App.jsx", content: j.code }]);
       return {
         provider,
         engineMode: "real",

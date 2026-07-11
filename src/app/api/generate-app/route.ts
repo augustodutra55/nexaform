@@ -4,6 +4,7 @@ import { generateAppWithProviders } from "@/lib/engine/code-providers";
 import { checkRateLimit } from "@/lib/engine/providers";
 import { isOwner, resolvePlan } from "@/lib/access";
 import type { AppCode } from "@/lib/engine/app-types";
+import { authorizeProjectOwner } from "@/lib/engine/data-guard";
 
 // Apps grandes + auto-cura (retry/fallback) podem passar de 2 min; damos folga
 // para o servidor não cortar a resposta no meio (o que virava "não é JSON válido").
@@ -148,6 +149,11 @@ export async function POST(req: NextRequest) {
     body ?? {};
   if (!projectId || typeof message !== "string" || !message.trim()) {
     return NextResponse.json({ error: "Requisição incompleta." }, { status: 400 });
+  }
+
+  const access = await authorizeProjectOwner(supabase, projectId, user.id, owner);
+  if (!access.allowed) {
+    return NextResponse.json({ error: access.error }, { status: access.status ?? 403 });
   }
 
   // limite mensal (owner ignora)

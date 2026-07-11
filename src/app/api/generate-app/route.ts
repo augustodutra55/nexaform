@@ -53,7 +53,7 @@ async function genImage(apiKey: string, prompt: string): Promise<string | null> 
 
 async function storeImage(supabase: any, projectId: string, dataUrl: string): Promise<string | null> {
   try {
-    const m = dataUrl.match(/^data:([^;]+);base64,(.*)$/s);
+    const m = dataUrl.match(/^data:([^;]+);base64,(.*)$/);
     if (!m) return null;
     const contentType = m[1];
     const bytes = Buffer.from(m[2], "base64");

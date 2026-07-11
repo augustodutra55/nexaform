@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { generateWithProviders, checkRateLimit } from "@/lib/engine/providers";
 import { isValidSchema } from "@/lib/engine/types";
 import { isOwner, resolvePlan } from "@/lib/access";
+import { authorizeProjectOwner } from "@/lib/engine/data-guard";
 
 export const maxDuration = 60;
 
@@ -42,6 +43,12 @@ export async function POST(req: NextRequest) {
   if (!projectId || typeof message !== "string" || !message.trim()) {
     return NextResponse.json({ error: "Requisição incompleta." }, { status: 400 });
   }
+
+  const access = await authorizeProjectOwner(supabase, projectId, user.id, owner);
+  if (!access.allowed) {
+    return NextResponse.json({ error: access.error }, { status: access.status ?? 403 });
+  }
+
   const safeSchema = isValidSchema(schema) ? schema : null;
 
   // ── Limite do plano (gerações no mês corrente) — owner ignora ──

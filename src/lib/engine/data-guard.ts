@@ -23,6 +23,38 @@ export interface GuardResult {
   error?: string;
 }
 
+/**
+ * Guarda estrita para operações do painel que só o dono pode executar.
+ *
+ * Diferente de authorizeProject(), um projeto publicado não libera acesso aqui:
+ * gerar código consome cota e pode gravar imagens/custos, então exige propriedade.
+ * A conta owner global mantém o bypass administrativo já usado pelas rotas.
+ */
+export async function authorizeProjectOwner(
+  supabase: SupabaseClient,
+  projectId: string,
+  userId: string,
+  ownerBypass = false
+): Promise<GuardResult> {
+  if (!isUuid(projectId)) return { allowed: false, status: 400, error: "projectId inválido" };
+  if (ownerBypass) return { allowed: true };
+
+  const { data: project, error } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("id", projectId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    return { allowed: false, status: 500, error: "Não foi possível validar o projeto." };
+  }
+  if (!project) {
+    return { allowed: false, status: 403, error: "Projeto não pertence a você." };
+  }
+  return { allowed: true };
+}
+
 export async function authorizeProject(
   supabase: SupabaseClient,
   projectId: string,

@@ -20,7 +20,7 @@ const IMG_BUCKET = "app-uploads";
 const MAX_IMAGES = 3; // teto por geração (controle de custo e de tempo)
 const IMG_MARKER = /ADIMG:\s*([^"'`)\n]+)/g;
 
-async function genImage(apiKey: string, prompt: string): Promise<string | null> {
+async function genImage(apiKey: string, prompt: string, timeoutMs = 18_000): Promise<string | null> {
   try {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -35,7 +35,7 @@ async function genImage(apiKey: string, prompt: string): Promise<string | null> 
           },
         ],
       }),
-      signal: AbortSignal.timeout(45_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -78,7 +78,7 @@ function imgFallback(prompt: string): string {
 async function resolveAiImages(
   app: AppCode,
   supabase: any,
-  opts: { userKey: string | null; userProvider: string | null; projectId: string }
+  opts: { userKey: string | null; userProvider: string | null; projectId: string; budgetMs?: number }
 ): Promise<number> {
   const texts: string[] = [];
   if (Array.isArray(app.files)) app.files.forEach((f) => texts.push(f.content));
@@ -100,7 +100,7 @@ async function resolveAiImages(
     // evitava estourar o tempo do servidor (erro "não é JSON válido").
     await Promise.all(
       prompts.map(async (p) => {
-        const dataUrl = await genImage(opts.userKey!, p);
+        const dataUrl = await genImage(opts.userKey!, p, Math.min(18_000, Math.max(4_000, opts.budgetMs ?? 18_000)));
         const url = dataUrl ? await storeImage(supabase, opts.projectId, dataUrl) : null;
         map.set(p, url || imgFallback(p));
       })
@@ -115,6 +115,7 @@ async function resolveAiImages(
 // ---- fim da geração de imagens custom ----
 
 export async function POST(req: NextRequest) {
+  const started = Date.now();
   const supabase = createClient();
   const {
     data: { user },
@@ -160,17 +161,37 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const result = await generateAppWithProviders({
-    message,
-    currentCode: typeof currentCode === "string" ? currentCode : null,
-    currentFiles: Array.isArray(currentFiles) ? currentFiles : null,
-    name: typeof name === "string" ? name : "App",
-    userKey: typeof userKey === "string" ? userKey : null,
-    userProvider: userProvider ?? null,
-    costMode: costMode ?? "auto",
-    forceReal: forceReal !== false, // padrão: geração REAL
-    allowTemplate: allowTemplate === true,
-  });
+  // No plano Hobby da Vercel a função é cortada em ~60s (o maxDuration=300 é
+  // IGNORADO nesse plano). Se a geração passar disso, a Vercel devolve uma página
+  // de erro crua ("An error occurred") que o cliente não consegue ler como JSON.
+  // Então cortamos NÓS em 50s e devolvemos um aviso claro em JSON.
+  const DEADLINE = { __timeout: true as const };
+  const raced = await Promise.race([
+    generateAppWithProviders({
+      message,
+      currentCode: typeof currentCode === "string" ? currentCode : null,
+      currentFiles: Array.isArray(currentFiles) ? currentFiles : null,
+      name: typeof name === "string" ? name : "App",
+      userKey: typeof userKey === "string" ? userKey : null,
+      userProvider: userProvider ?? null,
+      costMode: costMode ?? "auto",
+      forceReal: forceReal !== false, // padrão: geração REAL
+      allowTemplate: allowTemplate === true,
+    }),
+    new Promise<typeof DEADLINE>((resolve) => setTimeout(() => resolve(DEADLINE), 50_000)),
+  ]);
+  if ((raced as any).__timeout) {
+    return NextResponse.json(
+      {
+        error:
+          "A geração passou de ~50s. No plano atual da Vercel (Hobby) o servidor corta a função em ~60s, então parei antes para te avisar com clareza em vez de um erro quebrado. Tente um pedido menor, use o modo Econômico, ou ative o plano Pro da Vercel (libera até 5 min) para gerações grandes.",
+        timeout: true,
+        engineMode: "template",
+      },
+      { status: 504 }
+    );
+  }
+  const result = raced as Awaited<ReturnType<typeof generateAppWithProviders>>;
 
   // Modo real exigido, mas a IA não gerou. Se temos o motivo técnico real
   // (ex.: modelo 404, chave 401, sem saldo, timeout), mostramos ELE — nada de
@@ -189,15 +210,27 @@ export async function POST(req: NextRequest) {
   // Imagens custom: troca marcadores ADIMG: por fotos geradas por IA (não bloqueia
   // a geração se algo falhar — degrada para fallback).
   let imagesGenerated = 0;
-  if (result.engineMode === "real" && result.app) {
+  const msLeft = 58_000 - (Date.now() - started);
+  if (result.engineMode === "real" && result.app && msLeft > 8_000) {
+    // Ainda há tempo dentro da janela de ~60s: gera imagem por IA, mas com
+    // orçamento de tempo — nunca deixa a soma passar do limite da Vercel.
     try {
       imagesGenerated = await resolveAiImages(result.app, supabase, {
         userKey: typeof userKey === "string" ? userKey : null,
         userProvider: userProvider ?? null,
         projectId,
+        budgetMs: msLeft - 4_000,
       });
     } catch {
       /* imagem é opcional — nunca derruba a geração */
+    }
+  } else if (result.engineMode === "real" && result.app) {
+    // Sem tempo para IA: troca os marcadores ADIMG por fallback na hora (instantâneo),
+    // pra nunca sobrar "ADIMG:" cru na tela.
+    try {
+      await resolveAiImages(result.app, supabase, { userKey: null, userProvider: null, projectId });
+    } catch {
+      /* idem */
     }
   }
   if (imagesGenerated > 0) result.cost = (result.cost ?? 0) + imagesGenerated * 0.03; // custo estimado/imagem

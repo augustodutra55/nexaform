@@ -17,7 +17,7 @@ export const maxDuration = 300;
 // quebramos a build.
 const IMAGE_MODEL = process.env.NEXT_PUBLIC_IMAGE_MODEL || "google/gemini-2.5-flash-image";
 const IMG_BUCKET = "app-uploads";
-const MAX_IMAGES = 4; // teto por geração (controle de custo)
+const MAX_IMAGES = 3; // teto por geração (controle de custo e de tempo)
 const IMG_MARKER = /ADIMG:\s*([^"'`)\n]+)/g;
 
 async function genImage(apiKey: string, prompt: string): Promise<string | null> {
@@ -35,7 +35,7 @@ async function genImage(apiKey: string, prompt: string): Promise<string | null> 
           },
         ],
       }),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(45_000),
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -96,11 +96,15 @@ async function resolveAiImages(
         if (p && !prompts.includes(p) && prompts.length < MAX_IMAGES) prompts.push(p);
       }
     }
-    for (const p of prompts) {
-      const dataUrl = await genImage(opts.userKey, p);
-      const url = dataUrl ? await storeImage(supabase, opts.projectId, dataUrl) : null;
-      map.set(p, url || imgFallback(p));
-    }
+    // Em paralelo: assim N imagens custam ~o tempo de UMA, não a soma — o que
+    // evitava estourar o tempo do servidor (erro "não é JSON válido").
+    await Promise.all(
+      prompts.map(async (p) => {
+        const dataUrl = await genImage(opts.userKey!, p);
+        const url = dataUrl ? await storeImage(supabase, opts.projectId, dataUrl) : null;
+        map.set(p, url || imgFallback(p));
+      })
+    );
   }
   const swap = (t: string) =>
     t.replace(new RegExp(IMG_MARKER.source, "g"), (_m, p) => map.get(String(p).trim()) || imgFallback(String(p)));

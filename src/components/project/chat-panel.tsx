@@ -84,7 +84,17 @@ export function ChatPanel({
   onEngineMode,
 }: ChatPanelProps) {
   const supabase = useMemo(() => createClient(), []);
-  const [messages, setMessages] = useState<Message[]>(initialMessages);
+  const [messages, setMessages] = useState<Message[]>(() => {
+    // Se o banco trouxe a conversa, usa ela. Se veio vazia (ex.: falha de
+    // persistência/RLS), cai no espelho salvo no navegador — assim o histórico
+    // NUNCA some ao recarregar a página.
+    if (initialMessages && initialMessages.length) return initialMessages;
+    try {
+      const s = localStorage.getItem(`adstudio:chat:${threadId}`);
+      if (s) return JSON.parse(s) as Message[];
+    } catch {}
+    return initialMessages;
+  });
   const [input, setInput] = useState("");
   const [generating, setGenerating] = useState(false);
   const [plan, setPlan] = useState<string[]>([]);
@@ -107,6 +117,14 @@ export function ChatPanel({
     setGenMode(m);
     localStorage.setItem("adstudio:gen-mode", m);
   }
+
+  // Espelha a conversa no navegador (por thread) a cada mudança — garante que o
+  // histórico persista mesmo se o salvamento no banco falhar.
+  useEffect(() => {
+    try {
+      if (messages.length) localStorage.setItem(`adstudio:chat:${threadId}`, JSON.stringify(messages));
+    } catch {}
+  }, [messages, threadId]);
 
   // ── Comando por voz (Web Speech API — grátis, roda no navegador) ──
   const [listening, setListening] = useState(false);

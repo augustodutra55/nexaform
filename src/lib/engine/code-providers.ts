@@ -304,7 +304,9 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
     const secondary = modelFor(tier === "premium" ? "economy" : "premium", provider);
     const chain = primary === secondary ? [primary] : [primary, secondary];
     for (let i = 0; i < chain.length; i++) {
-      const attempts = i === 0 ? 2 : 1; // principal: 2 tentativas; fallback: 1
+      // Refinamento: 1 tentativa no principal (rápido, cabe nos 60s do Hobby).
+      // Primeira geração: 2 tentativas (mais robusto, vale a espera).
+      const attempts = i === 0 && !isRefinement ? 2 : 1;
       for (let t = 0; t < attempts; t++) {
         const r = await call(key, a, chain[i], diag);
         if (r) return r;

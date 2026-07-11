@@ -3,10 +3,112 @@ import { createClient } from "@/lib/supabase/server";
 import { generateAppWithProviders } from "@/lib/engine/code-providers";
 import { checkRateLimit } from "@/lib/engine/providers";
 import { isOwner, resolvePlan } from "@/lib/access";
+import type { AppCode } from "@/lib/engine/app-types";
 
 // Apps grandes + auto-cura (retry/fallback) podem passar de 2 min; damos folga
 // para o servidor não cortar a resposta no meio (o que virava "não é JSON válido").
 export const maxDuration = 300;
+
+// ---- Geração de imagens custom (Nano Banana / Gemini Flash Image via OpenRouter) ----
+// O motor pode emitir marcadores  src="ADIMG: descrição em inglês"  onde quiser uma
+// foto sob medida. Aqui, PÓS-geração, trocamos cada marcador por uma imagem gerada
+// por IA e guardada no bucket público. Sem chave OpenRouter (ou em qualquer falha),
+// cai num fallback que sempre carrega — nunca deixamos "ADIMG:" cru na tela nem
+// quebramos a build.
+const IMAGE_MODEL = process.env.NEXT_PUBLIC_IMAGE_MODEL || "google/gemini-2.5-flash-image";
+const IMG_BUCKET = "app-uploads";
+const MAX_IMAGES = 4; // teto por geração (controle de custo)
+const IMG_MARKER = /ADIMG:\s*([^"'`)\n]+)/g;
+
+async function genImage(apiKey: string, prompt: string): Promise<string | null> {
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: IMAGE_MODEL,
+        modalities: ["image", "text"],
+        messages: [
+          {
+            role: "user",
+            content: `A high-quality, photorealistic, professional photograph: ${prompt}. Natural lighting, elegant, realistic. No text, no watermark, no logos.`,
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const msg = data?.choices?.[0]?.message;
+    let url: any = msg?.images?.[0]?.image_url?.url ?? msg?.images?.[0]?.url;
+    if (!url && Array.isArray(msg?.content)) {
+      const part = msg.content.find((c: any) => c?.image_url?.url);
+      url = part?.image_url?.url;
+    }
+    return typeof url === "string" && url.startsWith("data:") ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+async function storeImage(supabase: any, projectId: string, dataUrl: string): Promise<string | null> {
+  try {
+    const m = dataUrl.match(/^data:([^;]+);base64,(.*)$/s);
+    if (!m) return null;
+    const contentType = m[1];
+    const bytes = Buffer.from(m[2], "base64");
+    if (bytes.length < 100 || bytes.length > 6_000_000) return null;
+    const extMap: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
+    const path = `${projectId}/ai-${crypto.randomUUID()}.${extMap[contentType] || "png"}`;
+    const { error } = await supabase.storage.from(IMG_BUCKET).upload(path, bytes, { contentType, upsert: false });
+    if (error) return null;
+    return supabase.storage.from(IMG_BUCKET).getPublicUrl(path).data.publicUrl;
+  } catch {
+    return null;
+  }
+}
+
+function imgFallback(prompt: string): string {
+  const seed = (prompt || "clinic").toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 24) || "clinic";
+  return `https://picsum.photos/seed/${seed}/1200/800`;
+}
+
+/** Troca marcadores ADIMG: por imagens custom (via OpenRouter) armazenadas no
+ *  bucket. Muta o `app`. Devolve quantas imagens reais foram geradas. */
+async function resolveAiImages(
+  app: AppCode,
+  supabase: any,
+  opts: { userKey: string | null; userProvider: string | null; projectId: string }
+): Promise<number> {
+  const texts: string[] = [];
+  if (Array.isArray(app.files)) app.files.forEach((f) => texts.push(f.content));
+  if (typeof app.code === "string") texts.push(app.code);
+  if (!texts.some((t) => new RegExp(IMG_MARKER.source).test(t))) return 0;
+
+  const map = new Map<string, string>();
+  if (opts.userKey && opts.userProvider === "openrouter") {
+    const prompts: string[] = [];
+    for (const t of texts) {
+      const re = new RegExp(IMG_MARKER.source, "g");
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(t))) {
+        const p = m[1].trim();
+        if (p && !prompts.includes(p) && prompts.length < MAX_IMAGES) prompts.push(p);
+      }
+    }
+    for (const p of prompts) {
+      const dataUrl = await genImage(opts.userKey, p);
+      const url = dataUrl ? await storeImage(supabase, opts.projectId, dataUrl) : null;
+      map.set(p, url || imgFallback(p));
+    }
+  }
+  const swap = (t: string) =>
+    t.replace(new RegExp(IMG_MARKER.source, "g"), (_m, p) => map.get(String(p).trim()) || imgFallback(String(p)));
+  if (Array.isArray(app.files)) app.files = app.files.map((f) => ({ ...f, content: swap(f.content) }));
+  if (typeof app.code === "string") app.code = swap(app.code);
+  return [...map.values()].filter((u) => u && !u.includes("picsum")).length;
+}
+// ---- fim da geração de imagens custom ----
 
 export async function POST(req: NextRequest) {
   const supabase = createClient();
@@ -80,6 +182,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Imagens custom: troca marcadores ADIMG: por fotos geradas por IA (não bloqueia
+  // a geração se algo falhar — degrada para fallback).
+  let imagesGenerated = 0;
+  if (result.engineMode === "real" && result.app) {
+    try {
+      imagesGenerated = await resolveAiImages(result.app, supabase, {
+        userKey: typeof userKey === "string" ? userKey : null,
+        userProvider: userProvider ?? null,
+        projectId,
+      });
+    } catch {
+      /* imagem é opcional — nunca derruba a geração */
+    }
+  }
+  if (imagesGenerated > 0) result.cost = (result.cost ?? 0) + imagesGenerated * 0.03; // custo estimado/imagem
+
   await supabase.from("generations").insert({
     user_id: user.id,
     project_id: projectId,
@@ -94,5 +212,5 @@ export async function POST(req: NextRequest) {
   const { data: rows } = await supabase.from("generations").select("cost_usd").eq("project_id", projectId);
   const projectCost = (rows ?? []).reduce((s: number, r: any) => s + Number(r.cost_usd ?? 0), 0);
 
-  return NextResponse.json({ ...result, projectCost });
+  return NextResponse.json({ ...result, projectCost, imagesGenerated });
 }

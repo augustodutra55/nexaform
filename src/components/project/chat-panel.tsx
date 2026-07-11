@@ -189,6 +189,12 @@ export function ChatPanel({
   codeRef.current = code;
   const filesRef = useRef(files);
   filesRef.current = files;
+  // Controla o "parar" de uma geração em andamento (o usuário pode interromper
+  // e mandar outro comando). Guardamos o AbortController da requisição atual.
+  const abortRef = useRef<AbortController | null>(null);
+  function stopGeneration() {
+    abortRef.current?.abort();
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -269,10 +275,13 @@ export function ChatPanel({
             costMode,
           };
 
+      const controller = new AbortController();
+      abortRef.current = controller;
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Falha na geração.");
@@ -308,10 +317,17 @@ export function ChatPanel({
         onSiteResult(data as GenerationResult);
       }
     } catch (err: any) {
-      const msg = err?.message ?? "Algo deu errado.";
-      toast.error("Geração falhou", { description: msg });
-      setMessages((m) => [...m, { id: crypto.randomUUID(), role: "assistant", content: `Ops — ${msg}` }]);
+      // Interrompido pelo usuário (botão parar): não é erro, apenas devolve o controle.
+      if (err?.name === "AbortError") {
+        toast("Geração interrompida.");
+        setMessages((m) => [...m, { id: crypto.randomUUID(), role: "assistant", content: "⏹️ Interrompido. Pode mandar outro comando." }]);
+      } else {
+        const msg = err?.message ?? "Algo deu errado.";
+        toast.error("Geração falhou", { description: msg });
+        setMessages((m) => [...m, { id: crypto.randomUUID(), role: "assistant", content: `Ops — ${msg}` }]);
+      }
     } finally {
+      abortRef.current = null;
       setGenerating(false);
       onGeneratingChange?.(false);
       setPlan([]);
@@ -528,9 +544,23 @@ export function ChatPanel({
               {listening ? <Square /> : <Mic />}
             </Button>
           )}
-          <Button type="submit" size="icon" variant="brand" disabled={generating || !input.trim()} aria-label="Enviar">
-            {generating ? <Loader2 className="animate-spin" /> : <ArrowUp />}
-          </Button>
+          {generating ? (
+            <Button
+              type="button"
+              size="icon"
+              variant="destructive"
+              onClick={stopGeneration}
+              aria-label="Parar geração"
+              title="Parar"
+              className="animate-pulse-soft"
+            >
+              <Square />
+            </Button>
+          ) : (
+            <Button type="submit" size="icon" variant="brand" disabled={!input.trim()} aria-label="Enviar">
+              <ArrowUp />
+            </Button>
+          )}
         </div>
         <p className="mt-1.5 px-1 text-[10px] text-muted-foreground">
           <kbd className="rounded border px-1">⏎</kbd> envia · <kbd className="rounded border px-1">⇧⏎</kbd> quebra linha

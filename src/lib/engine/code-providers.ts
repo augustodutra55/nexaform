@@ -6,7 +6,7 @@
  * o Studio operar barato.
  */
 import { AppFile, AppGenerationResult, codeStats, projectStats } from "./app-types";
-import { CODE_SYSTEM_PROMPT, buildCodeUserPrompt } from "./code-prompts";
+import { CODE_SYSTEM_PROMPT, CODE_REFINE_SYSTEM_PROMPT, buildCodeUserPrompt } from "./code-prompts";
 import { matchTemplate } from "./code-templates";
 import { CostMode, pickTier, modelFor, estimateCost } from "./models";
 
@@ -151,6 +151,14 @@ function currentOf(a: Args): AppFile[] | string | null {
   return a.currentCode ?? null;
 }
 
+/**
+ * Em REFINAMENTO usa o system prompt ENXUTO (só ops → poucos tokens de saída →
+ * geração rápida); na primeira geração usa o completo (design premium etc.).
+ */
+function systemPromptFor(a: Args): string {
+  return a.currentFiles?.length || a.currentCode ? CODE_REFINE_SYSTEM_PROMPT : CODE_SYSTEM_PROMPT;
+}
+
 /** Extrai uma mensagem curta de erro do corpo de resposta de um provedor. */
 async function errDetail(res: Response): Promise<string> {
   try {
@@ -182,7 +190,7 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
       body: JSON.stringify({
         model,
         max_tokens: 24000,
-        system: CODE_SYSTEM_PROMPT,
+        system: systemPromptFor(a),
         messages: [{ role: "user", content: buildCodeUserPrompt(a.message, currentOf(a)) }],
       }),
       signal: AbortSignal.timeout(120_000),
@@ -214,7 +222,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
         max_tokens: 24000,
         usage: { include: true },
         messages: [
-          { role: "system", content: CODE_SYSTEM_PROMPT },
+          { role: "system", content: systemPromptFor(a) },
           { role: "user", content: buildCodeUserPrompt(a.message, currentOf(a)) },
         ],
       }),

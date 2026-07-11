@@ -95,7 +95,15 @@ export function ChatPanel({
     } catch {}
     return initialMessages;
   });
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(() => {
+    // Rascunho: recupera o texto que estava sendo digitado (por thread), pra não
+    // sumir se recarregar a página no meio de um pedido.
+    try {
+      return localStorage.getItem(`adstudio:draft:${threadId}`) || "";
+    } catch {
+      return "";
+    }
+  });
   const [generating, setGenerating] = useState(false);
   const [plan, setPlan] = useState<string[]>([]);
   const [planDone, setPlanDone] = useState(0);
@@ -125,6 +133,14 @@ export function ChatPanel({
       if (messages.length) localStorage.setItem(`adstudio:chat:${threadId}`, JSON.stringify(messages));
     } catch {}
   }, [messages, threadId]);
+
+  // Salva o rascunho do input (por thread) e limpa quando esvazia/envia.
+  useEffect(() => {
+    try {
+      if (input) localStorage.setItem(`adstudio:draft:${threadId}`, input);
+      else localStorage.removeItem(`adstudio:draft:${threadId}`);
+    } catch {}
+  }, [input, threadId]);
 
   // ── Comando por voz (Web Speech API — grátis, roda no navegador) ──
   const [listening, setListening] = useState(false);

@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, MailCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +15,7 @@ import { GoogleButton } from "@/components/auth/google-button";
 export default function SignupPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [confirmationEmail, setConfirmationEmail] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -26,8 +27,9 @@ export default function SignupPage() {
     }
     setLoading(true);
     const supabase = createClient();
-    const { error } = await supabase.auth.signUp({
-      email: String(form.get("email")),
+    const email = String(form.get("email"));
+    const { data, error } = await supabase.auth.signUp({
+      email,
       password,
       options: {
         data: { full_name: String(form.get("name")) },
@@ -39,9 +41,25 @@ export default function SignupPage() {
       toast.error("Não foi possível criar a conta", { description: error.message });
       return;
     }
-    toast.success("Conta criada!", { description: "Vamos configurar seu espaço." });
-    router.push("/onboarding");
-    router.refresh();
+
+    // Com confirmação de e-mail ativa, o Supabase não revela se a conta já
+    // existe: retorna um usuário sem identities e sem erro.
+    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      toast.error("Este e-mail já está cadastrado", { description: "Faça login para continuar." });
+      return;
+    }
+
+    // Confirmação desativada: a sessão já existe e o onboarding pode abrir.
+    if (data.session) {
+      toast.success("Conta criada!", { description: "Vamos configurar seu espaço." });
+      router.push("/onboarding");
+      router.refresh();
+      return;
+    }
+
+    // Confirmação ativada: permanece nesta página até o usuário validar o link.
+    setConfirmationEmail(email);
+    toast.success("E-mail de confirmação enviado!", { description: "Abra sua caixa de entrada para ativar a conta." });
   }
 
   return (
@@ -51,30 +69,46 @@ export default function SignupPage() {
         <CardDescription>Seu primeiro produto fica de pé hoje. Sem cartão de crédito.</CardDescription>
       </CardHeader>
       <CardContent>
-        <GoogleButton next="/onboarding" label="Cadastrar com Google" />
-        <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="h-px flex-1 bg-border" />
-          ou com email
-          <span className="h-px flex-1 bg-border" />
-        </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="name">Nome</Label>
-            <Input id="name" name="name" placeholder="Como devemos te chamar?" required />
+        {confirmationEmail ? (
+          <div className="rounded-xl border border-primary/30 bg-primary/5 p-6 text-center">
+            <MailCheck className="mx-auto h-10 w-10 text-primary" aria-hidden="true" />
+            <h2 className="mt-4 text-lg font-semibold">Confirme seu e-mail para continuar</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Enviamos um link de confirmação para <strong className="text-foreground">{confirmationEmail}</strong>.
+              Abra seu e-mail e clique no link para ativar sua conta.
+            </p>
+            <Button variant="outline" className="mt-5" asChild>
+              <Link href="/login">Ir para o login</Link>
+            </Button>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <Input id="email" name="email" type="email" placeholder="voce@email.com" required autoComplete="email" />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">Senha</Label>
-            <Input id="password" name="password" type="password" placeholder="Mínimo de 8 caracteres" required autoComplete="new-password" />
-          </div>
-          <Button type="submit" className="w-full" variant="brand" disabled={loading}>
-            {loading && <Loader2 className="animate-spin" />}
-            Criar conta
-          </Button>
-        </form>
+        ) : (
+          <>
+            <GoogleButton next="/onboarding" label="Cadastrar com Google" />
+            <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground">
+              <span className="h-px flex-1 bg-border" />
+              ou com email
+              <span className="h-px flex-1 bg-border" />
+            </div>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Nome</Label>
+                <Input id="name" name="name" placeholder="Como devemos te chamar?" required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input id="email" name="email" type="email" placeholder="voce@email.com" required autoComplete="email" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">Senha</Label>
+                <Input id="password" name="password" type="password" placeholder="Mínimo de 8 caracteres" required autoComplete="new-password" />
+              </div>
+              <Button type="submit" className="w-full" variant="brand" disabled={loading}>
+                {loading && <Loader2 className="animate-spin" />}
+                Criar conta
+              </Button>
+            </form>
+          </>
+        )}
         <p className="mt-4 text-center text-sm text-muted-foreground">
           Já tem conta?{" "}
           <Link href="/login" className="text-primary underline-offset-4 hover:underline">

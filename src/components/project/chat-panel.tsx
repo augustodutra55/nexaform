@@ -63,7 +63,9 @@ const APP_SUGGESTIONS = [
   "Um quiz de perguntas e respostas",
 ];
 const REFINE_SITE = ["Mude a cor para azul", "Adicione uma seção de FAQ", "Crie uma página Sobre"];
-const REFINE_APP = ["Adicione um placar", "Deixe o tema escuro", "Adicione um botão de reiniciar"];
+const REFINE_APP = ["Melhore a experiência de uso", "Adicione validações e feedbacks", "Otimize a versão mobile"];
+const REFINE_GAME = ["Adicione um placar", "Crie níveis de dificuldade", "Adicione um botão de reiniciar"];
+const REFINE_CODE_SITE = ["Melhore a versão mobile", "Deixe o visual mais premium", "Revise os textos e chamadas"];
 
 export function ChatPanel({
   projectId,
@@ -111,6 +113,7 @@ export function ChatPanel({
   const [projectCost, setProjectCost] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const startedRef = useRef(false);
+  const autoFixInFlightRef = useRef<string | null>(null);
 
   // ── Modo de geração de código: REAL (IA escreve) vs TEMPLATE (enlatado/demo) ──
   const [genMode, setGenMode] = useState<GenMode>("real");
@@ -211,6 +214,8 @@ export function ChatPanel({
   // Auto-correção: ao receber um erro do preview, pede à IA para corrigir.
   useEffect(() => {
     if (!autoFixError || generating) return;
+    if (autoFixInFlightRef.current === autoFixError) return;
+    autoFixInFlightRef.current = autoFixError;
     const msg =
       `⚙️ Correção automática: o app apresentou este erro ao executar:\n"${autoFixError}"\n` +
       `Corrija a CAUSA desse erro nos arquivos atuais e mantenha TODA a funcionalidade. ` +
@@ -220,6 +225,10 @@ export function ChatPanel({
     onAutoFixHandled?.();
     send(msg, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFixError, generating]);
+
+  useEffect(() => {
+    if (!autoFixError) autoFixInFlightRef.current = null;
   }, [autoFixError]);
 
   async function persist(role: "user" | "assistant", content: string) {
@@ -335,8 +344,15 @@ export function ChatPanel({
     }
   }
 
+  const lastUserRequest = [...messages]
+    .reverse()
+    .find((message) => message.role === "user" && !message.content.startsWith("⚙️ Correção automática:"))?.content ?? "";
+  const describesContentSite = /\b(site|landing|p[áa]gina|portf[oó]lio|empresa|ag[êe]ncia|cl[ií]nica|cafeteria|restaurante|advocacia)\b/i.test(lastUserRequest);
+  const describesGame = /\b(jogo|game|quiz|xadrez|dama|sudoku|snake|cobrinha|2048|mem[oó]ria|forca|wordle|termo)\b/i.test(lastUserRequest);
   const suggestions =
-    mode === "app" ? REFINE_APP : mode === "site" ? REFINE_SITE : [...APP_SUGGESTIONS.slice(0, 2), SITE_SUGGESTIONS[0]];
+    mode === "app"
+      ? describesContentSite ? REFINE_CODE_SITE : describesGame ? REFINE_GAME : REFINE_APP
+      : mode === "site" ? REFINE_SITE : [...APP_SUGGESTIONS.slice(0, 2), SITE_SUGGESTIONS[0]];
 
   return (
     <div className="flex h-full flex-col">

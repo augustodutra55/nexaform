@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { ChatPanel, ProjectMode } from "@/components/project/chat-panel";
 import { CodePanel } from "@/components/project/code-panel";
 import { DataPanel } from "@/components/project/data-panel";
+import { MediaPanel } from "@/components/project/media-panel";
 import { EditorPanel } from "@/components/project/editor-panel";
 import { ProjectTopbar, VersionRow } from "@/components/project/project-topbar";
 import { PreviewPane } from "@/components/preview/preview-pane";
@@ -21,6 +22,7 @@ import { AppRunner } from "@/components/preview/app-runner";
 import { bundleApp } from "@/lib/preview/bundler";
 import { Skeleton } from "@/components/ui/skeleton";
 import { buildViteProject } from "@/lib/export/vite-project";
+import { replaceProjectMedia, type ProjectMediaAsset, type ProjectMediaItem } from "@/lib/media/project-media";
 
 interface ProjectRow {
   id: string;
@@ -56,7 +58,7 @@ export default function ProjectPage() {
   const [appName, setAppName] = useState<string>("App");
   const [appVer, setAppVer] = useState(0);
   const [engineMode, setEngineMode] = useState<EngineMode | null>(null);
-  const [appView, setAppView] = useState<"preview" | "code" | "data">("preview");
+  const [appView, setAppView] = useState<"preview" | "code" | "data" | "media">("preview");
   const [views, setViews] = useState<number | null>(null);
 
   // Visitas do site publicado (analytics agregado). Só busca quando publicado.
@@ -405,6 +407,40 @@ export default function ProjectPage() {
     toast.success("Código aplicado e executado");
   }
 
+  async function handleReplaceMedia(item: ProjectMediaItem, url: string) {
+    const edited = replaceProjectMedia(codeFiles, item, url);
+    if (!edited) {
+      toast.error("A mídia mudou desde a seleção", { description: "Atualize a Central de Mídia e tente novamente." });
+      return;
+    }
+
+    let app: AppCode;
+    if (appFiles && appFiles.length) {
+      setAppFiles(edited);
+      const entry = edited.some((file) => file.path === appEntry) ? appEntry! : edited[0].path;
+      setAppEntry(entry);
+      app = { kind: "app", name: appName, description: "", files: edited, entry };
+    } else {
+      const code = edited[0]?.content || "";
+      setAppCode(code);
+      app = { kind: "app", name: appName, description: "", code };
+    }
+    setAppVer((value) => value + 1);
+    setAppView("preview");
+    await supabase.from("projects").update({ schema: app, updated_at: new Date().toISOString() }).eq("id", projectId);
+    const { data } = await supabase
+      .from("versions")
+      .insert({ project_id: projectId, schema: app, label: `Mídia: ${item.context}`.slice(0, 120) })
+      .select("id, label, created_at, schema")
+      .single();
+    if (data) setVersions((current) => [data as VersionRow, ...current]);
+    toast.success("Mídia substituída no projeto");
+  }
+
+  async function handleMediaAssetsChange(assets: ProjectMediaAsset[]) {
+    await handleMetaChange({ media: assets });
+  }
+
   const MAX_AUTOFIX = 3;
   function handleAppError(message: string) {
     // Loop de auto-conserto: até 3 tentativas POR BUILD (o contador zera a cada
@@ -543,6 +579,16 @@ export default function ProjectPage() {
                   >
                     Dados
                   </button>
+                  <button
+                    onClick={() => setAppView("media")}
+                    title="Gere no ChatGPT/Genspark, envie e substitua imagens ou vídeos"
+                    className={cn(
+                      "rounded-md px-2.5 py-1 font-medium transition-colors",
+                      appView === "media" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Mídia
+                  </button>
                 </div>
                 {project?.published && views !== null && (
                   <span
@@ -557,6 +603,15 @@ export default function ProjectPage() {
               <div className="min-h-0 flex-1">
                 {appView === "data" ? (
                   <DataPanel projectId={projectId} />
+                ) : appView === "media" ? (
+                  <MediaPanel
+                    projectId={projectId}
+                    projectName={project.name}
+                    files={codeFiles}
+                    assets={meta.media || []}
+                    onReplace={handleReplaceMedia}
+                    onAssetsChange={handleMediaAssetsChange}
+                  />
                 ) : appView === "code" && codeFiles.length ? (
                   <CodePanel files={codeFiles} entry={appEntry} onApply={handleApplyCode} />
                 ) : (

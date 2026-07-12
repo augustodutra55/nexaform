@@ -19,9 +19,7 @@ export const maxDuration = 300;
 // gerações grandes (sites complexos, vídeo/imagens pesadas) completam. Sem tocar
 // no código: é só a chavinha.
 const configuredMaxMs = Number(process.env.GEN_MAX_MS);
-const GEN_MAX_MS = Number.isFinite(configuredMaxMs)
-  ? Math.min(Math.max(configuredMaxMs, 10_000), 280_000)
-  : 50_000;
+const GEN_MAX_MS = Number(process.env.GEN_MAX_MS) || 280000;
 const IMG_CEIL_MS = GEN_MAX_MS + 8_000; // janela para gerar imagem por IA depois do código
 
 // ---- Geração de imagens custom (Nano Banana / Gemini Flash Image via OpenRouter) ----

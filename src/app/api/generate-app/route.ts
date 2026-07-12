@@ -231,9 +231,16 @@ export async function POST(req: NextRequest) {
     // Ainda há tempo dentro da janela de ~60s: gera imagem por IA, mas com
     // orçamento de tempo — nunca deixa a soma passar do limite da Vercel.
     try {
+      // Nano Banana (imagem por IA) usa OpenRouter. Prioriza a chave do usuário;
+      // se não vier, cai na chave do servidor (OPENROUTER_API_KEY) — assim a imagem
+      // não depende do navegador guardar a chave.
+      const orKey =
+        userProvider === "openrouter" && typeof userKey === "string" && userKey
+          ? userKey
+          : process.env.OPENROUTER_API_KEY || null;
       imagesGenerated = await resolveAiImages(result.app, supabase, {
-        userKey: typeof userKey === "string" ? userKey : null,
-        userProvider: userProvider ?? null,
+        userKey: orKey,
+        userProvider: orKey ? "openrouter" : null,
         projectId,
         budgetMs: msLeft - 4_000,
       });

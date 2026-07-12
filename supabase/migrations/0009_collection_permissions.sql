@@ -9,9 +9,12 @@ begin
   if not exists (
     select 1 from pg_constraint where conname = 'app_data_project_fk'
   ) then
+    -- NOT VALID preserva registros legados cujo projeto já foi removido, mas
+    -- impede a criação de novos órfãos. A limpeza pode ser feita separadamente.
     alter table public.app_data
       add constraint app_data_project_fk
-      foreign key (project_id) references public.projects(id) on delete cascade;
+      foreign key (project_id) references public.projects(id) on delete cascade
+      not valid;
   end if;
 end $$;
 

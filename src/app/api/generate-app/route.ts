@@ -9,6 +9,7 @@ import { authorizeProjectOwner } from "@/lib/engine/data-guard";
 // Apps grandes + auto-cura (retry/fallback) podem passar de 2 min; damos folga
 // para o servidor não cortar a resposta no meio (o que virava "não é JSON válido").
 export const maxDuration = 300;
+// Fallback de chave: OPENROUTER_API_KEY (env da Vercel) garante geração mesmo se o navegador limpar a chave do usuário.
 
 // TEMPO MÁXIMO da geração antes de cortar com um aviso claro (em vez do erro cru
 // da Vercel). No plano HOBBY a função é cortada em ~60s, então o padrão é 50s.

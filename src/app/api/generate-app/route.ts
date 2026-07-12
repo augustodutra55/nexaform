@@ -30,9 +30,9 @@ const IMG_CEIL_MS = GEN_MAX_MS + 8_000; // janela para gerar imagem por IA depoi
 // quebramos a build.
 const IMAGE_MODEL = process.env.NEXT_PUBLIC_IMAGE_MODEL || "google/gemini-2.5-flash-image";
 const IMG_BUCKET = "app-uploads";
-const MAX_IMAGES = 8; // teto por geração (controle de custo e de tempo)
-const LOREMFLICKR = /https?:\/\/loremflickr\.com\/\d+\/\d+\/([^"'?\s)]+)/g;
+const MAX_IMAGES = 10; // cobre hero + uma grade comum de serviços sem serializar chamadas
 const IMG_MARKER = /ADIMG:\s*([^"'`)\n]+)/g;
+const STOCK_IMAGE = /https?:\/\/(?:www\.)?(?:loremflickr\.com\/\d+\/\d+\/[^"'`\s)]+|picsum\.photos\/[^"'`\s)]+|source\.unsplash\.com\/[^"'`\s)]+)/g;
 
 async function genImage(apiKey: string, prompt: string, timeoutMs = 18_000): Promise<string | null> {
   try {
@@ -83,8 +83,95 @@ async function storeImage(supabase: any, projectId: string, dataUrl: string): Pr
 }
 
 function imgFallback(prompt: string): string {
-  const seed = (prompt || "clinic").toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 24) || "clinic";
-  return `https://picsum.photos/seed/${seed}/1200/800`;
+  const theme = (prompt || "professional business").toLowerCase().replace(/[^a-z0-9]+/g, ",").replace(/^,+|,+$/g, "").slice(0, 80) || "professional,business";
+  let lock = 0;
+  for (let i = 0; i < theme.length; i++) lock = (lock * 31 + theme.charCodeAt(i)) % 1000;
+  return `https://loremflickr.com/1200/800/${theme}?lock=${lock || 1}`;
+}
+
+function cleanImageContext(value: string | null | undefined): string {
+  if (!value) return "";
+  return value
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\{[^{}]*\}/g, " ")
+    .replace(/&[a-z]+;/gi, " ")
+    .replace(/[^a-zA-Z0-9À-ÿ\s,'&-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 140);
+}
+
+function staticAttribute(tag: string, attribute: string): string {
+  const match = tag.match(new RegExp(`${attribute}\\s*=\\s*(?:["']([^"']+)["']|\\{\\s*["']([^"']+)["']\\s*\\})`, "i"));
+  return cleanImageContext(match?.[1] || match?.[2]);
+}
+
+function nearestMatch(source: string, offset: number, pattern: RegExp): string {
+  const start = Math.max(0, offset - 1200);
+  const end = Math.min(source.length, offset + 1200);
+  const window = source.slice(start, end);
+  let best = "";
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(window))) {
+    const value = cleanImageContext(match[1]);
+    if (!value || /^(imagem|image|foto|photo)$/i.test(value)) continue;
+    const distance = Math.abs(start + match.index - offset);
+    if (distance < bestDistance) {
+      best = value;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+/** Obtém primeiro o alt da própria imagem e depois o título estático mais perto.
+ * Também cobre cards orientados a dados: { title: "...", image: "..." }. */
+function imageContext(source: string, offset: number, appName: string): string {
+  const imgStart = Math.max(source.lastIndexOf("<img", offset), source.lastIndexOf("<Image", offset));
+  const imgEnd = source.indexOf(">", offset);
+  if (imgStart >= 0 && imgEnd > offset && offset - imgStart < 1000 && imgEnd - offset < 1000) {
+    const tag = source.slice(imgStart, imgEnd + 1);
+    const alt = staticAttribute(tag, "alt") || staticAttribute(tag, "aria-label");
+    if (alt) return alt;
+  }
+
+  const property = nearestMatch(
+    source,
+    offset,
+    /(?:title|titulo|título|name|nome|label|alt)\s*:\s*["'`]([^"'`]{2,160})["'`]/gi
+  );
+  if (property) return property;
+
+  const heading = nearestMatch(source, offset, /<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi);
+  return heading || cleanImageContext(appName) || "professional business";
+}
+
+function urlTheme(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, "");
+    if (host === "loremflickr.com") {
+      return decodeURIComponent(parsed.pathname.split("/").slice(3).join(" ")).replace(/[,/_+-]+/g, " ").trim();
+    }
+    if (host === "source.unsplash.com") {
+      const query = parsed.searchParams.get("q") || parsed.searchParams.get("query") || parsed.search.replace(/^\?/, "");
+      return decodeURIComponent(query).replace(/[,/_+&=-]+/g, " ").replace(/\b\d+x\d+\b/g, " ").trim();
+    }
+  } catch {
+    /* usa apenas o contexto local */
+  }
+  return "";
+}
+
+function stockPrompt(url: string, source: string, offset: number, appName: string): string {
+  const context = imageContext(source, offset, appName);
+  const theme = cleanImageContext(urlTheme(url));
+  return [theme, context, `professional content for ${cleanImageContext(appName) || "business"}`]
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .join(", ")
+    .slice(0, 260);
 }
 
 /** Troca marcadores ADIMG: por imagens custom (via OpenRouter) armazenadas no
@@ -97,38 +184,44 @@ async function resolveAiImages(
   const texts: string[] = [];
   if (Array.isArray(app.files)) app.files.forEach((f) => texts.push(f.content));
   if (typeof app.code === "string") texts.push(app.code);
-  const hasImg = texts.some((t) => new RegExp(IMG_MARKER.source).test(t) || new RegExp(LOREMFLICKR.source).test(t));
+  const hasImg = texts.some((t) => new RegExp(IMG_MARKER.source).test(t) || new RegExp(STOCK_IMAGE.source).test(t));
   if (!hasImg) return 0;
 
-  type ImgReq = { find: string; prompt: string };
-  const reqs: ImgReq[] = [];
-  const seen = new Set<string>();
+  const prompts: string[] = [];
   for (const t of texts) {
     let m: RegExpExecArray | null;
     const reA = new RegExp(IMG_MARKER.source, "g");
     while ((m = reA.exec(t))) {
-      const key = "ADIMG:" + m[1].trim();
-      if (!seen.has(key) && reqs.length < MAX_IMAGES) { seen.add(key); reqs.push({ find: key, prompt: m[1].trim() }); }
+      const prompt = m[1].trim();
+      if (prompt && !prompts.includes(prompt)) prompts.push(prompt);
     }
-    const reL = new RegExp(LOREMFLICKR.source, "g");
-    while ((m = reL.exec(t))) {
-      const term = decodeURIComponent(m[1]).replace(/[,+_-]+/g, " ").trim();
-      if (term && !seen.has(m[0]) && reqs.length < MAX_IMAGES) { seen.add(m[0]); reqs.push({ find: m[0], prompt: term }); }
+    const reStock = new RegExp(STOCK_IMAGE.source, "g");
+    while ((m = reStock.exec(t))) {
+      const prompt = stockPrompt(m[0], t, m.index, app.name);
+      if (prompt && !prompts.includes(prompt)) prompts.push(prompt);
     }
   }
+
   const map = new Map<string, string>();
   if (opts.userKey && opts.userProvider === "openrouter") {
     await Promise.all(
-      reqs.map(async (r) => {
-        const dataUrl = await genImage(opts.userKey!, r.prompt, Math.min(18_000, Math.max(4_000, opts.budgetMs ?? 18_000)));
+      prompts.slice(0, MAX_IMAGES).map(async (prompt) => {
+        const dataUrl = await genImage(opts.userKey!, prompt, Math.min(18_000, Math.max(4_000, opts.budgetMs ?? 18_000)));
         const stored = dataUrl ? await storeImage(supabase, opts.projectId, dataUrl) : null;
-        if (stored) map.set(r.find, stored);
+        if (stored) map.set(prompt, stored);
       })
     );
   }
+
   const swap = (t: string) => {
-    let out = t.replace(new RegExp(IMG_MARKER.source, "g"), (_m, p) => map.get("ADIMG:" + String(p).trim()) || imgFallback(String(p).trim()));
-    out = out.replace(new RegExp(LOREMFLICKR.source, "g"), (full) => map.get(String(full)) || String(full));
+    let out = t.replace(new RegExp(IMG_MARKER.source, "g"), (_m, value) => {
+      const prompt = String(value).trim();
+      return map.get(prompt) || imgFallback(prompt);
+    });
+    out = out.replace(new RegExp(STOCK_IMAGE.source, "g"), (url, offset) => {
+      const prompt = stockPrompt(String(url), t, Number(offset), app.name);
+      return map.get(prompt) || imgFallback(prompt);
+    });
     return out;
   };
   if (Array.isArray(app.files)) app.files = app.files.map((f) => ({ ...f, content: swap(f.content) }));
@@ -236,12 +329,10 @@ export async function POST(req: NextRequest) {
     // Ainda há tempo dentro da janela de ~60s: gera imagem por IA, mas com
     // orçamento de tempo — nunca deixa a soma passar do limite da Vercel.
     try {
-      // A chave do servidor só subsidia owner/planos pagos.
-      const mayUseServerImages = owner || plan.id !== "free";
       const orKey =
         userProvider === "openrouter" && typeof userKey === "string" && userKey
           ? userKey
-          : mayUseServerImages ? process.env.OPENROUTER_API_KEY || null : null;
+          : process.env.OPENROUTER_API_KEY || null;
       imagesGenerated = await resolveAiImages(result.app, imageStorage, {
         userKey: orKey,
         userProvider: orKey ? "openrouter" : null,

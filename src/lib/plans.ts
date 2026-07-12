@@ -50,7 +50,7 @@ export const PLANS: Record<PlanId, Plan> = {
     features: [
       "Projetos ilimitados",
       "500 gerações por mês",
-      "Exportação do projeto (JSON + código)",
+      "Exportação completa React + Vite",
       "Histórico de versões ilimitado",
       "Provedores de IA premium",
       "Suporte prioritário",

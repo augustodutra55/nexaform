@@ -52,6 +52,10 @@ Qualquer falha de rede ou parse cai para o próximo nível. Há rate-limit persi
 
 `src/lib/store/project.ts` (Zustand) guarda o schema com pilhas de **undo/redo**, página ativa, seção selecionada e estado de salvamento. O **autosave** (debounce de 1,2s) persiste o schema em `projects.schema`; cada geração insere um snapshot em `versions`.
 
+### Entrega para clientes
+
+Apps em código podem ser exportados como um projeto React + Vite completo. O ZIP inclui scripts de desenvolvimento e build, Tailwind, dependências detectadas, runtime `window.AD`, proxy local, regras de rewrite para a Vercel e instruções de publicação. Assim, o frontend pode ser versionado e implantado fora do editor sem copiar arquivos manualmente.
+
 ---
 
 ## 2. Estrutura de pastas

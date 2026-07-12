@@ -20,6 +20,7 @@ import { PreviewPane } from "@/components/preview/preview-pane";
 import { AppRunner } from "@/components/preview/app-runner";
 import { bundleApp } from "@/lib/preview/bundler";
 import { Skeleton } from "@/components/ui/skeleton";
+import { buildViteProject } from "@/lib/export/vite-project";
 
 interface ProjectRow {
   id: string;
@@ -324,19 +325,6 @@ export default function ProjectPage() {
     URL.revokeObjectURL(url);
   }
 
-  /** Carrega o JSZip via CDN (sem inflar o bundle) para exportar projeto multi-arquivo. */
-  function loadJSZip(): Promise<any> {
-    const w = window as any;
-    if (w.JSZip) return Promise.resolve(w.JSZip);
-    return new Promise((resolve, reject) => {
-      const s = document.createElement("script");
-      s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
-      s.onload = () => resolve((window as any).JSZip);
-      s.onerror = () => reject(new Error("Falha ao carregar o compactador."));
-      document.head.appendChild(s);
-    });
-  }
-
   async function handleExport() {
     const plan = resolvePlan(access);
     if (!plan.canExport) {
@@ -348,61 +336,45 @@ export default function ProjectPage() {
     }
     const safeName = (project?.name ?? "projeto").replace(/[^\w.-]+/g, "-").slice(0, 60) || "projeto";
 
-    // Multi-arquivo real → .zip com a árvore de arquivos + package.json + README.
-    if (mode === "app" && appFiles && appFiles.length) {
+    // App React → projeto Vite completo, executável e pronto para deploy.
+    if (mode === "app") {
       try {
-        const JSZip = await loadJSZip();
+        const [{ default: JSZip }] = await Promise.all([import("jszip")]);
         const zip = new JSZip();
         const root = zip.folder(safeName)!;
-        for (const f of appFiles) root.file(f.path, f.content);
-        // detecta TODOS os pacotes npm importados para declarar no package.json
-        const allSrc = appFiles.map((f) => f.content).join("\n");
-        const deps: Record<string, string> = { react: "^18.2.0", "react-dom": "^18.2.0" };
-        const importRe = /from\s+['"]([^'".][^'"]*)['"]/g;
-        let m: RegExpExecArray | null;
-        while ((m = importRe.exec(allSrc))) {
-          const spec = m[1];
-          if (spec.startsWith("react")) continue;
-          // nome do pacote (respeita escopo @org/pkg), ignora subcaminhos
-          const pkg = spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0];
-          if (pkg && !deps[pkg]) deps[pkg] = "latest";
-        }
-        root.file(
-          "package.json",
-          JSON.stringify(
-            {
-              name: safeName.toLowerCase(),
-              private: true,
-              version: "0.1.0",
-              description: `Exportado do AD Studio — entry: ${appEntry ?? appFiles[0].path}`,
-              dependencies: deps,
-            },
-            null,
-            2
-          )
-        );
-        root.file(
-          "README.md",
-          `# ${project?.name ?? "Projeto"}\n\nProjeto React multi-arquivo gerado pelo AD Studio.\n\n- Arquivo de entrada: \`${appEntry ?? appFiles[0].path}\`\n- ${appFiles.length} arquivo(s)\n- Estilização: Tailwind CSS (via CDN no preview)\n`
-        );
+        const sourceFiles: AppFile[] = appFiles && appFiles.length
+          ? appFiles
+          : [{ path: "App.jsx", content: appCode ?? "" }];
+        if (!sourceFiles[0]?.content) throw new Error("O projeto ainda não possui código para exportar.");
+        const apiOrigin = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+        const exportFiles = buildViteProject({
+          files: sourceFiles,
+          entry: appEntry ?? sourceFiles[0].path,
+          projectName: project?.name ?? "Projeto",
+          projectId,
+          apiOrigin,
+        });
+        for (const file of exportFiles) root.file(file.path, file.content);
         const blob = await zip.generateAsync({ type: "blob" });
         downloadBlob(blob, `${safeName}.zip`);
-        toast.success("Exportado como .zip (multi-arquivo)");
+        toast.success("Projeto Vite exportado", {
+          description: "O ZIP inclui scripts, Tailwind, dependências, backend AD e instruções de deploy.",
+        });
       } catch (e: any) {
         toast.error("Não foi possível gerar o .zip", { description: e?.message });
       }
       return;
     }
 
-    // Single-file (legado) → .jsx; site → .json.
-    const content = mode === "app" ? appCode ?? "" : JSON.stringify(store.schema, null, 2);
+    // Projetos antigos do editor visual preservam o schema para reimportação.
+    const content = JSON.stringify(store.schema, null, 2);
     if (!content) {
       toast.error("Nada para exportar ainda");
       return;
     }
     downloadBlob(
-      new Blob([content], { type: mode === "app" ? "text/plain" : "application/json" }),
-      mode === "app" ? `${safeName}.jsx` : `${safeName}.adstudio.json`
+      new Blob([content], { type: "application/json" }),
+      `${safeName}.adstudio.json`
     );
     toast.success("Exportado");
   }

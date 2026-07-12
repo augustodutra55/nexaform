@@ -16,7 +16,7 @@ export const maxDuration = 300;
 // Environment Variables da Vercel — o motor passa a usar quase todo o tempo e as
 // gerações grandes (sites complexos, vídeo/imagens pesadas) completam. Sem tocar
 // no código: é só a chavinha.
-const GEN_MAX_MS = Number(process.env.GEN_MAX_MS) || 50_000;
+const GEN_MAX_MS = Number(process.env.GEN_MAX_MS) || 280_000;
 const IMG_CEIL_MS = GEN_MAX_MS + 8_000; // janela para gerar imagem por IA depois do código
 
 // ---- Geração de imagens custom (Nano Banana / Gemini Flash Image via OpenRouter) ----

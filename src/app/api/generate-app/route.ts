@@ -83,7 +83,7 @@ async function storeImage(supabase: any, projectId: string, dataUrl: string): Pr
 }
 
 function imgFallback(prompt: string): string {
-  const theme = (prompt || "professional business").toLowerCase().replace(/[^a-z0-9]+/g, ",").replace(/^,+|,+$/g, "").slice(0, 80) || "professional,business";
+  const theme = (prompt || "professional business").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, ",").replace(/^,+|,+$/g, "").slice(0, 80) || "professional,business";
   let lock = 0;
   for (let i = 0; i < theme.length; i++) lock = (lock * 31 + theme.charCodeAt(i)) % 1000;
   return `https://loremflickr.com/1200/800/${theme}?lock=${lock || 1}`;

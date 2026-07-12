@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { generateAppWithProviders } from "@/lib/engine/code-providers";
-import { checkRateLimit } from "@/lib/engine/providers";
 import { isOwner, resolvePlan } from "@/lib/access";
 import type { AppCode } from "@/lib/engine/app-types";
-import { authorizeProjectOwner } from "@/lib/engine/data-guard";
+import { authorizeProjectOwner, consumeRateLimit } from "@/lib/engine/data-guard";
+import { finalizeGeneration, reserveGeneration } from "@/lib/engine/generation-usage";
 
 // Apps grandes + auto-cura (retry/fallback) podem passar de 2 min; damos folga
 // para o servidor não cortar a resposta no meio (o que virava "não é JSON válido").
@@ -17,7 +18,10 @@ export const maxDuration = 300;
 // Environment Variables da Vercel — o motor passa a usar quase todo o tempo e as
 // gerações grandes (sites complexos, vídeo/imagens pesadas) completam. Sem tocar
 // no código: é só a chavinha.
-const GEN_MAX_MS = Number(process.env.GEN_MAX_MS) || 280_000;
+const configuredMaxMs = Number(process.env.GEN_MAX_MS);
+const GEN_MAX_MS = Number.isFinite(configuredMaxMs)
+  ? Math.min(Math.max(configuredMaxMs, 10_000), 280_000)
+  : 50_000;
 const IMG_CEIL_MS = GEN_MAX_MS + 8_000; // janela para gerar imagem por IA depois do código
 
 // ---- Geração de imagens custom (Nano Banana / Gemini Flash Image via OpenRouter) ----
@@ -127,7 +131,8 @@ async function resolveAiImages(
 
 export async function POST(req: NextRequest) {
   const started = Date.now();
-  const supabase = createClient();
+  const supabase = await createClient();
+  const imageStorage = createAdminClient() ?? supabase;
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -136,7 +141,7 @@ export async function POST(req: NextRequest) {
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
   const owner = isOwner({ role: profile?.role, email: user.email });
 
-  if (!owner && !checkRateLimit(user.id)) {
+  if (!owner && !(await consumeRateLimit(`generation:${user.id}`, Number(process.env.GENERATION_RATE_LIMIT ?? 20), 60 * 60_000))) {
     return NextResponse.json({ error: "Muitas gerações em pouco tempo. Aguarde e tente de novo." }, { status: 429 });
   }
 
@@ -157,46 +162,37 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: access.error }, { status: access.status ?? 403 });
   }
 
-  // limite mensal (owner ignora)
-  if (!owner) {
-    const { data: sub } = await supabase.from("subscriptions").select("plan").eq("user_id", user.id).maybeSingle();
-    const plan = resolvePlan({ plan: sub?.plan, role: profile?.role, email: user.email });
-    const monthStart = new Date();
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
-    const { count } = await supabase
-      .from("generations")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .gte("created_at", monthStart.toISOString());
-    if ((count ?? 0) >= plan.maxGenerationsPerMonth) {
-      return NextResponse.json(
-        { error: `Limite de ${plan.maxGenerationsPerMonth} gerações do plano ${plan.name} atingido este mês.`, limitReached: true },
-        { status: 402 }
-      );
-    }
-  }
+  const { data: sub } = owner ? { data: null } : await supabase.from("subscriptions").select("plan").eq("user_id", user.id).maybeSingle();
+  const plan = resolvePlan({ plan: sub?.plan, role: profile?.role, email: user.email });
+  const reservation = await reserveGeneration({ supabase, userId: user.id, projectId, prompt: message, limit: plan.maxGenerationsPerMonth, unlimited: owner });
+  if (reservation.error) return NextResponse.json({ error: "Não foi possível reservar sua geração. Tente novamente." }, { status: 503 });
+  if (reservation.limitReached) return NextResponse.json(
+    { error: `Limite de ${plan.maxGenerationsPerMonth} gerações do plano ${plan.name} atingido este mês.`, limitReached: true },
+    { status: 402 }
+  );
 
   // No plano Hobby da Vercel a função é cortada em ~60s (o maxDuration=300 é
   // IGNORADO nesse plano). Se a geração passar disso, a Vercel devolve uma página
   // de erro crua ("An error occurred") que o cliente não consegue ler como JSON.
   // Então cortamos NÓS em 50s e devolvemos um aviso claro em JSON.
   const DEADLINE = { __timeout: true as const };
-  const raced = await Promise.race([
-    generateAppWithProviders({
-      message,
-      currentCode: typeof currentCode === "string" ? currentCode : null,
-      currentFiles: Array.isArray(currentFiles) ? currentFiles : null,
-      name: typeof name === "string" ? name : "App",
-      userKey: typeof userKey === "string" ? userKey : null,
-      userProvider: userProvider ?? null,
-      costMode: costMode ?? "auto",
-      forceReal: forceReal !== false, // padrão: geração REAL
-      allowTemplate: allowTemplate === true,
-    }),
-    new Promise<typeof DEADLINE>((resolve) => setTimeout(() => resolve(DEADLINE), GEN_MAX_MS)),
-  ]);
+  let raced: Awaited<ReturnType<typeof generateAppWithProviders>> | typeof DEADLINE;
+  try {
+    raced = await Promise.race([
+      generateAppWithProviders({ message, currentCode: typeof currentCode === "string" ? currentCode : null,
+        currentFiles: Array.isArray(currentFiles) ? currentFiles : null,
+        name: typeof name === "string" ? name : "App", userKey: typeof userKey === "string" ? userKey : null,
+        userProvider: userProvider ?? null, costMode: costMode ?? "auto",
+        forceReal: forceReal !== false, allowTemplate: allowTemplate === true }),
+      new Promise<typeof DEADLINE>((resolve) => setTimeout(() => resolve(DEADLINE), GEN_MAX_MS)),
+    ]);
+  } catch (error) {
+    await finalizeGeneration(supabase, reservation.id, { status: "failed" });
+    console.error("[generation] falha inesperada", error);
+    return NextResponse.json({ error: "A geração falhou antes de concluir. Tente novamente." }, { status: 502 });
+  }
   if ((raced as any).__timeout) {
+    await finalizeGeneration(supabase, reservation.id, { status: "failed" });
     return NextResponse.json(
       {
         error:
@@ -217,6 +213,7 @@ export async function POST(req: NextRequest) {
     const error = reason
       ? `A geração real falhou: ${reason} — não vou te entregar um demo disfarçado. Verifique sua chave/modelo em Configurações, ou troque para o modo Template/Demo.`
       : "Modo de geração real ativo, mas nenhuma IA está conectada — não vou te entregar um demo disfarçado. Conecte uma chave de IA em Configurações (ou troque para o modo Template/Demo explicitamente).";
+    await finalizeGeneration(supabase, reservation.id, { status: "failed", provider: result.provider });
     return NextResponse.json(
       { error, needsKey: !reason, generationFailed: !!reason, engineMode: result.engineMode },
       { status: 422 }
@@ -231,14 +228,13 @@ export async function POST(req: NextRequest) {
     // Ainda há tempo dentro da janela de ~60s: gera imagem por IA, mas com
     // orçamento de tempo — nunca deixa a soma passar do limite da Vercel.
     try {
-      // Nano Banana (imagem por IA) usa OpenRouter. Prioriza a chave do usuário;
-      // se não vier, cai na chave do servidor (OPENROUTER_API_KEY) — assim a imagem
-      // não depende do navegador guardar a chave.
+      // A chave do servidor só subsidia owner/planos pagos.
+      const mayUseServerImages = owner || plan.id !== "free";
       const orKey =
         userProvider === "openrouter" && typeof userKey === "string" && userKey
           ? userKey
-          : process.env.OPENROUTER_API_KEY || null;
-      imagesGenerated = await resolveAiImages(result.app, supabase, {
+          : mayUseServerImages ? process.env.OPENROUTER_API_KEY || null : null;
+      imagesGenerated = await resolveAiImages(result.app, imageStorage, {
         userKey: orKey,
         userProvider: orKey ? "openrouter" : null,
         projectId,
@@ -251,22 +247,14 @@ export async function POST(req: NextRequest) {
     // Sem tempo para IA: troca os marcadores ADIMG por fallback na hora (instantâneo),
     // pra nunca sobrar "ADIMG:" cru na tela.
     try {
-      await resolveAiImages(result.app, supabase, { userKey: null, userProvider: null, projectId });
+      await resolveAiImages(result.app, imageStorage, { userKey: null, userProvider: null, projectId });
     } catch {
       /* idem */
     }
   }
   if (imagesGenerated > 0) result.cost = (result.cost ?? 0) + imagesGenerated * 0.03; // custo estimado/imagem
 
-  await supabase.from("generations").insert({
-    user_id: user.id,
-    project_id: projectId,
-    prompt: message.slice(0, 2000),
-    provider: result.provider,
-    status: "completed",
-    cost_usd: result.cost ?? 0,
-    model: result.model ?? null,
-  });
+  await finalizeGeneration(supabase, reservation.id, { status: "completed", provider: result.provider, cost: result.cost ?? 0, model: result.model ?? null });
 
   // custo acumulado do projeto
   const { data: rows } = await supabase.from("generations").select("cost_usd").eq("project_id", projectId);

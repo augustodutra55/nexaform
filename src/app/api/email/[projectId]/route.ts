@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { authorizeProject, rateLimit } from "@/lib/engine/data-guard";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { authorizeProject, consumeRateLimit, requestRateKey } from "@/lib/engine/data-guard";
 
 /**
  * Formulário de contato dos apps gerados (window.AD.email).
@@ -33,9 +34,10 @@ async function sendViaResend(payload: {
   subject: string;
   message: string;
   projectId: string;
+  recipient: string | null;
 }): Promise<{ emailed: boolean; error?: string }> {
   const key = process.env.RESEND_API_KEY;
-  const to = process.env.EMAIL_TO || process.env.OWNER_EMAIL;
+  const to = payload.recipient;
   if (!key || !to) return { emailed: false };
   const from = process.env.EMAIL_FROM || "AD Studio <onboarding@resend.dev>";
   const subject = payload.subject ? `Contato: ${payload.subject}` : "Nova mensagem de contato";
@@ -73,10 +75,10 @@ async function sendViaResend(payload: {
   }
 }
 
-export async function POST(req: NextRequest, { params }: { params: { projectId: string } }) {
-  const projectId = params.projectId;
+export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
+  const { projectId } = await params;
   if (!UUID_RE.test(projectId)) return bad("projectId inválido");
-  if (!rateLimit(`email:${projectId}`, 20)) return bad("Muitas mensagens em pouco tempo. Aguarde.", 429);
+  if (!(await consumeRateLimit(`email:${projectId}:${requestRateKey(req)}`, 20))) return bad("Muitas mensagens em pouco tempo. Aguarde.", 429);
 
   let body: any;
   try {
@@ -90,13 +92,18 @@ export async function POST(req: NextRequest, { params }: { params: { projectId: 
   const message = clip(body?.message);
   if (!message && !name && !email) return bad("Mensagem vazia");
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const g = await authorizeProject(supabase, projectId, "write");
   if (!g.allowed) return NextResponse.json({ error: g.error }, { status: g.status });
+  const admin = createAdminClient();
+  if (!admin) return bad("Backend de dados não configurado.", 501);
+  const { data: project } = await admin.from("projects").select("user_id").eq("id", projectId).maybeSingle();
+  const ownerResult = project?.user_id ? await admin.auth.admin.getUserById(project.user_id) : null;
+  const recipient = ownerResult?.data?.user?.email || process.env.EMAIL_TO || process.env.OWNER_EMAIL || null;
 
   // 1) SEMPRE salva no painel de Dados (coleção "contatos").
   const record = { name, email, subject, message };
-  const { data: row, error } = await supabase
+  const { data: row, error } = await admin
     .from("app_data")
     .insert({ project_id: projectId, collection: "contatos", data: record })
     .select("id, data, created_at")
@@ -104,7 +111,7 @@ export async function POST(req: NextRequest, { params }: { params: { projectId: 
   if (error) return bad(error.message, 500);
 
   // 2) Tenta enviar e-mail (silencioso se não configurado).
-  const mail = await sendViaResend({ name, email, subject, message, projectId });
+  const mail = await sendViaResend({ name, email, subject, message, projectId, recipient });
 
   return NextResponse.json({
     ok: true,
@@ -112,6 +119,6 @@ export async function POST(req: NextRequest, { params }: { params: { projectId: 
     id: row.id,
     emailed: mail.emailed,
     // "configured" indica ao app se o e-mail está ligado; nunca vaza segredos.
-    emailConfigured: !!(process.env.RESEND_API_KEY && (process.env.EMAIL_TO || process.env.OWNER_EMAIL)),
+    emailConfigured: !!(process.env.RESEND_API_KEY && recipient),
   });
 }

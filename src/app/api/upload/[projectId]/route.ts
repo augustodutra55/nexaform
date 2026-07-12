@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { authorizeProject, rateLimit } from "@/lib/engine/data-guard";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { authorizeProject, consumeRateLimit, requestRateKey } from "@/lib/engine/data-guard";
 
 /**
  * Upload de arquivos dos apps gerados. Recebe um arquivo (multipart ou base64),
@@ -10,7 +11,7 @@ import { authorizeProject, rateLimit } from "@/lib/engine/data-guard";
 
 const BUCKET = "app-uploads";
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
-const OK_TYPES = /^(image\/(png|jpe?g|gif|webp|svg\+xml)|application\/pdf|text\/plain)$/;
+const OK_TYPES = /^(image\/(png|jpe?g|gif|webp)|application\/pdf|text\/plain)$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function ext(name: string, type: string): string {
@@ -21,17 +22,27 @@ function ext(name: string, type: string): string {
     "image/jpeg": "jpg",
     "image/gif": "gif",
     "image/webp": "webp",
-    "image/svg+xml": "svg",
     "application/pdf": "pdf",
     "text/plain": "txt",
   };
   return map[type] || "bin";
 }
 
-export async function POST(req: NextRequest, { params }: { params: { projectId: string } }) {
-  const projectId = params.projectId;
+function detectContentType(bytes: Buffer, declared: string): string | null {
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return "image/png";
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  const head = bytes.subarray(0, 12).toString("ascii");
+  if (head.startsWith("GIF87a") || head.startsWith("GIF89a")) return "image/gif";
+  if (head.startsWith("RIFF") && head.slice(8, 12) === "WEBP") return "image/webp";
+  if (bytes.subarray(0, 1024).includes(Buffer.from("%PDF-"))) return "application/pdf";
+  if (declared === "text/plain" && !bytes.subarray(0, 4096).includes(0)) return "text/plain";
+  return null;
+}
+
+export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
+  const { projectId } = await params;
   if (!UUID_RE.test(projectId)) return NextResponse.json({ error: "projectId inválido" }, { status: 400 });
-  if (!rateLimit(`upload:${projectId}`, 30)) return NextResponse.json({ error: "Muitos uploads em pouco tempo. Aguarde." }, { status: 429 });
+  if (!(await consumeRateLimit(`upload:${projectId}:${requestRateKey(req)}`, 30))) return NextResponse.json({ error: "Muitos uploads em pouco tempo. Aguarde." }, { status: 429 });
 
   let bytes: Buffer;
   let contentType = "application/octet-stream";
@@ -60,20 +71,25 @@ export async function POST(req: NextRequest, { params }: { params: { projectId: 
   }
 
   if (bytes.length > MAX_BYTES) return NextResponse.json({ error: "Arquivo maior que 5MB" }, { status: 413 });
+  contentType = contentType.split(";", 1)[0].trim().toLowerCase();
   if (!OK_TYPES.test(contentType))
     return NextResponse.json({ error: `Tipo não permitido: ${contentType}` }, { status: 415 });
+  const detectedType = detectContentType(bytes, contentType);
+  if (!detectedType || detectedType !== contentType) return NextResponse.json({ error: "O conteúdo do arquivo não corresponde ao tipo informado." }, { status: 415 });
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const g = await authorizeProject(supabase, projectId, "write");
   if (!g.allowed) return NextResponse.json({ error: g.error }, { status: g.status });
+  const admin = createAdminClient();
+  if (!admin) return NextResponse.json({ error: "Backend de uploads não configurado." }, { status: 501 });
 
-  const path = `${projectId}/${crypto.randomUUID()}.${ext(name, contentType)}`;
-  const { error } = await supabase.storage.from(BUCKET).upload(path, bytes, {
-    contentType,
+  const path = `${projectId}/${crypto.randomUUID()}.${ext(name, detectedType)}`;
+  const { error } = await admin.storage.from(BUCKET).upload(path, bytes, {
+    contentType: detectedType,
     upsert: false,
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+  const { data } = admin.storage.from(BUCKET).getPublicUrl(path);
   return NextResponse.json({ url: data.publicUrl, path });
 }

@@ -42,13 +42,6 @@ export default function SignupPage() {
       return;
     }
 
-    // Com confirmação de e-mail ativa, o Supabase não revela se a conta já
-    // existe: retorna um usuário sem identities e sem erro.
-    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-      toast.error("Este e-mail já está cadastrado", { description: "Faça login para continuar." });
-      return;
-    }
-
     // Confirmação desativada: a sessão já existe e o onboarding pode abrir.
     if (data.session) {
       toast.success("Conta criada!", { description: "Vamos configurar seu espaço." });
@@ -59,7 +52,9 @@ export default function SignupPage() {
 
     // Confirmação ativada: permanece nesta página até o usuário validar o link.
     setConfirmationEmail(email);
-    toast.success("E-mail de confirmação enviado!", { description: "Abra sua caixa de entrada para ativar a conta." });
+    toast.success("Verifique seu e-mail", {
+      description: "Se for uma nova conta, enviaremos o link de ativação. Se já tiver cadastro, faça login.",
+    });
   }
 
   return (
@@ -74,8 +69,9 @@ export default function SignupPage() {
             <MailCheck className="mx-auto h-10 w-10 text-primary" aria-hidden="true" />
             <h2 className="mt-4 text-lg font-semibold">Confirme seu e-mail para continuar</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Enviamos um link de confirmação para <strong className="text-foreground">{confirmationEmail}</strong>.
-              Abra seu e-mail e clique no link para ativar sua conta.
+              Se este for um novo cadastro, enviaremos um link para{" "}
+              <strong className="text-foreground">{confirmationEmail}</strong>. Abra seu e-mail e clique no link
+              para ativar a conta. Se você já tinha cadastro, entre normalmente.
             </p>
             <Button variant="outline" className="mt-5" asChild>
               <Link href="/login">Ir para o login</Link>

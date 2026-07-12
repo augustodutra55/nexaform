@@ -9,16 +9,23 @@ export function adGlobalScript(projectId?: string | null): string {
   return `<script>
 (function(){
   var PID = ${pid};
+  var HOST = window.parent, bridgeSeq = 0, pending = {};
+  window.addEventListener('message', function(e){
+    var d=e.data; if(e.source!==HOST || !d || d.__ad_bridge_result!==true || !pending[d.id]) return;
+    var p=pending[d.id]; delete pending[d.id];
+    if(d.ok) p.resolve(d.payload||{}); else p.reject(new Error(d.error||('AD '+(d.status||500))));
+  });
+  function bridge(kind, opts){ opts=opts||{}; var id='ad-'+Date.now()+'-'+(++bridgeSeq);
+    return new Promise(function(resolve,reject){ pending[id]={resolve:resolve,reject:reject};
+      HOST.postMessage({__ad_bridge:true,id:id,projectId:PID,kind:kind,method:opts.method||'GET',qs:opts.qs||'',body:opts.body,file:opts.file,fileName:opts.fileName},'*');
+      setTimeout(function(){if(!pending[id])return;delete pending[id];reject(new Error('O backend do app demorou para responder.'));},30000);
+    });
+  }
   function noop(){ return Promise.resolve(); }
   if(!PID){ window.AD = { list:function(){return Promise.resolve([]);}, get:function(){return Promise.resolve(null);}, count:function(){return Promise.resolve(0);}, insert:noop, update:noop, remove:noop, email:noop, enabled:false }; return; }
-  var base = '/api/data/' + PID;
   function req(method, opts){
     opts = opts || {};
-    return fetch(base + (opts.qs||''), {
-      method: method,
-      headers: opts.body ? { 'content-type':'application/json' } : undefined,
-      body: opts.body ? JSON.stringify(opts.body) : undefined
-    }).then(function(r){ if(!r.ok) throw new Error('AD data ' + r.status); return r.json(); });
+    return bridge('data',{method:method,qs:opts.qs||'',body:opts.body});
   }
   // Monta a query string de list/get/count a partir de um objeto de opções.
   // opts: { where:{campo:valor}, search, searchField, sort:'campo'|'-campo', limit, offset }
@@ -45,18 +52,14 @@ export function adGlobalScript(projectId?: string | null): string {
     remove: function(id){ return req('DELETE', { qs:'?id=' + encodeURIComponent(id) }).then(function(){ return true; }); },
     // Upload de arquivo/imagem (File ou Blob) → devolve a URL pública.
     upload: function(file){
-      var fd = new FormData();
-      fd.append('file', file);
-      return fetch('/api/upload/' + PID, { method:'POST', body: fd })
-        .then(function(r){ if(!r.ok) return r.json().then(function(e){ throw new Error(e.error||('upload '+r.status)); }); return r.json(); })
+      return bridge('upload',{method:'POST',file:file,fileName:file&&file.name})
         .then(function(r){ return r.url; });
     },
     // Formulário de contato: salva a mensagem no painel de Dados (coleção 'contatos')
     // e, se houver provedor de e-mail configurado, avisa o dono por e-mail.
     // Ex.: await AD.email({ name, email, subject, message }) → { ok, saved, emailed }
     email: function(payload){
-      return fetch('/api/email/' + PID, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload||{}) })
-        .then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error(j.error||('email '+r.status)); return j; }); });
+      return bridge('email',{method:'POST',body:payload||{}});
     }
   };
 
@@ -65,7 +68,7 @@ export function adGlobalScript(projectId?: string | null): string {
   // o marcador não existe, então não conta.
   try {
     if (window.__AD_PUBLISHED && PID) {
-      fetch('/api/view/' + PID, { method: 'POST', keepalive: true }).catch(function(){});
+      bridge('view',{method:'POST'}).catch(function(){});
     }
   } catch(e){}
 
@@ -75,16 +78,13 @@ export function adGlobalScript(projectId?: string | null): string {
   function setTok(t){ try { if(t) localStorage.setItem(TKEY, t); else localStorage.removeItem(TKEY); } catch(e){ window.__adTok = t; } }
   function authFetch(opts){
     opts = opts || {};
-    var h = { 'content-type':'application/json' };
-    var tok = getTok(); if(tok) h['authorization'] = 'Bearer ' + tok;
-    return fetch('/api/app-auth/' + PID + (opts.qs||''), { method: opts.method||'POST', headers: h, body: opts.body ? JSON.stringify(opts.body) : undefined })
-      .then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error(j.error || ('auth '+r.status)); return j; }); });
+    return bridge('auth',{method:opts.method||'POST',qs:opts.qs||'',body:opts.body});
   }
   window.AD.auth = {
     signUp: function(email, password, name){ return authFetch({ body:{ action:'signup', email:email, password:password, name:name } }).then(function(j){ setTok(j.token); return j.user; }); },
     signIn: function(email, password){ return authFetch({ body:{ action:'login', email:email, password:password } }).then(function(j){ setTok(j.token); return j.user; }); },
     signOut: function(){ return authFetch({ body:{ action:'logout' } }).catch(function(){}).then(function(){ setTok(null); return true; }); },
-    me: function(){ if(!getTok()) return Promise.resolve(null); return authFetch({ method:'GET', qs:'?me=1' }).then(function(j){ return j.user; }).catch(function(){ return null; }); },
+    me: function(){ return authFetch({ method:'GET', qs:'?me=1' }).then(function(j){ if(j.user)setTok('bridge-session'); return j.user; }).catch(function(){ return null; }); },
     token: getTok
   };
 })();

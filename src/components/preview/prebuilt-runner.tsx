@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { buildBundledSrcDoc } from "@/lib/preview/bundler";
+import { usePreviewBridge } from "@/components/preview/use-preview-bridge";
 
 /**
  * Runner do app PUBLICADO usando o bundle já pré-compilado no momento da
@@ -11,6 +12,8 @@ import { buildBundledSrcDoc } from "@/lib/preview/bundler";
  * bundle salvo; caso contrário a página pública cai no AppRunner (fallback).
  */
 export function PrebuiltRunner({ bundle, projectId }: { bundle: string; projectId?: string | null }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  usePreviewBridge(iframeRef, projectId);
   const srcDoc = useMemo(
     () => buildBundledSrcDoc(bundle, projectId ?? null, { published: true }),
     [bundle, projectId]
@@ -18,7 +21,8 @@ export function PrebuiltRunner({ bundle, projectId }: { bundle: string; projectI
   return (
     <iframe
       title="App publicado"
-      sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-popups-to-escape-sandbox allow-modals"
+      ref={iframeRef}
+      sandbox="allow-scripts allow-pointer-lock allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads"
       allow="microphone; clipboard-write"
       srcDoc={srcDoc}
       className="h-full w-full border-0 bg-white"

@@ -4,7 +4,7 @@ Estúdio digital de IA para **criar, aprender e construir produtos**: o usuário
 
 Brand assets em `public/brand/`: `logo.svg` (lockup), `logo-mark.svg` (monograma), `favicon.svg`, `app-icon.svg`.
 
-Stack: **Next.js (App Router) · React · TypeScript · Tailwind CSS · shadcn/ui (componentes próprios no mesmo padrão) · Supabase**.
+Stack: **Next.js 15 (App Router) · React · TypeScript · Tailwind CSS · shadcn/ui (componentes próprios no mesmo padrão) · Supabase**.
 
 ---
 
@@ -46,9 +46,7 @@ Vantagens: geração barata (poucos tokens ou zero), preview instantâneo, undo/
 3. `OPENROUTER_API_KEY` do ambiente
 4. **Motor local** (`local.ts`) — determinístico, por templates e heurísticas. Sempre disponível: é o modo demo/uso gratuito.
 
-Qualquer falha de rede ou parse cai para o próximo nível. Há rate-limit por usuário no servidor (`GENERATION_RATE_LIMIT`, default 20/h) além do limite mensal do plano, verificado contra a tabela `generations`.
-
-> Nota: o rate-limit em memória é por instância. Em produção serverless, troque por um contador no Postgres/Redis.
+Qualquer falha de rede ou parse cai para o próximo nível. Há rate-limit persistente por usuário (`GENERATION_RATE_LIMIT`, default 20/h) e reserva atômica da cota mensal antes da chamada ao provedor.
 
 ### Estado do editor
 
@@ -61,8 +59,7 @@ Qualquer falha de rede ou parse cai para o próximo nível. Há rate-limit por u
 ```
 nexaform/
 ├── public/brand/                       # logo.svg, logo-mark.svg, favicon.svg, app-icon.svg
-├── supabase/migrations/0001_init.sql   # todas as tabelas + RLS + triggers
-├── supabase/migrations/0002_owner_role.sql  # role owner + bypass de planos
+├── supabase/migrations/                # schema, RLS, Storage, auth e segurança
 ├── src/
 │   ├── middleware.ts                   # sessão Supabase + rotas protegidas
 │   ├── app/
@@ -113,7 +110,17 @@ Tudo em `supabase/migrations/0001_init.sql`, com **RLS em todas as tabelas**:
 | `generations` | log de cada geração (base do limite mensal por plano) |
 | `versions` | snapshots do schema (histórico de versões restaurável) |
 
-Políticas principais: dono tem CRUD nos próprios dados; `projects` publicados são legíveis anonimamente (rota `/p/[slug]`); `subscriptions`/`usage_limits` são somente leitura para o cliente (escrita via service role/backoffice).
+Políticas principais: dono tem CRUD nos próprios dados; a rota pública recebe apenas campos seguros via `get_public_project`; dados dos apps usam permissões por coleção e API server-side autorizada.
+
+### Segurança do runtime gerado
+
+- iframe em origem opaca, sem `allow-same-origin`;
+- `window.AD` usa ponte escopada ao projeto;
+- coleções privadas por padrão, com perfis de catálogo, formulário e usuário autenticado;
+- uploads diretos bloqueados e arquivos validados pela API;
+- tokens de sessão armazenados com hash e senhas com scrypt assíncrono.
+
+> Aplique as migrations antes de publicar o código que depende delas.
 
 ---
 
@@ -131,13 +138,11 @@ npm install
 
 # 2. Configure o ambiente
 cp .env.example .env.local
-# preencha NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY
+# preencha URL, anon key e SUPABASE_SERVICE_ROLE_KEY
 # (Supabase → Settings → API)
 
 # 3. Crie o banco
-# Abra o SQL Editor do Supabase e execute, em ordem:
-#   supabase/migrations/0001_init.sql
-#   supabase/migrations/0002_owner_role.sql  (ajuste o owner_email no arquivo)
+# Aplique todos os arquivos de supabase/migrations em ordem numérica.
 
 # 4. (Opcional) IA premium
 # Adicione ANTHROPIC_API_KEY ou OPENROUTER_API_KEY ao .env.local.

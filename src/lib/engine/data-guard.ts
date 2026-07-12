@@ -1,11 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import crypto from "crypto";
 import { isOwner } from "@/lib/access";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
- * Guarda de acesso dos endpoints de dados/upload dos apps gerados.
+ * Guarda geral dos endpoints especializados dos apps gerados (upload, e-mail e
+ * autenticação). O CRUD de app_data usa a guarda por coleção em
+ * collection-access.ts.
  *
  * Regra: a escrita/leitura só é permitida quando
- *   - o projeto está PUBLICADO (apps públicos podem coletar/mostrar dados), OU
+ *   - o projeto está PUBLICADO (endpoints públicos especializados podem operar), OU
  *   - quem chama é o DONO autenticado (preview do editor).
  * Isso fecha o buraco de gravar em qualquer UUID de projeto de terceiros.
  * Combina com um limitador de taxa simples por projeto.
@@ -62,7 +66,8 @@ export async function authorizeProject(
 ): Promise<GuardResult> {
   if (!isUuid(projectId)) return { allowed: false, status: 400, error: "projectId inválido" };
 
-  const { data: project } = await supabase
+  const lookup = createAdminClient() ?? supabase;
+  const { data: project } = await lookup
     .from("projects")
     .select("user_id, published")
     .eq("id", projectId)
@@ -103,4 +108,25 @@ export function rateLimit(key: string, max = 60, windowMs = 60_000): boolean {
   arr.push(now);
   hits.set(key, arr);
   return true;
+}
+
+export function requestRateKey(req: Request): string {
+  const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const ip = forwarded || req.headers.get("x-real-ip") || "unknown";
+  return crypto.createHash("sha256").update(ip.slice(0, 128)).digest("hex").slice(0, 24);
+}
+
+export async function consumeRateLimit(key: string, max = 60, windowMs = 60_000): Promise<boolean> {
+  const admin = createAdminClient();
+  if (admin) {
+    const keyHash = crypto.createHash("sha256").update(key).digest("hex");
+    const { data, error } = await admin.rpc("consume_rate_limit", {
+      p_key_hash: keyHash,
+      p_limit: max,
+      p_window_seconds: Math.max(1, Math.ceil(windowMs / 1000)),
+    });
+    if (!error && typeof data === "boolean") return data;
+    if (error) console.warn("[security] rate limit persistente indisponível; usando fallback local", error.message);
+  }
+  return rateLimit(key, max, windowMs);
 }

@@ -11,20 +11,24 @@ import { PublicPreview } from "./public-preview";
 
 export const revalidate = 10;
 
+interface PublicProject {
+  id: string; name: string; description: string | null; schema: unknown;
+  published: boolean; share_slug: string; meta: unknown; build_bundle: string | null;
+}
+
 async function fetchProject(slug: string) {
-  const supabase = createClient();
+  if (!/^[a-zA-Z0-9_-]{1,120}$/.test(slug)) return null;
+  const supabase = await createClient();
   const { data } = await supabase
-    .from("projects")
-    .select("id, name, description, schema, published, meta, build_bundle")
-    .eq("share_slug", slug)
-    .eq("published", true)
+    .rpc("get_public_project", { p_slug: slug })
     .maybeSingle();
-  return data;
+  return data as PublicProject | null;
 }
 
 /** SEO / compartilhamento: metadados dinâmicos por publicação. */
-export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
-  const project = await fetchProject(params.slug);
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params;
+  const project = await fetchProject(slug);
   if (!project) return { title: "Projeto não encontrado" };
   const meta = readMeta(project.meta);
   const description =
@@ -47,8 +51,9 @@ export async function generateMetadata({ params }: { params: { slug: string } })
   };
 }
 
-export default async function PublicProjectPage({ params }: { params: { slug: string } }) {
-  const project = await fetchProject(params.slug);
+export default async function PublicProjectPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const project = await fetchProject(slug);
   if (!project || (!isValidSchema(project.schema) && !isAppCode(project.schema))) notFound();
 
   const app = isAppCode(project.schema) ? project.schema : null;

@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import type { AppFile, EngineMode } from "@/lib/engine/app-types";
 import { bundleApp, buildBundledSrcDoc } from "@/lib/preview/bundler";
 import { adGlobalScript } from "@/lib/preview/ad-global";
+import { usePreviewBridge } from "@/components/preview/use-preview-bridge";
 
 interface AppRunnerProps {
   /** Single-file (legado): código de um componente App. */
@@ -33,6 +34,7 @@ interface AppRunnerProps {
   projectId?: string | null;
   /** chamado quando o app dá erro de execução (para auto-correção). */
   onError?: (message: string) => void;
+  editorSession?: boolean;
 }
 
 function buildSrcDoc(code: string, projectId?: string | null): string {
@@ -281,7 +283,7 @@ ${adScript}
 </html>`;
 }
 
-export function AppRunner({ code, files, entry, version, engineMode, projectId, onError }: AppRunnerProps) {
+export function AppRunner({ code, files, entry, version, engineMode, projectId, onError, editorSession = false }: AppRunnerProps) {
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -291,6 +293,7 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  usePreviewBridge(iframeRef, projectId, (message) => onErrorRef.current?.(message), editorSession);
 
   const hasFiles = Array.isArray(files) && files.length > 0;
   const hasContent = hasFiles || !!code;
@@ -329,17 +332,6 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code, files, entry, version, reloadKey, projectId]);
-
-  // Escuta erros de execução vindos do iframe (para auto-correção).
-  useEffect(() => {
-    function onMsg(e: MessageEvent) {
-      if (e?.data && typeof e.data === "object" && typeof e.data.__nx_error === "string") {
-        onErrorRef.current?.(e.data.__nx_error);
-      }
-    }
-    window.addEventListener("message", onMsg);
-    return () => window.removeEventListener("message", onMsg);
-  }, []);
 
   useEffect(() => {
     if (!expanded) return;
@@ -449,7 +441,7 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
               key={reloadKey}
               ref={iframeRef}
               title="Preview do app"
-              sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-popups-to-escape-sandbox allow-modals"
+              sandbox="allow-scripts allow-pointer-lock allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads"
               allow="microphone; clipboard-write"
               srcDoc={srcDoc}
               onLoad={() => setLoading(false)}

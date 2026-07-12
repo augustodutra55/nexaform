@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
+import { safeNextPath } from "@/lib/auth/redirect";
 
 /**
  * Login com Google (Supabase Auth, fluxo OAuth + PKCE).
@@ -20,10 +21,11 @@ export function GoogleButton({ next = "/dashboard", label = "Continuar com Googl
   async function signIn() {
     setLoading(true);
     const supabase = createClient();
+    const safeNext = safeNextPath(next);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeNext)}`,
         // refresh token de longa duração para manter a sessão persistente
         queryParams: { access_type: "offline", prompt: "consent" },
       },

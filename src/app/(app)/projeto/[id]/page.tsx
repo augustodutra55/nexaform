@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
@@ -30,7 +30,8 @@ interface ProjectRow {
   meta: any;
 }
 
-export default function ProjectPage({ params }: { params: { id: string } }) {
+export default function ProjectPage() {
+  const params = useParams<{ id: string }>();
   const projectId = params.id;
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -594,6 +595,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                     version={appVer}
                     engineMode={engineMode}
                     projectId={projectId}
+                    editorSession
                     onError={handleAppError}
                   />
                 )}

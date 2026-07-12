@@ -30,7 +30,8 @@ const IMG_CEIL_MS = GEN_MAX_MS + 8_000; // janela para gerar imagem por IA depoi
 // quebramos a build.
 const IMAGE_MODEL = process.env.NEXT_PUBLIC_IMAGE_MODEL || "google/gemini-2.5-flash-image";
 const IMG_BUCKET = "app-uploads";
-const MAX_IMAGES = 3; // teto por geração (controle de custo e de tempo)
+const MAX_IMAGES = 8; // teto por geração (controle de custo e de tempo)
+const LOREMFLICKR = /https?:\/\/loremflickr\.com\/\d+\/\d+\/([^"'?\s)]+)/g;
 const IMG_MARKER = /ADIMG:\s*([^"'`)\n]+)/g;
 
 async function genImage(apiKey: string, prompt: string, timeoutMs = 18_000): Promise<string | null> {
@@ -96,34 +97,43 @@ async function resolveAiImages(
   const texts: string[] = [];
   if (Array.isArray(app.files)) app.files.forEach((f) => texts.push(f.content));
   if (typeof app.code === "string") texts.push(app.code);
-  if (!texts.some((t) => new RegExp(IMG_MARKER.source).test(t))) return 0;
+  const hasImg = texts.some((t) => new RegExp(IMG_MARKER.source).test(t) || new RegExp(LOREMFLICKR.source).test(t));
+  if (!hasImg) return 0;
 
+  type ImgReq = { find: string; prompt: string };
+  const reqs: ImgReq[] = [];
+  const seen = new Set<string>();
+  for (const t of texts) {
+    let m: RegExpExecArray | null;
+    const reA = new RegExp(IMG_MARKER.source, "g");
+    while ((m = reA.exec(t))) {
+      const key = "ADIMG:" + m[1].trim();
+      if (!seen.has(key) && reqs.length < MAX_IMAGES) { seen.add(key); reqs.push({ find: key, prompt: m[1].trim() }); }
+    }
+    const reL = new RegExp(LOREMFLICKR.source, "g");
+    while ((m = reL.exec(t))) {
+      const term = decodeURIComponent(m[1]).replace(/[,+_-]+/g, " ").trim();
+      if (term && !seen.has(m[0]) && reqs.length < MAX_IMAGES) { seen.add(m[0]); reqs.push({ find: m[0], prompt: term }); }
+    }
+  }
   const map = new Map<string, string>();
   if (opts.userKey && opts.userProvider === "openrouter") {
-    const prompts: string[] = [];
-    for (const t of texts) {
-      const re = new RegExp(IMG_MARKER.source, "g");
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(t))) {
-        const p = m[1].trim();
-        if (p && !prompts.includes(p) && prompts.length < MAX_IMAGES) prompts.push(p);
-      }
-    }
-    // Em paralelo: assim N imagens custam ~o tempo de UMA, não a soma — o que
-    // evitava estourar o tempo do servidor (erro "não é JSON válido").
     await Promise.all(
-      prompts.map(async (p) => {
-        const dataUrl = await genImage(opts.userKey!, p, Math.min(18_000, Math.max(4_000, opts.budgetMs ?? 18_000)));
-        const url = dataUrl ? await storeImage(supabase, opts.projectId, dataUrl) : null;
-        map.set(p, url || imgFallback(p));
+      reqs.map(async (r) => {
+        const dataUrl = await genImage(opts.userKey!, r.prompt, Math.min(18_000, Math.max(4_000, opts.budgetMs ?? 18_000)));
+        const stored = dataUrl ? await storeImage(supabase, opts.projectId, dataUrl) : null;
+        if (stored) map.set(r.find, stored);
       })
     );
   }
-  const swap = (t: string) =>
-    t.replace(new RegExp(IMG_MARKER.source, "g"), (_m, p) => map.get(String(p).trim()) || imgFallback(String(p)));
+  const swap = (t: string) => {
+    let out = t.replace(new RegExp(IMG_MARKER.source, "g"), (_m, p) => map.get("ADIMG:" + String(p).trim()) || imgFallback(String(p).trim()));
+    out = out.replace(new RegExp(LOREMFLICKR.source, "g"), (full) => map.get(String(full)) || String(full));
+    return out;
+  };
   if (Array.isArray(app.files)) app.files = app.files.map((f) => ({ ...f, content: swap(f.content) }));
   if (typeof app.code === "string") app.code = swap(app.code);
-  return Array.from(map.values()).filter((u) => u && !u.includes("picsum")).length;
+  return map.size;
 }
 // ---- fim da geração de imagens custom ----
 

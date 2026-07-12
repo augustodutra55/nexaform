@@ -143,6 +143,7 @@ select distinct
     )
   )
 from public.app_data d
+join public.projects p on p.id = d.project_id
 on conflict (project_id, collection) do nothing;
 
 select 'migracao 0009 aplicada: colecoes privadas por padrao' as resultado;

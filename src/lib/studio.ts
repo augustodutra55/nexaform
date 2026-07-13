@@ -3,6 +3,8 @@
  * Serve para qualquer tipo de projeto: site, app ou jogo.
  */
 
+import type { ProjectMediaAsset } from "@/lib/media/project-media";
+
 export type ProjectStatus = "rascunho" | "producao" | "revisao" | "entregue";
 
 export interface ProjectMeta {
@@ -14,6 +16,8 @@ export interface ProjectMeta {
   client?: string;
   /** Entrega white-label: publicação sem a marca AD Studio. */
   whitelabel?: boolean;
+  /** Arquivos enviados pela Central de Mídia para reutilização no projeto. */
+  media?: ProjectMediaAsset[];
 }
 
 export const STATUS_LABEL: Record<ProjectStatus, string> = {

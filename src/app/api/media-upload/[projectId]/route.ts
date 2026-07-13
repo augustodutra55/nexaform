@@ -7,6 +7,18 @@ import { authorizeProjectOwner, consumeRateLimit, isUuid, requestRateKey } from 
 
 const BUCKET = "app-uploads";
 const MAX_BYTES = 50 * 1024 * 1024;
+const PROJECT_MAX_BYTES = 500 * 1024 * 1024;
+const BUCKET_MIME_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "application/pdf",
+  "text/plain",
+];
 const TYPES: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -54,6 +66,33 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
 
   const admin = createAdminClient();
   if (!admin) return bad("Backend de mídia não configurado.", 501);
+
+  // A configuração é idempotente e só ocorre depois de autenticar e confirmar
+  // a propriedade do projeto. Evita exigir uma etapa manual no SQL Editor.
+  const { data: currentBucket, error: bucketReadError } = await admin.storage.getBucket(BUCKET);
+  if (bucketReadError || !currentBucket) {
+    return bad(`Não foi possível verificar o armazenamento: ${bucketReadError?.message || "bucket ausente"}`, 500);
+  }
+  const { error: bucketError } = await admin.storage.updateBucket(BUCKET, {
+    public: currentBucket.public,
+    fileSizeLimit: MAX_BYTES,
+    allowedMimeTypes: BUCKET_MIME_TYPES,
+  });
+  if (bucketError) return bad(`Não foi possível configurar o armazenamento: ${bucketError.message}`, 500);
+
+  // Proteção de custo: cada projeto pode ocupar no máximo 500 MB na Central.
+  const { data: storedFiles, error: listError } = await admin.storage
+    .from(BUCKET)
+    .list(projectId, { limit: 1000 });
+  if (listError) return bad(`Não foi possível verificar o espaço usado: ${listError.message}`, 500);
+  const usedBytes = (storedFiles || []).reduce(
+    (total, file) => total + Math.max(0, Number(file.metadata?.size || 0)),
+    0
+  );
+  if (usedBytes + size > PROJECT_MAX_BYTES) {
+    return bad("Este projeto atingiu o limite de 500 MB da Central de Mídia.", 413);
+  }
+
   const path = `${projectId}/media-${crypto.randomUUID()}.${extension}`;
   const { data, error } = await admin.storage.from(BUCKET).createSignedUploadUrl(path);
   if (error || !data?.token) return bad(error?.message || "Não foi possível preparar o upload.", 500);

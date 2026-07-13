@@ -225,8 +225,14 @@ ${adScript}
         };
       }
       if(L && L.icons){ Object.keys(L.icons).forEach(function(name){ out[name] = make(L.icons[name]); }); }
-      __lucideCache = out;
-      return out;
+      // Mesmo no runtime Babel de contingência, um nome inventado pela IA não
+      // pode derrubar o app inteiro. O Proxy devolve um ícone neutro e mantém a
+      // interface funcional até a edição seguinte substituir o nome.
+      var fallback = out.Gauge || out.Circle || make([['circle',{cx:12,cy:12,r:9}]]);
+      __lucideCache = typeof Proxy === 'function'
+        ? new Proxy(out, { get: function(target, key){ return target[key] || fallback; } })
+        : out;
+      return __lucideCache;
     }
     function external(spec){
       if(spec==='react') return React;

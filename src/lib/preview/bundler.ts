@@ -76,6 +76,44 @@ const IMPORT_MAP_KEYS = new Set([
   "react/jsx-dev-runtime",
 ]);
 
+const LUCIDE_RE = /import\s*\{([^}]*)\}\s*from\s*['"]lucide-react['"]/g;
+const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/**
+ * Descobre os named exports de lucide-react pedidos pelo código gerado.
+ * O módulo virtual criado abaixo usa acesso por namespace, portanto um nome
+ * inventado pela IA não faz o navegador rejeitar o módulo inteiro.
+ */
+export function collectLucideImports(files: AppFile[]): string[] {
+  const names = new Set<string>();
+  for (const file of files) {
+    LUCIDE_RE.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = LUCIDE_RE.exec(file.content)) !== null) {
+      const specs = match[1].split(",");
+      for (const spec of specs) {
+        const imported = spec.trim().split(/\s+as\s+/i)[0]?.trim();
+        if (imported && IDENTIFIER_RE.test(imported)) names.add(imported);
+      }
+    }
+  }
+  return Array.from(names);
+}
+
+function lucideVirtualModule(names: string[]): string {
+  const source = "https://esm.sh/lucide-react@0.468.0?external=react,react-dom";
+  const exports = names.map(
+    (name) =>
+      `export const ${name} = Lucide[${JSON.stringify(name)}] || Lucide.Gauge || Lucide.Circle;`
+  );
+  return [
+    `import * as Lucide from ${JSON.stringify(source)};`,
+    `export * from ${JSON.stringify(source)};`,
+    ...exports,
+    "export default Lucide;",
+  ].join("\n");
+}
+
 export interface BundleResult {
   code: string;
   /** Pacotes npm externos detectados (para info/export). */
@@ -92,6 +130,7 @@ export async function bundleApp(files: AppFile[], entry: string): Promise<Bundle
   for (const f of files) map[f.path.replace(/^\.?\//, "")] = f.content;
   const entryPath = entry.replace(/^\.?\//, "");
   const packages = new Set<string>();
+  const lucideImports = collectLucideImports(files);
 
   const candidates = (base: string) => [
     base,
@@ -132,6 +171,7 @@ export async function bundleApp(files: AppFile[], entry: string): Promise<Bundle
         setup(build: any) {
           build.onResolve({ filter: /.*/ }, (args: any) => {
             if (args.path === BOOT) return { path: BOOT, namespace: "nx" };
+            if (/^https?:\/\//.test(args.path)) return { path: args.path, external: true };
             // imports relativos → arquivos em memória
             if (args.path.startsWith(".") || args.importer === BOOT) {
               if (args.path.startsWith(".")) {
@@ -145,6 +185,14 @@ export async function bundleApp(files: AppFile[], entry: string): Promise<Bundle
             }
             // React e afins → externos, resolvidos pelo import map (React único)
             if (IMPORT_MAP_KEYS.has(args.path)) return { path: args.path, external: true };
+            // A IA eventualmente inventa um nome de ícone (ex.: Engine). Se o
+            // pacote ficar externo, o navegador aborta TODO o app por causa de
+            // um único named export ausente. O módulo virtual preserva ícones
+            // válidos e usa um fallback visual seguro para nomes inexistentes.
+            if (args.path === "lucide-react") {
+              packages.add("lucide-react");
+              return { path: "lucide-react", namespace: "nx-lucide" };
+            }
             // qualquer outro pacote npm → esm.sh externo, usando o React do import map
             const clean = args.path.split("/")[0].replace(/^@[^/]+\//, "");
             packages.add(args.path.startsWith("@") ? args.path.split("/").slice(0, 2).join("/") : clean);
@@ -157,6 +205,10 @@ export async function bundleApp(files: AppFile[], entry: string): Promise<Bundle
             if (content == null) return { errors: [{ text: `Arquivo não encontrado: ${args.path}` }] };
             return { contents: content, loader: loaderFor(args.path) };
           });
+          build.onLoad({ filter: /.*/, namespace: "nx-lucide" }, () => ({
+            contents: lucideVirtualModule(lucideImports),
+            loader: "js",
+          }));
         },
       },
     ],

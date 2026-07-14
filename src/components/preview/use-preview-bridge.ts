@@ -45,12 +45,26 @@ export function usePreviewBridge(
           utterance.rate = Math.min(2, Math.max(0.5, Number(body?.rate) || 1));
           utterance.pitch = Math.min(2, Math.max(0, Number(body?.pitch) || 1));
           utterance.volume = Math.min(1, Math.max(0, body?.volume == null ? 1 : Number(body.volume)));
-          // Rede de segurança para clientes antigos que ainda usam a ponte:
-          // nunca herdar uma fila pausada ou presa por outro app/preview.
-          window.speechSynthesis.cancel();
-          window.speechSynthesis.resume();
-          window.speechSynthesis.speak(utterance);
-          reply(source, id, { ok: true, status: 200, payload: { speaking: true } });
+          const voices = window.speechSynthesis.getVoices();
+          const language = utterance.lang.toLowerCase();
+          const baseLanguage = language.split("-")[0];
+          utterance.voice = voices.find((voice) => voice.lang.toLowerCase() === language)
+            || voices.find((voice) => voice.lang.toLowerCase().split("-")[0] === baseLanguage)
+            || null;
+          const queueWasBusy = window.speechSynthesis.speaking
+            || window.speechSynthesis.pending || window.speechSynthesis.paused;
+          if (queueWasBusy) window.speechSynthesis.cancel();
+          const play = () => {
+            try {
+              window.speechSynthesis.resume();
+              window.speechSynthesis.speak(utterance);
+              reply(source, id, { ok: true, status: 200, payload: { speaking: true } });
+            } catch (error) {
+              reply(source, id, { ok: false, status: 500, error: error instanceof Error ? error.message : "Falha na leitura em voz alta." });
+            }
+          };
+          // Safari pode descartar a fala se cancel() e speak() ocorrerem juntos.
+          if (queueWasBusy) window.setTimeout(play, 120); else play();
         } catch (error) {
           reply(source, id, { ok: false, status: 500, error: error instanceof Error ? error.message : "Falha na leitura em voz alta." });
         }

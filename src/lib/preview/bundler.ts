@@ -237,11 +237,7 @@ export function buildBundledSrcDoc(
       "react-dom/client": `https://esm.sh/react-dom@${REACT_VERSION}/client`,
     },
   };
-  // Safari rejeita import(blob:) de um documento srcdoc com origem opaca
-  // (sandbox sem allow-same-origin) e devolve apenas "Importing a module script
-  // failed". O bundle já é ESM; executá-lo como módulo inline preserva o import
-  // map e mantém o isolamento. Escapamos a única sequência que encerraria a tag.
-  const inlineModule = bundledCode.replace(/<\/script/gi, "<\\/script");
+  const codeJson = JSON.stringify(bundledCode);
   return `<!doctype html>
 <html lang="pt-BR">
 <head>
@@ -287,7 +283,18 @@ ${adScript}
   try { Object.defineProperty(window, 'top', { get: function(){ return window; } }); } catch(e){}
 </script>
 <script type="module">
-${inlineModule}
+(async () => {
+  try {
+    const blob = new Blob([${codeJson}], { type: 'text/javascript' });
+    const url = URL.createObjectURL(blob);
+    await import(url);
+  } catch (e) {
+    var m = (e && e.message) || String(e);
+    var r = document.getElementById('root');
+    if (r) r.innerHTML = '<div class="nx-error">⚠ Erro ao executar o app:\\n\\n'+String(m).replace(/</g,'&lt;')+'</div>';
+    try{ window.parent.postMessage({ __nx_error:String(m).slice(0,800) }, '*'); }catch(_){}
+  }
+})();
 </script>
 </body>
 </html>`;

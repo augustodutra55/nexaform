@@ -121,6 +121,7 @@ export function installADRuntime() {
     if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) return Promise.reject(new Error('Leitura em voz alta indisponível.'));
     const utterance = new SpeechSynthesisUtterance(String(text || ''));
     utterance.lang = options.lang || 'pt-BR'; utterance.rate = options.rate || 1; utterance.pitch = options.pitch || 1; utterance.volume = options.volume == null ? 1 : options.volume;
+    window.speechSynthesis.cancel(); window.speechSynthesis.resume();
     window.speechSynthesis.speak(utterance); return Promise.resolve({ speaking: true });
   }
   window.AD = {

@@ -61,12 +61,37 @@ export function adGlobalScript(projectId?: string | null): string {
     email: function(payload){
       return bridge('email',{method:'POST',body:payload||{}});
     },
-    // Voz é executada pela página principal. O app continua em sandbox seguro,
-    // mas ganha microfone e alto-falante confiáveis via uma ponte controlada.
+    // O microfone usa a página principal, pois reconhecimento de voz costuma ser
+    // bloqueado em iframes sandbox. A leitura em voz alta fica local e síncrona:
+    // isso preserva o gesto do clique e impede um app de prender a fila dos demais.
     voice: {
       listen: function(opts){ opts=opts||{}; return bridge('voice',{method:'POST',body:{action:'listen',lang:opts.lang||'pt-BR'}}).then(function(r){return r.transcript||'';}); },
-      speak: function(text, opts){ opts=opts||{}; return bridge('voice',{method:'POST',body:{action:'speak',text:String(text||''),lang:opts.lang||'pt-BR',rate:opts.rate,pitch:opts.pitch,volume:opts.volume}}); },
-      cancel: function(){ return bridge('voice',{method:'POST',body:{action:'cancel'}}).catch(function(){}); }
+      speak: function(text, opts){
+        opts=opts||{};
+        return new Promise(function(resolve,reject){
+          var synth=window.speechSynthesis, Utterance=window.SpeechSynthesisUtterance;
+          var value=String(text||'').trim();
+          if(!value || !synth || !Utterance){ reject(new Error('Leitura em voz alta não disponível neste navegador.')); return; }
+          try {
+            // Sempre zera a fila local. Corrige filas pausadas/presas por outra fala
+            // e faz cada clique pronunciar apenas a palavra solicitada.
+            synth.cancel();
+            synth.resume();
+            var utterance=new Utterance(value.slice(0,5000));
+            utterance.lang=String(opts.lang||'pt-BR').slice(0,20);
+            utterance.rate=Math.min(2,Math.max(0.5,Number(opts.rate)||1));
+            utterance.pitch=Math.min(2,Math.max(0,Number(opts.pitch)||1));
+            utterance.volume=Math.min(1,Math.max(0,opts.volume==null?1:Number(opts.volume)));
+            // Deve acontecer no mesmo ciclo do clique; não mover para await/timer.
+            synth.speak(utterance);
+            resolve({speaking:true});
+          } catch(error){ reject(error instanceof Error?error:new Error('Falha na leitura em voz alta.')); }
+        });
+      },
+      cancel: function(){
+        try { if(window.speechSynthesis)window.speechSynthesis.cancel(); } catch(e){}
+        return bridge('voice',{method:'POST',body:{action:'cancel'}}).catch(function(){});
+      }
     }
   };
 
@@ -95,9 +120,9 @@ export function adGlobalScript(projectId?: string | null): string {
     token: getTok
   };
 
-  // Compatibilidade com apps já gerados que usam diretamente Web Speech API.
-  // A origem opaca do iframe pode bloquear a implementação nativa; este adaptador
-  // mantém a mesma interface e encaminha a operação para window.AD.voice.
+  // Compatibilidade de MICROFONE com apps já gerados que usam Web Speech API.
+  // A fala nativa (speechSynthesis) não é sobrescrita: ela precisa permanecer no
+  // ciclo síncrono do clique e não deve compartilhar a fila com outros previews.
   (function installVoiceCompatibility(){
     function BridgeRecognition(){
       this.lang='pt-BR'; this.interimResults=false; this.continuous=false;
@@ -123,22 +148,6 @@ export function adGlobalScript(projectId?: string | null): string {
     BridgeRecognition.prototype.stop=function(){ this._run++; window.AD.voice.cancel(); if(typeof this.onend==='function') try{this.onend({type:'end'});}catch(e){} };
     BridgeRecognition.prototype.abort=BridgeRecognition.prototype.stop;
     try { window.SpeechRecognition=BridgeRecognition; window.webkitSpeechRecognition=BridgeRecognition; } catch(e){}
-
-    // Apps existentes que chamam speechSynthesis.speak passam a falar no topo,
-    // onde o navegador permite a saída de áudio com mais consistência.
-    try {
-      var synth=window.speechSynthesis;
-      if(synth){
-        var nativeCancel=typeof synth.cancel==='function' ? synth.cancel.bind(synth) : function(){};
-        synth.speak=function(utterance){
-          window.AD.voice.speak(utterance&&utterance.text||'',{
-            lang:utterance&&utterance.lang||'pt-BR', rate:utterance&&utterance.rate,
-            pitch:utterance&&utterance.pitch, volume:utterance&&utterance.volume
-          }).catch(function(){});
-        };
-        synth.cancel=function(){ nativeCancel(); window.AD.voice.cancel(); };
-      }
-    } catch(e){}
   })();
 })();
 </script>

@@ -22,6 +22,56 @@ export function adGlobalScript(projectId?: string | null): string {
     });
   }
   function noop(){ return Promise.resolve(); }
+  // Guarda as funções nativas antes que apps antigos tentem alterá-las. No
+  // Safari/macOS, chamar cancel() e speak() no mesmo instante pode silenciar a
+  // nova fala; o pequeno intervalo abaixo deixa a fila realmente ser liberada.
+  var voiceSynth=window.speechSynthesis;
+  var nativeVoiceSpeak=voiceSynth&&typeof voiceSynth.speak==='function'?voiceSynth.speak.bind(voiceSynth):null;
+  var nativeVoiceCancel=voiceSynth&&typeof voiceSynth.cancel==='function'?voiceSynth.cancel.bind(voiceSynth):null;
+  var nativeVoiceResume=voiceSynth&&typeof voiceSynth.resume==='function'?voiceSynth.resume.bind(voiceSynth):function(){};
+  var voiceRun=0, voiceCancelGeneration=0, lastVoiceCancel=0, legacyVoiceQueue=[], legacyVoiceTimer=null;
+  function cancelLocalVoice(){
+    voiceRun++; voiceCancelGeneration++; lastVoiceCancel=Date.now();
+    if(legacyVoiceTimer)clearTimeout(legacyVoiceTimer);
+    legacyVoiceTimer=null; legacyVoiceQueue=[];
+    if(nativeVoiceCancel)nativeVoiceCancel();
+  }
+  function playLocalUtterance(utterance, onPlayed, onError){
+    if(!voiceSynth||!nativeVoiceSpeak){ if(onError)onError(new Error('Leitura em voz alta não disponível neste navegador.')); return; }
+    var run=++voiceRun;
+    var mustReset=!!(voiceSynth.speaking||voiceSynth.pending||voiceSynth.paused);
+    if(mustReset)cancelLocalVoice();
+    run=++voiceRun;
+    var elapsed=Date.now()-lastVoiceCancel;
+    var delay=(mustReset||elapsed<120)?Math.max(60,120-elapsed):0;
+    function play(){
+      if(run!==voiceRun){ if(onPlayed)onPlayed(false); return; }
+      try { nativeVoiceResume(); nativeVoiceSpeak(utterance); if(onPlayed)onPlayed(true); }
+      catch(error){ if(onError)onError(error instanceof Error?error:new Error('Falha na leitura em voz alta.')); }
+    }
+    if(delay)setTimeout(play,delay); else play();
+  }
+  function queueLegacyUtterance(utterance){
+    if(!voiceSynth||!nativeVoiceSpeak)return;
+    var generation=voiceCancelGeneration;
+    var elapsed=Date.now()-lastVoiceCancel;
+    function play(){
+      // Apenas cancel() invalida a fila. Várias chamadas speak() continuam sendo
+      // enfileiradas na ordem nativa, como a Web Speech API especifica.
+      if(generation!==voiceCancelGeneration)return;
+      try { nativeVoiceResume(); nativeVoiceSpeak(utterance); } catch(e){}
+    }
+    if(elapsed<120){
+      legacyVoiceQueue.push({utterance:utterance,generation:generation});
+      if(!legacyVoiceTimer)legacyVoiceTimer=setTimeout(function(){
+        var queued=legacyVoiceQueue; legacyVoiceQueue=[]; legacyVoiceTimer=null;
+        queued.forEach(function(item){
+          if(item.generation!==voiceCancelGeneration)return;
+          try { nativeVoiceResume(); nativeVoiceSpeak(item.utterance); } catch(e){}
+        });
+      },Math.max(60,120-elapsed));
+    } else play();
+  }
   if(!PID){ window.AD = { list:function(){return Promise.resolve([]);}, get:function(){return Promise.resolve(null);}, count:function(){return Promise.resolve(0);}, insert:noop, update:noop, remove:noop, email:noop, voice:{listen:function(){return Promise.reject(new Error('Voz indisponível fora de um projeto.'));},speak:noop,cancel:noop}, enabled:false }; return; }
   function req(method, opts){
     opts = opts || {};
@@ -73,23 +123,24 @@ export function adGlobalScript(projectId?: string | null): string {
           var value=String(text||'').trim();
           if(!value || !synth || !Utterance){ reject(new Error('Leitura em voz alta não disponível neste navegador.')); return; }
           try {
-            // Sempre zera a fila local. Corrige filas pausadas/presas por outra fala
-            // e faz cada clique pronunciar apenas a palavra solicitada.
-            synth.cancel();
-            synth.resume();
             var utterance=new Utterance(value.slice(0,5000));
             utterance.lang=String(opts.lang||'pt-BR').slice(0,20);
             utterance.rate=Math.min(2,Math.max(0.5,Number(opts.rate)||1));
             utterance.pitch=Math.min(2,Math.max(0,Number(opts.pitch)||1));
             utterance.volume=Math.min(1,Math.max(0,opts.volume==null?1:Number(opts.volume)));
-            // Deve acontecer no mesmo ciclo do clique; não mover para await/timer.
-            synth.speak(utterance);
-            resolve({speaking:true});
+            try {
+              var voices=typeof synth.getVoices==='function'?synth.getVoices():[];
+              var lang=utterance.lang.toLowerCase(), base=lang.split('-')[0];
+              var selected=Array.from(voices||[]).filter(function(v){return v&&v.lang;}).find(function(v){return v.lang.toLowerCase()===lang;})
+                ||Array.from(voices||[]).filter(function(v){return v&&v.lang;}).find(function(v){return v.lang.toLowerCase().split('-')[0]===base;});
+              if(selected)utterance.voice=selected;
+            } catch(e){}
+            playLocalUtterance(utterance,function(played){resolve({speaking:!!played,cancelled:!played});},reject);
           } catch(error){ reject(error instanceof Error?error:new Error('Falha na leitura em voz alta.')); }
         });
       },
       cancel: function(){
-        try { if(window.speechSynthesis)window.speechSynthesis.cancel(); } catch(e){}
+        try { cancelLocalVoice(); } catch(e){}
         return bridge('voice',{method:'POST',body:{action:'cancel'}}).catch(function(){});
       }
     }
@@ -148,6 +199,17 @@ export function adGlobalScript(projectId?: string | null): string {
     BridgeRecognition.prototype.stop=function(){ this._run++; window.AD.voice.cancel(); if(typeof this.onend==='function') try{this.onend({type:'end'});}catch(e){} };
     BridgeRecognition.prototype.abort=BridgeRecognition.prototype.stop;
     try { window.SpeechRecognition=BridgeRecognition; window.webkitSpeechRecognition=BridgeRecognition; } catch(e){}
+
+    // Compatibilidade de ALTO-FALANTE para projetos antigos. Eles chamam
+    // speechSynthesis diretamente, sem passar por AD.voice. Mantemos a API
+    // original, mas recuperamos filas presas e respeitamos o intervalo exigido
+    // pelo Safari depois de cancel().
+    try {
+      if(voiceSynth&&nativeVoiceSpeak){
+        voiceSynth.speak=function(utterance){ queueLegacyUtterance(utterance); };
+        voiceSynth.cancel=function(){ cancelLocalVoice(); };
+      }
+    } catch(e){}
   })();
 })();
 </script>

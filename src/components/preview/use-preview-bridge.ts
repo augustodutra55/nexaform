@@ -14,6 +14,7 @@ export function usePreviewBridge(
 ) {
   useEffect(() => {
     let activeRecognition: any = null;
+    let activeSpeechRequest = 0;
     function reply(source: Window, id: string, result: Record<string, unknown>) {
       source.postMessage({ __ad_bridge_result: true, id, ...result }, "*");
     }
@@ -27,6 +28,7 @@ export function usePreviewBridge(
     function handleVoice(source: Window, id: string, body: any) {
       const action = String(body?.action || "");
       if (action === "cancel") {
+        activeSpeechRequest++;
         try { activeRecognition?.abort(); } catch {}
         activeRecognition = null;
         try { window.speechSynthesis?.cancel(); } catch {}
@@ -34,6 +36,7 @@ export function usePreviewBridge(
         return;
       }
       if (action === "speak") {
+        const speechRequest = ++activeSpeechRequest;
         const text = String(body?.text || "").trim().slice(0, 5000);
         if (!text || !("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
           reply(source, id, { ok: false, status: 501, error: "Leitura em voz alta não disponível neste navegador." });
@@ -45,12 +48,27 @@ export function usePreviewBridge(
           utterance.rate = Math.min(2, Math.max(0.5, Number(body?.rate) || 1));
           utterance.pitch = Math.min(2, Math.max(0, Number(body?.pitch) || 1));
           utterance.volume = Math.min(1, Math.max(0, body?.volume == null ? 1 : Number(body.volume)));
-          // Rede de segurança para clientes antigos que ainda usam a ponte:
-          // nunca herdar uma fila pausada ou presa por outro app/preview.
-          window.speechSynthesis.cancel();
-          window.speechSynthesis.resume();
-          window.speechSynthesis.speak(utterance);
-          reply(source, id, { ok: true, status: 200, payload: { speaking: true } });
+          const voices = window.speechSynthesis.getVoices();
+          const language = utterance.lang.toLowerCase();
+          const baseLanguage = language.split("-")[0];
+          utterance.voice = voices.find((voice) => voice.lang.toLowerCase() === language)
+            || voices.find((voice) => voice.lang.toLowerCase().split("-")[0] === baseLanguage)
+            || null;
+          const queueWasBusy = window.speechSynthesis.speaking
+            || window.speechSynthesis.pending || window.speechSynthesis.paused;
+          if (queueWasBusy) window.speechSynthesis.cancel();
+          const play = () => {
+            if (speechRequest !== activeSpeechRequest) return;
+            try {
+              window.speechSynthesis.resume();
+              window.speechSynthesis.speak(utterance);
+              reply(source, id, { ok: true, status: 200, payload: { speaking: true } });
+            } catch (error) {
+              reply(source, id, { ok: false, status: 500, error: error instanceof Error ? error.message : "Falha na leitura em voz alta." });
+            }
+          };
+          // Safari pode descartar a fala se cancel() e speak() ocorrerem juntos.
+          if (queueWasBusy) window.setTimeout(play, 120); else play();
         } catch (error) {
           reply(source, id, { ok: false, status: 500, error: error instanceof Error ? error.message : "Falha na leitura em voz alta." });
         }
@@ -143,8 +161,10 @@ export function usePreviewBridge(
     window.addEventListener("message", onMessage);
     return () => {
       window.removeEventListener("message", onMessage);
+      activeSpeechRequest++;
       try { activeRecognition?.abort(); } catch {}
       activeRecognition = null;
+      try { window.speechSynthesis?.cancel(); } catch {}
     };
   }, [allowEditorSession, iframeRef, onError, projectId]);
 }

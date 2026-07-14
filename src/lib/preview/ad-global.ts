@@ -22,7 +22,7 @@ export function adGlobalScript(projectId?: string | null): string {
     });
   }
   function noop(){ return Promise.resolve(); }
-  if(!PID){ window.AD = { list:function(){return Promise.resolve([]);}, get:function(){return Promise.resolve(null);}, count:function(){return Promise.resolve(0);}, insert:noop, update:noop, remove:noop, email:noop, enabled:false }; return; }
+  if(!PID){ window.AD = { list:function(){return Promise.resolve([]);}, get:function(){return Promise.resolve(null);}, count:function(){return Promise.resolve(0);}, insert:noop, update:noop, remove:noop, email:noop, voice:{listen:function(){return Promise.reject(new Error('Voz indisponível fora de um projeto.'));},speak:noop,cancel:noop}, enabled:false }; return; }
   function req(method, opts){
     opts = opts || {};
     return bridge('data',{method:method,qs:opts.qs||'',body:opts.body});
@@ -60,6 +60,13 @@ export function adGlobalScript(projectId?: string | null): string {
     // Ex.: await AD.email({ name, email, subject, message }) → { ok, saved, emailed }
     email: function(payload){
       return bridge('email',{method:'POST',body:payload||{}});
+    },
+    // Voz é executada pela página principal. O app continua em sandbox seguro,
+    // mas ganha microfone e alto-falante confiáveis via uma ponte controlada.
+    voice: {
+      listen: function(opts){ opts=opts||{}; return bridge('voice',{method:'POST',body:{action:'listen',lang:opts.lang||'pt-BR'}}).then(function(r){return r.transcript||'';}); },
+      speak: function(text, opts){ opts=opts||{}; return bridge('voice',{method:'POST',body:{action:'speak',text:String(text||''),lang:opts.lang||'pt-BR',rate:opts.rate,pitch:opts.pitch,volume:opts.volume}}); },
+      cancel: function(){ return bridge('voice',{method:'POST',body:{action:'cancel'}}).catch(function(){}); }
     }
   };
 
@@ -87,6 +94,52 @@ export function adGlobalScript(projectId?: string | null): string {
     me: function(){ return authFetch({ method:'GET', qs:'?me=1' }).then(function(j){ if(j.user)setTok('bridge-session'); return j.user; }).catch(function(){ return null; }); },
     token: getTok
   };
+
+  // Compatibilidade com apps já gerados que usam diretamente Web Speech API.
+  // A origem opaca do iframe pode bloquear a implementação nativa; este adaptador
+  // mantém a mesma interface e encaminha a operação para window.AD.voice.
+  (function installVoiceCompatibility(){
+    function BridgeRecognition(){
+      this.lang='pt-BR'; this.interimResults=false; this.continuous=false;
+      this.onstart=null; this.onresult=null; this.onerror=null; this.onend=null;
+      this._run=0;
+    }
+    BridgeRecognition.prototype.start=function(){
+      var self=this, run=++this._run;
+      if(typeof self.onstart==='function') try{self.onstart({type:'start'});}catch(e){}
+      window.AD.voice.listen({lang:self.lang}).then(function(transcript){
+        if(run!==self._run)return;
+        var alternative={transcript:transcript,confidence:1};
+        var result=[alternative]; result.isFinal=true;
+        var results=[result];
+        if(typeof self.onresult==='function') try{self.onresult({type:'result',resultIndex:0,results:results});}catch(e){}
+        if(typeof self.onend==='function') try{self.onend({type:'end'});}catch(e){}
+      }).catch(function(error){
+        if(run!==self._run)return;
+        if(typeof self.onerror==='function') try{self.onerror({type:'error',error:'not-allowed',message:error&&error.message});}catch(e){}
+        if(typeof self.onend==='function') try{self.onend({type:'end'});}catch(e){}
+      });
+    };
+    BridgeRecognition.prototype.stop=function(){ this._run++; window.AD.voice.cancel(); if(typeof this.onend==='function') try{this.onend({type:'end'});}catch(e){} };
+    BridgeRecognition.prototype.abort=BridgeRecognition.prototype.stop;
+    try { window.SpeechRecognition=BridgeRecognition; window.webkitSpeechRecognition=BridgeRecognition; } catch(e){}
+
+    // Apps existentes que chamam speechSynthesis.speak passam a falar no topo,
+    // onde o navegador permite a saída de áudio com mais consistência.
+    try {
+      var synth=window.speechSynthesis;
+      if(synth){
+        var nativeCancel=typeof synth.cancel==='function' ? synth.cancel.bind(synth) : function(){};
+        synth.speak=function(utterance){
+          window.AD.voice.speak(utterance&&utterance.text||'',{
+            lang:utterance&&utterance.lang||'pt-BR', rate:utterance&&utterance.rate,
+            pitch:utterance&&utterance.pitch, volume:utterance&&utterance.volume
+          }).catch(function(){});
+        };
+        synth.cancel=function(){ nativeCancel(); window.AD.voice.cancel(); };
+      }
+    } catch(e){}
+  })();
 })();
 </script>
 <script>

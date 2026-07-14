@@ -8,6 +8,31 @@ const METHODS: Record<BridgeKind, string[]> = {
 };
 const sessionKey = (projectId: string) => `adstudio:app-token:${projectId}`;
 
+function speechVoiceScore(voice: SpeechSynthesisVoice, requestedLang: string): number {
+  const requested = String(requestedLang || "pt-BR").toLowerCase().replace("_", "-");
+  const language = String(voice.lang || "").toLowerCase().replace("_", "-");
+  if (language.split("-")[0] !== requested.split("-")[0]) return -100_000;
+  const name = String(voice.name || "").toLowerCase();
+  let score = language === requested ? 1000 : 600;
+  if (voice.localService) score += 180;
+  if (voice.default) score += 30;
+  if (/enhanced|premium|natural|neural/.test(name)) score += 180;
+  if (/samantha|ava|allison|alex|victoria|karen|daniel|serena|tessa|fiona|moira|luciana|joana|felipe/.test(name)) score += 150;
+  if (/google.*(english|portugu|brazil)|microsoft.*natural/.test(name)) score += 80;
+  if (/compact|eloquence|novelty|zarvox|trinoids|whisper|boing|bubbles|cellos|organ|bells|bad news|good news/.test(name)) score -= 600;
+  return score;
+}
+
+function preferredSpeechVoice(voices: SpeechSynthesisVoice[], lang: string): SpeechSynthesisVoice | null {
+  let best: SpeechSynthesisVoice | null = null;
+  let bestScore = -100_000;
+  for (const voice of voices) {
+    const score = speechVoiceScore(voice, lang);
+    if (score > bestScore) { best = voice; bestScore = score; }
+  }
+  return bestScore > -100_000 ? best : null;
+}
+
 export function usePreviewBridge(
   iframeRef: RefObject<HTMLIFrameElement>, projectId?: string | null,
   onError?: (message: string) => void, allowEditorSession = false
@@ -15,6 +40,7 @@ export function usePreviewBridge(
   useEffect(() => {
     let activeRecognition: any = null;
     let activeSpeechRequest = 0;
+    try { window.speechSynthesis?.getVoices(); } catch {}
     function reply(source: Window, id: string, result: Record<string, unknown>) {
       source.postMessage({ __ad_bridge_result: true, id, ...result }, "*");
     }
@@ -48,12 +74,7 @@ export function usePreviewBridge(
           utterance.rate = Math.min(2, Math.max(0.5, Number(body?.rate) || 1));
           utterance.pitch = Math.min(2, Math.max(0, Number(body?.pitch) || 1));
           utterance.volume = Math.min(1, Math.max(0, body?.volume == null ? 1 : Number(body.volume)));
-          const voices = window.speechSynthesis.getVoices();
-          const language = utterance.lang.toLowerCase();
-          const baseLanguage = language.split("-")[0];
-          utterance.voice = voices.find((voice) => voice.lang.toLowerCase() === language)
-            || voices.find((voice) => voice.lang.toLowerCase().split("-")[0] === baseLanguage)
-            || null;
+          utterance.voice = preferredSpeechVoice(window.speechSynthesis.getVoices(), utterance.lang);
           const queueWasBusy = window.speechSynthesis.speaking
             || window.speechSynthesis.pending || window.speechSynthesis.paused;
           if (queueWasBusy) window.speechSynthesis.cancel();

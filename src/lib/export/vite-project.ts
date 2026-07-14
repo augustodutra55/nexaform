@@ -105,6 +105,27 @@ function query(collection, options = {}) {
 
 export function installADRuntime() {
   let speechRequest = 0;
+  function voiceScore(voice, requestedLang) {
+    const requested = String(requestedLang || 'pt-BR').toLowerCase().replace('_', '-');
+    const language = String(voice?.lang || '').toLowerCase().replace('_', '-');
+    if (language.split('-')[0] !== requested.split('-')[0]) return -100000;
+    const name = String(voice?.name || '').toLowerCase();
+    let score = language === requested ? 1000 : 600;
+    if (voice.localService) score += 180;
+    if (voice.default) score += 30;
+    if (/enhanced|premium|natural|neural/.test(name)) score += 180;
+    if (/samantha|ava|allison|alex|victoria|karen|daniel|serena|tessa|fiona|moira|luciana|joana|felipe/.test(name)) score += 150;
+    if (/google.*(english|portugu|brazil)|microsoft.*natural/.test(name)) score += 80;
+    if (/compact|eloquence|novelty|zarvox|trinoids|whisper|boing|bubbles|cellos|organ|bells|bad news|good news/.test(name)) score -= 600;
+    return score;
+  }
+  function preferredVoice(lang) {
+    const voices = window.speechSynthesis?.getVoices?.() || [];
+    let best = null, bestScore = -100000;
+    for (const voice of voices) { const score = voiceScore(voice, lang); if (score > bestScore) { best = voice; bestScore = score; } }
+    return bestScore > -100000 ? best : null;
+  }
+  try { window.speechSynthesis?.getVoices?.(); } catch {}
   function listen(options = {}) {
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Recognition) return Promise.reject(new Error('Reconhecimento de voz não disponível. Use Chrome ou Edge atualizado.'));
@@ -122,6 +143,7 @@ export function installADRuntime() {
     if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) return Promise.reject(new Error('Leitura em voz alta indisponível.'));
     const utterance = new SpeechSynthesisUtterance(String(text || ''));
     utterance.lang = options.lang || 'pt-BR'; utterance.rate = options.rate || 1; utterance.pitch = options.pitch || 1; utterance.volume = options.volume == null ? 1 : options.volume;
+    utterance.voice = preferredVoice(utterance.lang);
     const queueWasBusy = window.speechSynthesis.speaking || window.speechSynthesis.pending || window.speechSynthesis.paused;
     const request = ++speechRequest;
     if (queueWasBusy) window.speechSynthesis.cancel();

@@ -30,6 +30,36 @@ export function adGlobalScript(projectId?: string | null): string {
   var nativeVoiceCancel=voiceSynth&&typeof voiceSynth.cancel==='function'?voiceSynth.cancel.bind(voiceSynth):null;
   var nativeVoiceResume=voiceSynth&&typeof voiceSynth.resume==='function'?voiceSynth.resume.bind(voiceSynth):function(){};
   var voiceRun=0, voiceCancelGeneration=0, lastVoiceCancel=0, legacyVoiceQueue=[], legacyVoiceTimer=null;
+  // O Chrome costuma listar uma voz compacta antes das vozes naturais da Apple.
+  // Ranqueamos por idioma e qualidade para manter a pronúncia próxima à do Safari.
+  function normalizedVoiceLang(value){return String(value||'').toLowerCase().replace('_','-');}
+  function voiceQualityScore(voice, requestedLang){
+    if(!voice)return -100000;
+    var requested=normalizedVoiceLang(requestedLang||'pt-BR');
+    var requestedBase=requested.split('-')[0];
+    var language=normalizedVoiceLang(voice.lang);
+    var languageBase=language.split('-')[0];
+    if(languageBase!==requestedBase)return -100000;
+    var name=String(voice.name||'').toLowerCase();
+    var score=language===requested?1000:600;
+    if(voice.localService)score+=180;
+    if(voice.default)score+=30;
+    if(/enhanced|premium|natural|neural/.test(name))score+=180;
+    if(/samantha|ava|allison|alex|victoria|karen|daniel|serena|tessa|fiona|moira|luciana|joana|felipe/.test(name))score+=150;
+    if(/google.*(english|portugu|brazil)|microsoft.*natural/.test(name))score+=80;
+    if(/compact|eloquence|novelty|zarvox|trinoids|whisper|boing|bubbles|cellos|organ|bells|bad news|good news/.test(name))score-=600;
+    return score;
+  }
+  function applyPreferredVoice(utterance){
+    if(!utterance||utterance.voice||!voiceSynth||typeof voiceSynth.getVoices!=='function')return;
+    try {
+      var voices=Array.from(voiceSynth.getVoices()||[]);
+      var best=null, bestScore=-100000;
+      voices.forEach(function(voice){var score=voiceQualityScore(voice,utterance.lang);if(score>bestScore){best=voice;bestScore=score;}});
+      if(best&&bestScore>-100000)utterance.voice=best;
+    } catch(e){}
+  }
+  try { if(voiceSynth&&typeof voiceSynth.getVoices==='function')voiceSynth.getVoices(); } catch(e){}
   function cancelLocalVoice(){
     voiceRun++; voiceCancelGeneration++; lastVoiceCancel=Date.now();
     if(legacyVoiceTimer)clearTimeout(legacyVoiceTimer);
@@ -46,7 +76,7 @@ export function adGlobalScript(projectId?: string | null): string {
     var delay=(mustReset||elapsed<120)?Math.max(60,120-elapsed):0;
     function play(){
       if(run!==voiceRun){ if(onPlayed)onPlayed(false); return; }
-      try { nativeVoiceResume(); nativeVoiceSpeak(utterance); if(onPlayed)onPlayed(true); }
+      try { applyPreferredVoice(utterance); nativeVoiceResume(); nativeVoiceSpeak(utterance); if(onPlayed)onPlayed(true); }
       catch(error){ if(onError)onError(error instanceof Error?error:new Error('Falha na leitura em voz alta.')); }
     }
     if(delay)setTimeout(play,delay); else play();
@@ -59,7 +89,7 @@ export function adGlobalScript(projectId?: string | null): string {
       // Apenas cancel() invalida a fila. Várias chamadas speak() continuam sendo
       // enfileiradas na ordem nativa, como a Web Speech API especifica.
       if(generation!==voiceCancelGeneration)return;
-      try { nativeVoiceResume(); nativeVoiceSpeak(utterance); } catch(e){}
+      try { applyPreferredVoice(utterance); nativeVoiceResume(); nativeVoiceSpeak(utterance); } catch(e){}
     }
     if(elapsed<120){
       legacyVoiceQueue.push({utterance:utterance,generation:generation});
@@ -67,7 +97,7 @@ export function adGlobalScript(projectId?: string | null): string {
         var queued=legacyVoiceQueue; legacyVoiceQueue=[]; legacyVoiceTimer=null;
         queued.forEach(function(item){
           if(item.generation!==voiceCancelGeneration)return;
-          try { nativeVoiceResume(); nativeVoiceSpeak(item.utterance); } catch(e){}
+          try { applyPreferredVoice(item.utterance); nativeVoiceResume(); nativeVoiceSpeak(item.utterance); } catch(e){}
         });
       },Math.max(60,120-elapsed));
     } else play();
@@ -128,13 +158,6 @@ export function adGlobalScript(projectId?: string | null): string {
             utterance.rate=Math.min(2,Math.max(0.5,Number(opts.rate)||1));
             utterance.pitch=Math.min(2,Math.max(0,Number(opts.pitch)||1));
             utterance.volume=Math.min(1,Math.max(0,opts.volume==null?1:Number(opts.volume)));
-            try {
-              var voices=typeof synth.getVoices==='function'?synth.getVoices():[];
-              var lang=utterance.lang.toLowerCase(), base=lang.split('-')[0];
-              var selected=Array.from(voices||[]).filter(function(v){return v&&v.lang;}).find(function(v){return v.lang.toLowerCase()===lang;})
-                ||Array.from(voices||[]).filter(function(v){return v&&v.lang;}).find(function(v){return v.lang.toLowerCase().split('-')[0]===base;});
-              if(selected)utterance.voice=selected;
-            } catch(e){}
             playLocalUtterance(utterance,function(played){resolve({speaking:!!played,cancelled:!played});},reject);
           } catch(error){ reject(error instanceof Error?error:new Error('Falha na leitura em voz alta.')); }
         });

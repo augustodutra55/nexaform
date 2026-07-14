@@ -45,6 +45,9 @@ export function usePreviewBridge(
           utterance.rate = Math.min(2, Math.max(0.5, Number(body?.rate) || 1));
           utterance.pitch = Math.min(2, Math.max(0, Number(body?.pitch) || 1));
           utterance.volume = Math.min(1, Math.max(0, body?.volume == null ? 1 : Number(body.volume)));
+          // Rede de segurança para clientes antigos que ainda usam a ponte:
+          // nunca herdar uma fila pausada ou presa por outro app/preview.
+          window.speechSynthesis.cancel();
           window.speechSynthesis.resume();
           window.speechSynthesis.speak(utterance);
           reply(source, id, { ok: true, status: 200, payload: { speaking: true } });

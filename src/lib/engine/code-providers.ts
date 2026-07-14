@@ -9,6 +9,7 @@ import { AppFile, AppGenerationResult, codeStats, projectStats } from "./app-typ
 import { CODE_SYSTEM_PROMPT, CODE_REFINE_SYSTEM_PROMPT, buildCodeUserPrompt } from "./code-prompts";
 import { matchTemplate } from "./code-templates";
 import { CostMode, pickTier, modelFor, estimateCost } from "./models";
+import type { PromptAttachment } from "./prompt-attachments";
 
 interface Args {
   message: string;
@@ -23,6 +24,8 @@ interface Args {
   forceReal?: boolean;
   /** Permite template enlatado / demo (só quando o usuário aceitar). */
   allowTemplate?: boolean;
+  /** Referências locais escolhidas pelo usuário no compositor do AD Studio. */
+  attachments?: PromptAttachment[];
 }
 
 /** Normaliza e valida os arquivos devolvidos pelo modelo. */
@@ -173,6 +176,46 @@ function systemPromptFor(a: Args): string {
   return a.currentFiles?.length || a.currentCode ? CODE_REFINE_SYSTEM_PROMPT : CODE_SYSTEM_PROMPT;
 }
 
+function textPromptFor(a: Args): string {
+  const base = buildCodeUserPrompt(a.message, currentOf(a));
+  const textAttachments = (a.attachments ?? []).filter((attachment) => attachment.kind === "text");
+  if (!textAttachments.length) return base;
+  let remaining = 160_000;
+  const blocks: string[] = [];
+  for (const attachment of textAttachments) {
+    if (remaining <= 0) break;
+    const content = attachment.content.slice(0, remaining);
+    remaining -= content.length;
+    blocks.push(`--- ANEXO DO USUÁRIO: ${attachment.name} ---\n${content}\n--- FIM DO ANEXO ---`);
+  }
+  return `${base}\n\nUse os anexos abaixo como referência fiel para esta geração. Não invente conteúdo que contradiga os arquivos.\n\n${blocks.join("\n\n")}`;
+}
+
+function claudeUserContent(a: Args): any {
+  const images = (a.attachments ?? []).filter((attachment) => attachment.kind === "image");
+  if (!images.length) return textPromptFor(a);
+  return [
+    { type: "text", text: `${textPromptFor(a)}\n\nAs imagens anexadas são referências visuais do usuário. Analise composição, conteúdo e estilo ao construir ou refinar o app.` },
+    ...images.map((attachment) => ({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: attachment.type,
+        data: attachment.content.slice(attachment.content.indexOf(",") + 1),
+      },
+    })),
+  ];
+}
+
+function openRouterUserContent(a: Args): any {
+  const images = (a.attachments ?? []).filter((attachment) => attachment.kind === "image");
+  if (!images.length) return textPromptFor(a);
+  return [
+    { type: "text", text: `${textPromptFor(a)}\n\nAs imagens anexadas são referências visuais do usuário. Analise composição, conteúdo e estilo ao construir ou refinar o app.` },
+    ...images.map((attachment) => ({ type: "image_url", image_url: { url: attachment.content } })),
+  ];
+}
+
 /** Extrai uma mensagem curta de erro do corpo de resposta de um provedor. */
 async function errDetail(res: Response): Promise<string> {
   try {
@@ -205,7 +248,7 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
         model,
         max_tokens: 24000,
         system: systemPromptFor(a),
-        messages: [{ role: "user", content: buildCodeUserPrompt(a.message, currentOf(a)) }],
+        messages: [{ role: "user", content: claudeUserContent(a) }],
       }),
       signal: AbortSignal.timeout(120_000),
     });
@@ -237,7 +280,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
         usage: { include: true },
         messages: [
           { role: "system", content: systemPromptFor(a) },
-          { role: "user", content: buildCodeUserPrompt(a.message, currentOf(a)) },
+          { role: "user", content: openRouterUserContent(a) },
         ],
       }),
       signal: AbortSignal.timeout(120_000),

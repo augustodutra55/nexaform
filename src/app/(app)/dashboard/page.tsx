@@ -19,6 +19,10 @@ import {
   Square,
   LayoutTemplate,
   Bookmark,
+  Paperclip,
+  X,
+  FileCode2,
+  Image as ImageIcon,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { timeAgo } from "@/lib/utils";
@@ -47,6 +51,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useSpeechInput } from "@/hooks/use-speech-input";
+import {
+  attachmentPayloadBytes,
+  MAX_PROMPT_ATTACHMENTS,
+  MAX_PROMPT_TOTAL_BYTES,
+  preparePromptAttachment,
+  PROMPT_ATTACHMENT_ACCEPT,
+  type PromptAttachment,
+} from "@/lib/engine/prompt-attachments";
 
 interface Project {
   id: string;
@@ -71,44 +84,46 @@ export default function DashboardPage() {
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [quickPrompt, setQuickPrompt] = useState("");
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
 
-  // Comando por voz (Web Speech API — grátis)
-  const [listening, setListening] = useState(false);
-  const [voiceSupported, setVoiceSupported] = useState(false);
-  const recRef = useRef<any>(null);
-  useEffect(() => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    setVoiceSupported(!!SR);
-  }, []);
-  function toggleMic() {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      toast.error("Seu navegador não suporta ditado por voz", { description: "Use o Chrome." });
+  // Comando por voz com mensagens claras para permissão/dispositivo.
+  const { listening, supported: voiceSupported, toggle: toggleMic } = useSpeechInput({ value: quickPrompt, onChange: setQuickPrompt });
+
+  async function addAttachments(fileList: FileList | null) {
+    if (!fileList?.length) return;
+    const slots = Math.max(0, MAX_PROMPT_ATTACHMENTS - attachments.length);
+    if (!slots) {
+      toast.error(`Você pode anexar até ${MAX_PROMPT_ATTACHMENTS} arquivos por pedido.`);
       return;
     }
-    if (listening) {
-      recRef.current?.stop();
-      return;
+    const prepared: PromptAttachment[] = [];
+    for (const file of Array.from(fileList).slice(0, slots)) {
+      try {
+        prepared.push(await preparePromptAttachment(file));
+      } catch (error) {
+        toast.error(`Não foi possível anexar ${file.name}`, {
+          description: error instanceof Error ? error.message : undefined,
+        });
+      }
     }
-    const rec = new SR();
-    rec.lang = "pt-BR";
-    rec.interimResults = true;
-    rec.continuous = false;
-    const base = quickPrompt ? quickPrompt.trim() + " " : "";
-    rec.onresult = (e: any) => {
-      let t = "";
-      for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
-      setQuickPrompt(base + t);
-    };
-    rec.onend = () => setListening(false);
-    rec.onerror = () => setListening(false);
-    recRef.current = rec;
-    try {
-      rec.start();
-      setListening(true);
-    } catch {
-      setListening(false);
+    if (prepared.length) {
+      setAttachments((current) => {
+        let total = current.reduce((sum, item) => sum + attachmentPayloadBytes(item), 0);
+        const accepted: PromptAttachment[] = [];
+        for (const item of prepared) {
+          const bytes = attachmentPayloadBytes(item);
+          if (total + bytes > MAX_PROMPT_TOTAL_BYTES) {
+            toast.error("Os anexos ficaram grandes demais juntos", { description: "Remova um arquivo ou use referências menores." });
+            continue;
+          }
+          total += bytes;
+          accepted.push(item);
+        }
+        return current.concat(accepted).slice(0, MAX_PROMPT_ATTACHMENTS);
+      });
     }
+    if (attachmentInputRef.current) attachmentInputRef.current.value = "";
   }
 
   const load = useCallback(async () => {
@@ -206,6 +221,13 @@ export default function DashboardPage() {
       return;
     }
     sessionStorage.setItem(`nexaform:starter:${data.id}`, prompt);
+    if (attachments.length) {
+      try {
+        sessionStorage.setItem(`nexaform:starter-attachments:${data.id}`, JSON.stringify(attachments));
+      } catch {
+        toast.error("Os anexos não couberam no navegador", { description: "Abra o projeto e anexe-os novamente no chat." });
+      }
+    }
     router.push(`/projeto/${data.id}`);
   }
 
@@ -345,6 +367,19 @@ export default function DashboardPage() {
         onSubmit={handleQuickCreate}
         className="mt-8 rounded-2xl border bg-card p-2 shadow-elevated transition-shadow focus-within:ring-1 focus-within:ring-ring"
       >
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-2 pb-2 pt-1">
+            {attachments.map((attachment) => (
+              <span key={attachment.id} className="inline-flex max-w-full items-center gap-1.5 rounded-lg border bg-secondary/60 px-2 py-1 text-[11px]">
+                {attachment.kind === "image" ? <ImageIcon className="h-3 w-3 shrink-0" /> : <FileCode2 className="h-3 w-3 shrink-0" />}
+                <span className="max-w-48 truncate">{attachment.name}</span>
+                <button type="button" onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))} aria-label={`Remover ${attachment.name}`}>
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <div className="flex items-end gap-2">
           <Textarea
             value={quickPrompt}
@@ -363,19 +398,29 @@ export default function DashboardPage() {
             }
             className="min-h-0 resize-none border-0 text-base shadow-none focus-visible:ring-0"
           />
-          {voiceSupported && (
-            <Button
-              type="button"
-              size="icon"
-              variant={listening ? "brand" : "ghost"}
-              onClick={toggleMic}
-              aria-label={listening ? "Parar" : "Ditar por voz"}
-              title={listening ? "Parar" : "Ditar por voz"}
-              className={listening ? "animate-pulse-soft" : ""}
-            >
-              {listening ? <Square /> : <Mic />}
-            </Button>
-          )}
+          <input ref={attachmentInputRef} type="file" multiple accept={PROMPT_ATTACHMENT_ACCEPT} className="hidden" onChange={(event) => addAttachments(event.target.files)} />
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            onClick={() => attachmentInputRef.current?.click()}
+            disabled={busy || attachments.length >= MAX_PROMPT_ATTACHMENTS}
+            aria-label="Anexar arquivo do computador"
+            title="Anexar imagem, texto ou código"
+          >
+            <Paperclip />
+          </Button>
+          <Button
+            type="button"
+            size="icon"
+            variant={listening ? "brand" : "ghost"}
+            onClick={toggleMic}
+            aria-label={listening ? "Parar" : "Ditar por voz"}
+            title={voiceSupported === false ? "Ditado indisponível neste navegador" : listening ? "Parar" : "Ditar por voz"}
+            className={listening ? "animate-pulse-soft" : ""}
+          >
+            {listening ? <Square /> : <Mic />}
+          </Button>
           <Button type="submit" size="icon" variant="brand" disabled={busy || !quickPrompt.trim()} aria-label="Construir">
             {busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}
           </Button>

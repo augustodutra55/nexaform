@@ -104,6 +104,25 @@ function query(collection, options = {}) {
 }
 
 export function installADRuntime() {
+  function listen(options = {}) {
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) return Promise.reject(new Error('Reconhecimento de voz não disponível. Use Chrome ou Edge atualizado.'));
+    return new Promise((resolve, reject) => {
+      const recognition = new Recognition();
+      recognition.lang = options.lang || 'pt-BR'; recognition.interimResults = false; recognition.continuous = false;
+      let transcript = '';
+      recognition.onresult = (event) => { for (let index = event.resultIndex || 0; index < event.results.length; index++) transcript += event.results[index][0]?.transcript || ''; };
+      recognition.onerror = (event) => reject(new Error(event.error === 'not-allowed' ? 'Permissão do microfone bloqueada.' : 'Falha no reconhecimento de voz: ' + event.error));
+      recognition.onend = () => transcript.trim() ? resolve(transcript.trim()) : reject(new Error('Nenhuma fala foi reconhecida.'));
+      recognition.start();
+    });
+  }
+  function speak(text, options = {}) {
+    if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) return Promise.reject(new Error('Leitura em voz alta indisponível.'));
+    const utterance = new SpeechSynthesisUtterance(String(text || ''));
+    utterance.lang = options.lang || 'pt-BR'; utterance.rate = options.rate || 1; utterance.pitch = options.pitch || 1; utterance.volume = options.volume == null ? 1 : options.volume;
+    window.speechSynthesis.speak(utterance); return Promise.resolve({ speaking: true });
+  }
   window.AD = {
     enabled: true,
     list: (collection, options) => request('data', 'GET', { qs: query(collection, options) }).then((r) => r.items || []),
@@ -114,6 +133,7 @@ export function installADRuntime() {
     remove: (id) => request('data', 'DELETE', { qs: '?id=' + encodeURIComponent(id) }).then(() => true),
     upload: (file) => request('upload', 'POST', { file }).then((r) => r.url),
     email: (payload) => request('email', 'POST', { body: payload || {} }),
+    voice: { listen, speak, cancel: () => { window.speechSynthesis?.cancel(); return Promise.resolve(); } },
     auth: {
       signUp: (email, password, name) => request('app-auth', 'POST', { body: { action: 'signup', email, password, name } }).then((r) => { setToken(r.token); return r.user; }),
       signIn: (email, password) => request('app-auth', 'POST', { body: { action: 'login', email, password } }).then((r) => { setToken(r.token); return r.user; }),

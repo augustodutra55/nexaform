@@ -23,6 +23,7 @@ import { bundleApp } from "@/lib/preview/bundler";
 import { Skeleton } from "@/components/ui/skeleton";
 import { buildViteProject } from "@/lib/export/vite-project";
 import { replaceProjectMedia, type ProjectMediaAsset, type ProjectMediaItem } from "@/lib/media/project-media";
+import { sanitizePromptAttachments, type PromptAttachment } from "@/lib/engine/prompt-attachments";
 
 interface ProjectRow {
   id: string;
@@ -48,6 +49,7 @@ export default function ProjectPage() {
   const [generating, setGenerating] = useState(false);
   const [editorOpen, setEditorOpen] = useState(true);
   const [starter, setStarter] = useState<string | null>(null);
+  const [starterAttachments, setStarterAttachments] = useState<PromptAttachment[]>([]);
   const [notFound, setNotFound] = useState(false);
 
   // Modo do projeto: site (schema) | app (código) | empty
@@ -162,6 +164,11 @@ export default function ProjectPage() {
       const s = sessionStorage.getItem(`nexaform:starter:${projectId}`);
       if (s) {
         sessionStorage.removeItem(`nexaform:starter:${projectId}`);
+        const rawAttachments = sessionStorage.getItem(`nexaform:starter-attachments:${projectId}`);
+        sessionStorage.removeItem(`nexaform:starter-attachments:${projectId}`);
+        if (rawAttachments) {
+          try { setStarterAttachments(sanitizePromptAttachments(JSON.parse(rawAttachments))); } catch {}
+        }
         setStarter(s);
       }
     })();
@@ -536,6 +543,7 @@ export default function ProjectPage() {
             files={appFiles}
             projectName={project.name}
             starterPrompt={starter}
+            starterAttachments={starterAttachments}
             autoFixError={autoFixError}
             onAutoFixHandled={() => setAutoFixError(null)}
             onUserSend={() => { autoFixCount.current = 0; }}

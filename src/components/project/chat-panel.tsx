@@ -2,13 +2,23 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout, Mic, Square, Cpu, FileCode2, AlertTriangle } from "lucide-react";
+import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout, Mic, Square, Cpu, FileCode2, AlertTriangle, Paperclip, X, Image as ImageIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AppSchema, GenerationResult } from "@/lib/engine/types";
 import { AppFile, AppGenerationResult, CodeStats, EngineMode, looksLikeApp } from "@/lib/engine/app-types";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { useSpeechInput } from "@/hooks/use-speech-input";
+import {
+  attachmentLabel,
+  attachmentPayloadBytes,
+  MAX_PROMPT_ATTACHMENTS,
+  MAX_PROMPT_TOTAL_BYTES,
+  preparePromptAttachment,
+  PROMPT_ATTACHMENT_ACCEPT,
+  type PromptAttachment,
+} from "@/lib/engine/prompt-attachments";
 
 interface Message {
   id: string;
@@ -40,6 +50,7 @@ interface ChatPanelProps {
   files?: AppFile[] | null;
   projectName: string;
   starterPrompt?: string | null;
+  starterAttachments?: PromptAttachment[] | null;
   /** Mensagem de erro para auto-correção (disparada pelo preview). */
   autoFixError?: string | null;
   onAutoFixHandled?: () => void;
@@ -77,6 +88,7 @@ export function ChatPanel({
   files,
   projectName,
   starterPrompt,
+  starterAttachments,
   autoFixError,
   onAutoFixHandled,
   onUserSend,
@@ -114,6 +126,8 @@ export function ChatPanel({
   const bottomRef = useRef<HTMLDivElement>(null);
   const startedRef = useRef(false);
   const autoFixInFlightRef = useRef<string | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
 
   // ── Modo de geração de código: REAL (IA escreve) vs TEMPLATE (enlatado/demo) ──
   const [genMode, setGenMode] = useState<GenMode>("real");
@@ -145,43 +159,44 @@ export function ChatPanel({
     } catch {}
   }, [input, threadId]);
 
-  // ── Comando por voz (Web Speech API — grátis, roda no navegador) ──
-  const [listening, setListening] = useState(false);
-  const [voiceSupported, setVoiceSupported] = useState(false);
-  const recRef = useRef<any>(null);
-  useEffect(() => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    setVoiceSupported(!!SR);
-  }, []);
-  function toggleMic() {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      toast.error("Seu navegador não suporta ditado por voz", { description: "Use o Chrome para o comando de voz." });
+  // ── Comando por voz (Web Speech API com diagnóstico de permissão) ──
+  const { listening, supported: voiceSupported, toggle: toggleMic } = useSpeechInput({ value: input, onChange: setInput });
+
+  async function addAttachments(fileList: FileList | null) {
+    if (!fileList?.length) return;
+    const slots = Math.max(0, MAX_PROMPT_ATTACHMENTS - attachments.length);
+    if (!slots) {
+      toast.error(`Você pode anexar até ${MAX_PROMPT_ATTACHMENTS} arquivos por pedido.`);
       return;
     }
-    if (listening) {
-      recRef.current?.stop();
-      return;
+    const selected = Array.from(fileList).slice(0, slots);
+    const prepared: PromptAttachment[] = [];
+    for (const file of selected) {
+      try {
+        prepared.push(await preparePromptAttachment(file));
+      } catch (error) {
+        toast.error(`Não foi possível anexar ${file.name}`, {
+          description: error instanceof Error ? error.message : undefined,
+        });
+      }
     }
-    const rec = new SR();
-    rec.lang = "pt-BR";
-    rec.interimResults = true;
-    rec.continuous = false;
-    const base = input ? input.trim() + " " : "";
-    rec.onresult = (e: any) => {
-      let t = "";
-      for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
-      setInput(base + t);
-    };
-    rec.onend = () => setListening(false);
-    rec.onerror = () => setListening(false);
-    recRef.current = rec;
-    try {
-      rec.start();
-      setListening(true);
-    } catch {
-      setListening(false);
+    if (prepared.length) {
+      setAttachments((current) => {
+        let total = current.reduce((sum, item) => sum + attachmentPayloadBytes(item), 0);
+        const accepted: PromptAttachment[] = [];
+        for (const item of prepared) {
+          const bytes = attachmentPayloadBytes(item);
+          if (total + bytes > MAX_PROMPT_TOTAL_BYTES) {
+            toast.error("Os anexos ficaram grandes demais juntos", { description: "Remova um arquivo ou use referências menores." });
+            continue;
+          }
+          total += bytes;
+          accepted.push(item);
+        }
+        return current.concat(accepted).slice(0, MAX_PROMPT_ATTACHMENTS);
+      });
     }
+    if (attachmentInputRef.current) attachmentInputRef.current.value = "";
   }
 
   const modeRef = useRef(mode);
@@ -206,10 +221,10 @@ export function ChatPanel({
   useEffect(() => {
     if (starterPrompt && !startedRef.current && messages.length === 0) {
       startedRef.current = true;
-      send(starterPrompt);
+      send(starterPrompt, false, starterAttachments ?? []);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [starterPrompt]);
+  }, [starterPrompt, starterAttachments]);
 
   // Auto-correção: ao receber um erro do preview, pede à IA para corrigir.
   useEffect(() => {
@@ -235,9 +250,10 @@ export function ChatPanel({
     await supabase.from("chat_messages").insert({ thread_id: threadId, role, content });
   }
 
-  async function send(text: string, isAutoFix = false) {
+  async function send(text: string, isAutoFix = false, providedAttachments?: PromptAttachment[]) {
     const content = text.trim();
     if (!content || generating) return;
+    const requestAttachments = providedAttachments ?? (isAutoFix ? [] : attachments);
     // Cada pedido MANUAL seu zera o contador de auto-correção — assim cada build
     // ganha um novo orçamento de tentativas (o loop de auto-conserto não trava
     // a sessão inteira). As correções automáticas NÃO zeram (senão seria infinito).
@@ -252,7 +268,11 @@ export function ChatPanel({
       (modeRef.current !== "site" && (genModeRef.current === "real" || looksLikeApp(content)));
 
     setInput("");
-    setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", content }]);
+    if (!isAutoFix) setAttachments([]);
+    const visibleContent = requestAttachments.length
+      ? `${content}\n\n📎 ${requestAttachments.map(attachmentLabel).join(" · ")}`
+      : content;
+    setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", content: visibleContent }]);
     setGenerating(true);
     onGeneratingChange?.(true);
     setPlan([]);
@@ -274,6 +294,7 @@ export function ChatPanel({
             costMode,
             forceReal: genModeRef.current === "real",
             allowTemplate: genModeRef.current === "template",
+            attachments: requestAttachments,
           }
         : {
             projectId,
@@ -525,6 +546,24 @@ export function ChatPanel({
         }}
         className="border-t p-3"
       >
+        {attachments.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {attachments.map((attachment) => (
+              <span key={attachment.id} className="inline-flex max-w-full items-center gap-1.5 rounded-lg border bg-secondary/60 px-2 py-1 text-[11px]">
+                {attachment.kind === "image" ? <ImageIcon className="h-3 w-3 shrink-0" /> : <FileCode2 className="h-3 w-3 shrink-0" />}
+                <span className="max-w-48 truncate">{attachment.name}</span>
+                <button
+                  type="button"
+                  onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}
+                  className="rounded p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
+                  aria-label={`Remover ${attachment.name}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <div className="flex items-end gap-2 rounded-xl border bg-card p-2 focus-within:ring-1 focus-within:ring-ring">
           <Textarea
             value={input}
@@ -546,20 +585,37 @@ export function ChatPanel({
             className="min-h-0 resize-none border-0 shadow-none focus-visible:ring-0"
             disabled={generating}
           />
-          {voiceSupported && (
-            <Button
-              type="button"
-              size="icon"
-              variant={listening ? "brand" : "ghost"}
-              onClick={toggleMic}
-              disabled={generating}
-              aria-label={listening ? "Parar de ouvir" : "Ditar por voz"}
-              title={listening ? "Parar" : "Ditar por voz"}
-              className={listening ? "animate-pulse-soft" : ""}
-            >
-              {listening ? <Square /> : <Mic />}
-            </Button>
-          )}
+          <input
+            ref={attachmentInputRef}
+            type="file"
+            multiple
+            accept={PROMPT_ATTACHMENT_ACCEPT}
+            className="hidden"
+            onChange={(event) => addAttachments(event.target.files)}
+          />
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            onClick={() => attachmentInputRef.current?.click()}
+            disabled={generating || attachments.length >= MAX_PROMPT_ATTACHMENTS}
+            aria-label="Anexar arquivo do computador"
+            title="Anexar imagem, texto ou código"
+          >
+            <Paperclip />
+          </Button>
+          <Button
+            type="button"
+            size="icon"
+            variant={listening ? "brand" : "ghost"}
+            onClick={toggleMic}
+            disabled={generating}
+            aria-label={listening ? "Parar de ouvir" : "Ditar por voz"}
+            title={voiceSupported === false ? "Ditado indisponível neste navegador" : listening ? "Parar" : "Ditar por voz"}
+            className={listening ? "animate-pulse-soft" : ""}
+          >
+            {listening ? <Square /> : <Mic />}
+          </Button>
           {generating ? (
             <Button
               type="button"
@@ -580,7 +636,7 @@ export function ChatPanel({
         </div>
         <p className="mt-1.5 px-1 text-[10px] text-muted-foreground">
           <kbd className="rounded border px-1">⏎</kbd> envia · <kbd className="rounded border px-1">⇧⏎</kbd> quebra linha
-          {voiceSupported ? " · 🎙 fale pelo microfone" : ""}
+          {voiceSupported ? " · 🎙 fale pelo microfone" : ""} · <Paperclip className="inline h-3 w-3" /> anexe imagem, texto ou código
         </p>
       </form>
     </div>

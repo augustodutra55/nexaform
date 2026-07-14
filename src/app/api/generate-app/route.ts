@@ -6,6 +6,7 @@ import { isOwner, resolvePlan } from "@/lib/access";
 import type { AppCode } from "@/lib/engine/app-types";
 import { authorizeProjectOwner, consumeRateLimit } from "@/lib/engine/data-guard";
 import { finalizeGeneration, reserveGeneration } from "@/lib/engine/generation-usage";
+import { sanitizePromptAttachments } from "@/lib/engine/prompt-attachments";
 
 // Apps grandes + auto-cura (retry/fallback) podem passar de 2 min; damos folga
 // para o servidor não cortar a resposta no meio (o que virava "não é JSON válido").
@@ -262,6 +263,7 @@ export async function POST(req: NextRequest) {
   if (!access.allowed) {
     return NextResponse.json({ error: access.error }, { status: access.status ?? 403 });
   }
+  const attachments = sanitizePromptAttachments(body?.attachments);
 
   const { data: sub } = owner ? { data: null } : await supabase.from("subscriptions").select("plan").eq("user_id", user.id).maybeSingle();
   const plan = resolvePlan({ plan: sub?.plan, role: profile?.role, email: user.email });
@@ -284,7 +286,7 @@ export async function POST(req: NextRequest) {
         currentFiles: Array.isArray(currentFiles) ? currentFiles : null,
         name: typeof name === "string" ? name : "App", userKey: typeof userKey === "string" ? userKey : null,
         userProvider: userProvider ?? null, costMode: costMode ?? "auto",
-        forceReal: forceReal !== false, allowTemplate: allowTemplate === true }),
+        forceReal: forceReal !== false, allowTemplate: allowTemplate === true, attachments }),
       new Promise<typeof DEADLINE>((resolve) => setTimeout(() => resolve(DEADLINE), GEN_MAX_MS)),
     ]);
   } catch (error) {

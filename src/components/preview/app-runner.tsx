@@ -448,7 +448,7 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
               ref={iframeRef}
               title="Preview do app"
               sandbox="allow-scripts allow-pointer-lock allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads"
-              allow="microphone; clipboard-write"
+              allow="microphone; autoplay; clipboard-write"
               srcDoc={srcDoc}
               onLoad={() => setLoading(false)}
               allowFullScreen

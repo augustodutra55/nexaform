@@ -1,10 +1,10 @@
 "use client";
 import { useEffect, type RefObject } from "react";
 
-type BridgeKind = "data" | "upload" | "email" | "view" | "auth";
+type BridgeKind = "data" | "upload" | "email" | "view" | "auth" | "voice";
 const METHODS: Record<BridgeKind, string[]> = {
   data: ["GET", "POST", "PATCH", "DELETE"], upload: ["POST"],
-  email: ["POST"], view: ["POST"], auth: ["GET", "POST"],
+  email: ["POST"], view: ["POST"], auth: ["GET", "POST"], voice: ["POST"],
 };
 const sessionKey = (projectId: string) => `adstudio:app-token:${projectId}`;
 
@@ -13,8 +13,79 @@ export function usePreviewBridge(
   onError?: (message: string) => void, allowEditorSession = false
 ) {
   useEffect(() => {
+    let activeRecognition: any = null;
     function reply(source: Window, id: string, result: Record<string, unknown>) {
       source.postMessage({ __ad_bridge_result: true, id, ...result }, "*");
+    }
+    function voiceError(code: string): string {
+      if (code === "not-allowed" || code === "service-not-allowed") return "Permissão do microfone bloqueada. Permita o microfone no cadeado do navegador.";
+      if (code === "audio-capture") return "Nenhum microfone disponível. Confira o dispositivo e tente novamente.";
+      if (code === "no-speech") return "Nenhuma fala foi reconhecida. Tente novamente.";
+      if (code === "network") return "O reconhecimento de voz ficou indisponível. Confira a conexão.";
+      return code || "Falha ao usar o recurso de voz.";
+    }
+    function handleVoice(source: Window, id: string, body: any) {
+      const action = String(body?.action || "");
+      if (action === "cancel") {
+        try { activeRecognition?.abort(); } catch {}
+        activeRecognition = null;
+        try { window.speechSynthesis?.cancel(); } catch {}
+        reply(source, id, { ok: true, status: 200, payload: { cancelled: true } });
+        return;
+      }
+      if (action === "speak") {
+        const text = String(body?.text || "").trim().slice(0, 5000);
+        if (!text || !("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
+          reply(source, id, { ok: false, status: 501, error: "Leitura em voz alta não disponível neste navegador." });
+          return;
+        }
+        try {
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = String(body?.lang || "pt-BR").slice(0, 20);
+          utterance.rate = Math.min(2, Math.max(0.5, Number(body?.rate) || 1));
+          utterance.pitch = Math.min(2, Math.max(0, Number(body?.pitch) || 1));
+          utterance.volume = Math.min(1, Math.max(0, body?.volume == null ? 1 : Number(body.volume)));
+          window.speechSynthesis.resume();
+          window.speechSynthesis.speak(utterance);
+          reply(source, id, { ok: true, status: 200, payload: { speaking: true } });
+        } catch (error) {
+          reply(source, id, { ok: false, status: 500, error: error instanceof Error ? error.message : "Falha na leitura em voz alta." });
+        }
+        return;
+      }
+      if (action !== "listen") {
+        reply(source, id, { ok: false, status: 400, error: "Ação de voz inválida." });
+        return;
+      }
+      const Recognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!Recognition) {
+        reply(source, id, { ok: false, status: 501, error: "Reconhecimento de voz não disponível. Use Chrome ou Edge atualizado." });
+        return;
+      }
+      try { activeRecognition?.abort(); } catch {}
+      const recognition = new Recognition();
+      activeRecognition = recognition;
+      recognition.lang = String(body?.lang || "pt-BR").slice(0, 20);
+      recognition.interimResults = false;
+      recognition.continuous = false;
+      let transcript = "";
+      let settled = false;
+      const finish = (result: Record<string, unknown>) => {
+        if (settled) return;
+        settled = true;
+        if (activeRecognition === recognition) activeRecognition = null;
+        reply(source, id, result);
+      };
+      recognition.onresult = (event: any) => {
+        for (let index = event.resultIndex || 0; index < event.results.length; index++) {
+          transcript += event.results[index][0]?.transcript || "";
+        }
+      };
+      recognition.onerror = (event: any) => finish({ ok: false, status: 400, error: voiceError(String(event?.error || "")) });
+      recognition.onend = () => transcript.trim()
+        ? finish({ ok: true, status: 200, payload: { transcript: transcript.trim() } })
+        : finish({ ok: false, status: 400, error: "Nenhuma fala foi reconhecida. Tente novamente." });
+      recognition.start();
     }
     async function onMessage(event: MessageEvent) {
       const source = iframeRef.current?.contentWindow;
@@ -27,9 +98,13 @@ export function usePreviewBridge(
       if (!id || !projectId || event.data.projectId !== projectId || !METHODS[kind]?.includes(method)) {
         reply(source, id, { ok: false, status: 403, error: "Operação não permitida no preview." }); return;
       }
+      if (kind === "voice") {
+        handleVoice(source, id, event.data.body);
+        return;
+      }
       const rawQs = typeof event.data.qs === "string" ? event.data.qs : "";
       const qs = rawQs.startsWith("?") && rawQs.length <= 5000 && !rawQs.includes("#") ? rawQs : "";
-      const paths: Record<BridgeKind, string> = {
+      const paths: Record<Exclude<BridgeKind, "voice">, string> = {
         data: `/api/data/${projectId}`, upload: `/api/upload/${projectId}`,
         email: `/api/email/${projectId}`, view: `/api/view/${projectId}`, auth: `/api/app-auth/${projectId}`,
       };
@@ -63,6 +138,10 @@ export function usePreviewBridge(
       }
     }
     window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      try { activeRecognition?.abort(); } catch {}
+      activeRecognition = null;
+    };
   }, [allowEditorSession, iframeRef, onError, projectId]);
 }

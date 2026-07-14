@@ -14,6 +14,7 @@ export function usePreviewBridge(
 ) {
   useEffect(() => {
     let activeRecognition: any = null;
+    let activeSpeechRequest = 0;
     function reply(source: Window, id: string, result: Record<string, unknown>) {
       source.postMessage({ __ad_bridge_result: true, id, ...result }, "*");
     }
@@ -27,6 +28,7 @@ export function usePreviewBridge(
     function handleVoice(source: Window, id: string, body: any) {
       const action = String(body?.action || "");
       if (action === "cancel") {
+        activeSpeechRequest++;
         try { activeRecognition?.abort(); } catch {}
         activeRecognition = null;
         try { window.speechSynthesis?.cancel(); } catch {}
@@ -34,6 +36,7 @@ export function usePreviewBridge(
         return;
       }
       if (action === "speak") {
+        const speechRequest = ++activeSpeechRequest;
         const text = String(body?.text || "").trim().slice(0, 5000);
         if (!text || !("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
           reply(source, id, { ok: false, status: 501, error: "Leitura em voz alta não disponível neste navegador." });
@@ -55,6 +58,7 @@ export function usePreviewBridge(
             || window.speechSynthesis.pending || window.speechSynthesis.paused;
           if (queueWasBusy) window.speechSynthesis.cancel();
           const play = () => {
+            if (speechRequest !== activeSpeechRequest) return;
             try {
               window.speechSynthesis.resume();
               window.speechSynthesis.speak(utterance);
@@ -157,8 +161,10 @@ export function usePreviewBridge(
     window.addEventListener("message", onMessage);
     return () => {
       window.removeEventListener("message", onMessage);
+      activeSpeechRequest++;
       try { activeRecognition?.abort(); } catch {}
       activeRecognition = null;
+      try { window.speechSynthesis?.cancel(); } catch {}
     };
   }, [allowEditorSession, iframeRef, onError, projectId]);
 }

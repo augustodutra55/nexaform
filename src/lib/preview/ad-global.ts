@@ -29,8 +29,13 @@ export function adGlobalScript(projectId?: string | null): string {
   var nativeVoiceSpeak=voiceSynth&&typeof voiceSynth.speak==='function'?voiceSynth.speak.bind(voiceSynth):null;
   var nativeVoiceCancel=voiceSynth&&typeof voiceSynth.cancel==='function'?voiceSynth.cancel.bind(voiceSynth):null;
   var nativeVoiceResume=voiceSynth&&typeof voiceSynth.resume==='function'?voiceSynth.resume.bind(voiceSynth):function(){};
-  var voiceRun=0, lastVoiceCancel=0;
-  function cancelLocalVoice(){ voiceRun++; lastVoiceCancel=Date.now(); if(nativeVoiceCancel)nativeVoiceCancel(); }
+  var voiceRun=0, voiceCancelGeneration=0, lastVoiceCancel=0, legacyVoiceQueue=[], legacyVoiceTimer=null;
+  function cancelLocalVoice(){
+    voiceRun++; voiceCancelGeneration++; lastVoiceCancel=Date.now();
+    if(legacyVoiceTimer)clearTimeout(legacyVoiceTimer);
+    legacyVoiceTimer=null; legacyVoiceQueue=[];
+    if(nativeVoiceCancel)nativeVoiceCancel();
+  }
   function playLocalUtterance(utterance, onPlayed, onError){
     if(!voiceSynth||!nativeVoiceSpeak){ if(onError)onError(new Error('Leitura em voz alta não disponível neste navegador.')); return; }
     var run=++voiceRun;
@@ -40,11 +45,32 @@ export function adGlobalScript(projectId?: string | null): string {
     var elapsed=Date.now()-lastVoiceCancel;
     var delay=(mustReset||elapsed<120)?Math.max(60,120-elapsed):0;
     function play(){
-      if(run!==voiceRun)return;
-      try { nativeVoiceResume(); nativeVoiceSpeak(utterance); if(onPlayed)onPlayed(); }
+      if(run!==voiceRun){ if(onPlayed)onPlayed(false); return; }
+      try { nativeVoiceResume(); nativeVoiceSpeak(utterance); if(onPlayed)onPlayed(true); }
       catch(error){ if(onError)onError(error instanceof Error?error:new Error('Falha na leitura em voz alta.')); }
     }
     if(delay)setTimeout(play,delay); else play();
+  }
+  function queueLegacyUtterance(utterance){
+    if(!voiceSynth||!nativeVoiceSpeak)return;
+    var generation=voiceCancelGeneration;
+    var elapsed=Date.now()-lastVoiceCancel;
+    function play(){
+      // Apenas cancel() invalida a fila. Várias chamadas speak() continuam sendo
+      // enfileiradas na ordem nativa, como a Web Speech API especifica.
+      if(generation!==voiceCancelGeneration)return;
+      try { nativeVoiceResume(); nativeVoiceSpeak(utterance); } catch(e){}
+    }
+    if(elapsed<120){
+      legacyVoiceQueue.push({utterance:utterance,generation:generation});
+      if(!legacyVoiceTimer)legacyVoiceTimer=setTimeout(function(){
+        var queued=legacyVoiceQueue; legacyVoiceQueue=[]; legacyVoiceTimer=null;
+        queued.forEach(function(item){
+          if(item.generation!==voiceCancelGeneration)return;
+          try { nativeVoiceResume(); nativeVoiceSpeak(item.utterance); } catch(e){}
+        });
+      },Math.max(60,120-elapsed));
+    } else play();
   }
   if(!PID){ window.AD = { list:function(){return Promise.resolve([]);}, get:function(){return Promise.resolve(null);}, count:function(){return Promise.resolve(0);}, insert:noop, update:noop, remove:noop, email:noop, voice:{listen:function(){return Promise.reject(new Error('Voz indisponível fora de um projeto.'));},speak:noop,cancel:noop}, enabled:false }; return; }
   function req(method, opts){
@@ -109,7 +135,7 @@ export function adGlobalScript(projectId?: string | null): string {
                 ||Array.from(voices||[]).filter(function(v){return v&&v.lang;}).find(function(v){return v.lang.toLowerCase().split('-')[0]===base;});
               if(selected)utterance.voice=selected;
             } catch(e){}
-            playLocalUtterance(utterance,function(){resolve({speaking:true});},reject);
+            playLocalUtterance(utterance,function(played){resolve({speaking:!!played,cancelled:!played});},reject);
           } catch(error){ reject(error instanceof Error?error:new Error('Falha na leitura em voz alta.')); }
         });
       },
@@ -180,7 +206,7 @@ export function adGlobalScript(projectId?: string | null): string {
     // pelo Safari depois de cancel().
     try {
       if(voiceSynth&&nativeVoiceSpeak){
-        voiceSynth.speak=function(utterance){ playLocalUtterance(utterance); };
+        voiceSynth.speak=function(utterance){ queueLegacyUtterance(utterance); };
         voiceSynth.cancel=function(){ cancelLocalVoice(); };
       }
     } catch(e){}

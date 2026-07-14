@@ -104,6 +104,7 @@ function query(collection, options = {}) {
 }
 
 export function installADRuntime() {
+  let speechRequest = 0;
   function listen(options = {}) {
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Recognition) return Promise.reject(new Error('Reconhecimento de voz não disponível. Use Chrome ou Edge atualizado.'));
@@ -122,8 +123,9 @@ export function installADRuntime() {
     const utterance = new SpeechSynthesisUtterance(String(text || ''));
     utterance.lang = options.lang || 'pt-BR'; utterance.rate = options.rate || 1; utterance.pitch = options.pitch || 1; utterance.volume = options.volume == null ? 1 : options.volume;
     const queueWasBusy = window.speechSynthesis.speaking || window.speechSynthesis.pending || window.speechSynthesis.paused;
+    const request = ++speechRequest;
     if (queueWasBusy) window.speechSynthesis.cancel();
-    const play = () => { window.speechSynthesis.resume(); window.speechSynthesis.speak(utterance); };
+    const play = () => { if (request !== speechRequest) return; window.speechSynthesis.resume(); window.speechSynthesis.speak(utterance); };
     if (queueWasBusy) window.setTimeout(play, 120); else play();
     return Promise.resolve({ speaking: true });
   }
@@ -137,7 +139,7 @@ export function installADRuntime() {
     remove: (id) => request('data', 'DELETE', { qs: '?id=' + encodeURIComponent(id) }).then(() => true),
     upload: (file) => request('upload', 'POST', { file }).then((r) => r.url),
     email: (payload) => request('email', 'POST', { body: payload || {} }),
-    voice: { listen, speak, cancel: () => { window.speechSynthesis?.cancel(); return Promise.resolve(); } },
+    voice: { listen, speak, cancel: () => { speechRequest++; window.speechSynthesis?.cancel(); return Promise.resolve(); } },
     auth: {
       signUp: (email, password, name) => request('app-auth', 'POST', { body: { action: 'signup', email, password, name } }).then((r) => { setToken(r.token); return r.user; }),
       signIn: (email, password) => request('app-auth', 'POST', { body: { action: 'login', email, password } }).then((r) => { setToken(r.token); return r.user; }),

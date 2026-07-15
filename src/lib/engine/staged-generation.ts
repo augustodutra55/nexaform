@@ -14,6 +14,8 @@ export interface StagedBuildJob {
   threadId: string;
   originalPrompt: string;
   masterPrompt: string;
+  /** Referências visuais preservadas somente enquanto a primeira etapa não concluiu. */
+  imageAttachments?: PromptAttachment[];
   nextStage: number;
   startedAt: string;
 }

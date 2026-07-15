@@ -303,7 +303,9 @@ export function ChatPanel({
   ) {
     const content = (resumedJob?.originalPrompt ?? text).trim();
     if (!content || generating) return;
-    const requestAttachments = resumedJob ? [] : providedAttachments ?? (isAutoFix ? [] : attachments);
+    const requestAttachments = resumedJob
+      ? resumedJob.imageAttachments ?? []
+      : providedAttachments ?? (isAutoFix ? [] : attachments);
     // Cada pedido MANUAL seu zera o contador de auto-correção — assim cada build
     // ganha um novo orçamento de tentativas (o loop de auto-conserto não trava
     // a sessão inteira). As correções automáticas NÃO zeram (senão seria infinito).
@@ -385,6 +387,7 @@ export function ChatPanel({
           threadId,
           originalPrompt: content,
           masterPrompt: buildMasterPrompt(content, requestAttachments),
+          imageAttachments: requestAttachments.filter((attachment) => attachment.kind === "image"),
           nextStage: 0,
           startedAt: new Date().toISOString(),
         };
@@ -413,7 +416,7 @@ export function ChatPanel({
             if (!canRetryStagedFailure(firstError)) throw firstError;
             setStageStatus({ current: index + 1, total: stages.length, label: `${stage.label} · nova tentativa` });
             const retryPrompt = buildStageRetryPrompt(job.masterPrompt, stage, index, stages.length);
-            data = await request(appPayload(retryPrompt, workingCode, workingFiles, []));
+            data = await request(appPayload(retryPrompt, workingCode, workingFiles, stageAttachments));
           }
           lastData = data;
 
@@ -443,7 +446,11 @@ export function ChatPanel({
             filesRef.current = null;
           }
 
-          job = { ...job, nextStage: index + 1 };
+          job = {
+            ...job,
+            nextStage: index + 1,
+            imageAttachments: index === 0 ? undefined : job.imageAttachments,
+          };
           activeStagedJob = job;
           setPlanDone(index + 1);
           storeStagedJob(job.nextStage < stages.length ? job : null);

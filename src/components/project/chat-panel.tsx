@@ -19,6 +19,14 @@ import {
   PROMPT_ATTACHMENT_ACCEPT,
   type PromptAttachment,
 } from "@/lib/engine/prompt-attachments";
+import {
+  buildMasterPrompt,
+  buildStagePrompt,
+  shouldStageInitialBuild,
+  stagedBuildStages,
+  STAGED_BUILD_VERSION,
+  type StagedBuildJob,
+} from "@/lib/engine/staged-generation";
 
 interface Message {
   id: string;
@@ -57,7 +65,7 @@ interface ChatPanelProps {
   /** Disparado quando o usuário envia um pedido MANUAL (para zerar o orçamento de auto-correções). */
   onUserSend?: () => void;
   onSiteResult: (result: GenerationResult) => void;
-  onAppResult: (result: AppGenerationResult) => void;
+  onAppResult: (result: AppGenerationResult) => void | Promise<void>;
   onGeneratingChange?: (generating: boolean) => void;
   /** Informa o modo do motor da última geração (real/template/demo) ao pai. */
   onEngineMode?: (mode: EngineMode | null) => void;
@@ -128,6 +136,9 @@ export function ChatPanel({
   const autoFixInFlightRef = useRef<string | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
+  const [resumeJob, setResumeJob] = useState<StagedBuildJob | null>(null);
+  const [stageStatus, setStageStatus] = useState<{ current: number; total: number; label: string } | null>(null);
+  const stagedStorageKey = `adstudio:staged-build:${projectId}`;
 
   // ── Modo de geração de código: REAL (IA escreve) vs TEMPLATE (enlatado/demo) ──
   const [genMode, setGenMode] = useState<GenMode>("real");
@@ -138,6 +149,33 @@ export function ChatPanel({
     const s = localStorage.getItem("adstudio:gen-mode");
     if (s === "real" || s === "template") setGenMode(s);
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(stagedStorageKey);
+      if (!raw) return;
+      const job = JSON.parse(raw) as StagedBuildJob;
+      const total = stagedBuildStages().length;
+      if (
+        job.version === STAGED_BUILD_VERSION &&
+        job.projectId === projectId &&
+        job.threadId === threadId &&
+        typeof job.masterPrompt === "string" &&
+        job.nextStage >= 0 && job.nextStage < total
+      ) setResumeJob(job);
+      else localStorage.removeItem(stagedStorageKey);
+    } catch {
+      localStorage.removeItem(stagedStorageKey);
+    }
+  }, [projectId, stagedStorageKey, threadId]);
+
+  function storeStagedJob(job: StagedBuildJob | null) {
+    try {
+      if (job) localStorage.setItem(stagedStorageKey, JSON.stringify(job));
+      else localStorage.removeItem(stagedStorageKey);
+    } catch {}
+    setResumeJob(job);
+  }
   function chooseMode(m: GenMode) {
     setGenMode(m);
     localStorage.setItem("adstudio:gen-mode", m);
@@ -250,52 +288,161 @@ export function ChatPanel({
     await supabase.from("chat_messages").insert({ thread_id: threadId, role, content });
   }
 
-  async function send(text: string, isAutoFix = false, providedAttachments?: PromptAttachment[]) {
-    const content = text.trim();
+  async function send(
+    text: string,
+    isAutoFix = false,
+    providedAttachments?: PromptAttachment[],
+    resumedJob?: StagedBuildJob
+  ) {
+    const content = (resumedJob?.originalPrompt ?? text).trim();
     if (!content || generating) return;
-    const requestAttachments = providedAttachments ?? (isAutoFix ? [] : attachments);
+    const requestAttachments = resumedJob ? [] : providedAttachments ?? (isAutoFix ? [] : attachments);
     // Cada pedido MANUAL seu zera o contador de auto-correção — assim cada build
     // ganha um novo orçamento de tentativas (o loop de auto-conserto não trava
     // a sessão inteira). As correções automáticas NÃO zeram (senão seria infinito).
-    if (!isAutoFix) onUserSend?.();
+    if (!isAutoFix && !resumedJob) onUserSend?.();
 
     // Decide o motor desta geração.
     // "Geração real" SEMPRE escreve código React de verdade (inclusive landings),
     // exceto em projetos que já são schema/site (para não sobrescrever o editor visual).
     // "Template/Schema" usa a heurística: app enlatado ou motor de seções.
-    const useApp =
+    const useApp = !!resumedJob ||
       modeRef.current === "app" ||
       (modeRef.current !== "site" && (genModeRef.current === "real" || looksLikeApp(content)));
+    const hasCurrentProject = !!(codeRef.current || filesRef.current?.length);
+    const useStagedBuild = useApp && genModeRef.current === "real" && !!(
+      resumedJob || shouldStageInitialBuild(content, requestAttachments, hasCurrentProject)
+    );
 
     setInput("");
-    if (!isAutoFix) setAttachments([]);
+    if (!isAutoFix && !resumedJob) setAttachments([]);
     const visibleContent = requestAttachments.length
       ? `${content}\n\n📎 ${requestAttachments.map(attachmentLabel).join(" · ")}`
       : content;
-    setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", content: visibleContent }]);
+    if (!resumedJob) {
+      setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", content: visibleContent }]);
+      persist("user", content);
+    }
     setGenerating(true);
     onGeneratingChange?.(true);
-    setPlan([]);
-    setPlanDone(0);
-    persist("user", content);
+    if (!useStagedBuild) {
+      setPlan([]);
+      setPlanDone(0);
+    }
+
+    let activeStagedJob: StagedBuildJob | null = null;
+    let activeStageLabel = "";
 
     try {
       const endpoint = useApp ? "/api/generate-app" : "/api/generate";
       const costMode = localStorage.getItem("nexaform:cost-mode") || "auto";
-      const payload = useApp
-        ? {
-            projectId,
-            message: content,
-            currentCode: codeRef.current,
-            currentFiles: filesRef.current ?? null,
-            name: projectName,
-            userKey: localStorage.getItem("nexaform:ai-key") || null,
-            userProvider: localStorage.getItem("nexaform:ai-provider") || null,
-            costMode,
-            forceReal: genModeRef.current === "real",
-            allowTemplate: genModeRef.current === "template",
-            attachments: requestAttachments,
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const request = async (payload: Record<string, unknown>) => {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        let data: any;
+        try { data = await res.json(); }
+        catch { throw new Error("O servidor encerrou a resposta antes de concluir esta etapa."); }
+        if (!res.ok) throw new Error(data?.error ?? "Falha na geração.");
+        return data;
+      };
+      const appPayload = (
+        message: string,
+        currentCode: string | null,
+        currentFiles: AppFile[] | null,
+        stageAttachments: PromptAttachment[]
+      ) => ({
+        projectId,
+        message,
+        currentCode,
+        currentFiles,
+        name: projectName,
+        userKey: localStorage.getItem("nexaform:ai-key") || null,
+        userProvider: localStorage.getItem("nexaform:ai-provider") || null,
+        costMode,
+        forceReal: genModeRef.current === "real",
+        allowTemplate: genModeRef.current === "template",
+        attachments: stageAttachments,
+      });
+
+      if (useStagedBuild) {
+        const stages = stagedBuildStages();
+        let job: StagedBuildJob = resumedJob ?? {
+          version: STAGED_BUILD_VERSION,
+          projectId,
+          threadId,
+          originalPrompt: content,
+          masterPrompt: buildMasterPrompt(content, requestAttachments),
+          nextStage: 0,
+          startedAt: new Date().toISOString(),
+        };
+        activeStagedJob = job;
+        storeStagedJob(job);
+        setPlan(stages.map((stage, index) => `${index + 1}/${stages.length} · ${stage.label}`));
+        setPlanDone(job.nextStage);
+
+        let workingCode = codeRef.current;
+        let workingFiles = filesRef.current ?? null;
+        let lastData: any = null;
+        for (let index = job.nextStage; index < stages.length; index++) {
+          const stage = stages[index];
+          activeStageLabel = stage.label;
+          setStageStatus({ current: index + 1, total: stages.length, label: stage.label });
+          const stagePrompt = buildStagePrompt(job.masterPrompt, stage, index, stages.length);
+          // O texto dos anexos já foi incorporado à especificação mestra. Imagens
+          // de referência seguem apenas na primeira etapa para não multiplicar payloads.
+          const stageAttachments = index === 0
+            ? requestAttachments.filter((attachment) => attachment.kind === "image")
+            : [];
+          const data = await request(appPayload(stagePrompt, workingCode, workingFiles, stageAttachments));
+          lastData = data;
+
+          if (typeof data.cost === "number") setLastCost(data.cost);
+          if (typeof data.projectCost === "number") setProjectCost(data.projectCost);
+          const evidence: GenEvidence = {
+            engineMode: (data.engineMode as EngineMode) ?? "real",
+            provider: String(data.provider ?? "?"),
+            model: data.model,
+            stats: data.stats,
+            cost: typeof data.cost === "number" ? data.cost : undefined,
+          };
+          setLastGen(evidence);
+          onEngineMode?.(evidence.engineMode);
+          await Promise.resolve(onAppResult(data as AppGenerationResult));
+
+          const app = (data as AppGenerationResult).app;
+          if (app.files?.length) {
+            workingFiles = app.files;
+            workingCode = null;
+            filesRef.current = app.files;
+            codeRef.current = null;
+          } else {
+            workingCode = app.code ?? null;
+            workingFiles = null;
+            codeRef.current = workingCode;
+            filesRef.current = null;
           }
+
+          job = { ...job, nextStage: index + 1 };
+          activeStagedJob = job;
+          setPlanDone(index + 1);
+          storeStagedJob(job.nextStage < stages.length ? job : null);
+        }
+
+        const completion = `✅ Projeto construído em ${stages.length} etapas, com salvamento após cada uma. ${lastData?.reply ?? "A base funcional está pronta para novos refinamentos."}`;
+        setMessages((messages) => [...messages, { id: crypto.randomUUID(), role: "assistant", content: completion }]);
+        persist("assistant", completion);
+        storeStagedJob(null);
+        return;
+      }
+
+      const payload = useApp
+        ? appPayload(content, codeRef.current, filesRef.current ?? null, requestAttachments)
         : {
             projectId,
             message: content,
@@ -304,17 +451,7 @@ export function ChatPanel({
             userProvider: localStorage.getItem("nexaform:ai-provider") || null,
             costMode,
           };
-
-      const controller = new AbortController();
-      abortRef.current = controller;
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? "Falha na geração.");
+      const data = await request(payload);
 
       const steps: string[] = Array.isArray(data.plan) ? data.plan : [];
       setPlan(steps);
@@ -339,7 +476,7 @@ export function ChatPanel({
         };
         setLastGen(ev);
         onEngineMode?.(ev.engineMode);
-        onAppResult(data as AppGenerationResult);
+        await Promise.resolve(onAppResult(data as AppGenerationResult));
       } else {
         // Modo site = motor de schema/seções (não é geração de código real).
         setLastGen({ engineMode: "template", provider: "schema" });
@@ -347,6 +484,18 @@ export function ChatPanel({
         onSiteResult(data as GenerationResult);
       }
     } catch (err: any) {
+      if (activeStagedJob) {
+        storeStagedJob(activeStagedJob);
+        const current = Math.min(activeStagedJob.nextStage + 1, stagedBuildStages().length);
+        const paused = err?.name === "AbortError"
+          ? `⏸️ Construção pausada antes da etapa ${current}. Todo o progresso anterior foi salvo.`
+          : `A construção parou na etapa ${current} (${activeStageLabel || "continuação"}), mas todo o progresso anterior foi salvo. Clique em “Continuar construção” para retomar deste ponto. Motivo: ${err?.message ?? "falha temporária"}`;
+        if (err?.name === "AbortError") toast("Construção pausada com segurança.");
+        else toast.error("Etapa não concluída", { description: "O progresso anterior foi preservado." });
+        setMessages((messages) => [...messages, { id: crypto.randomUUID(), role: "assistant", content: paused }]);
+        persist("assistant", paused);
+        return;
+      }
       // Interrompido pelo usuário (botão parar): não é erro, apenas devolve o controle.
       if (err?.name === "AbortError") {
         toast("Geração interrompida.");
@@ -360,6 +509,7 @@ export function ChatPanel({
       abortRef.current = null;
       setGenerating(false);
       onGeneratingChange?.(false);
+      setStageStatus(null);
       setPlan([]);
       setPlanDone(0);
     }
@@ -389,7 +539,9 @@ export function ChatPanel({
             </span>
           )}
           <span className={cn("h-1.5 w-1.5 rounded-full", generating ? "animate-pulse-soft bg-brand-500" : "bg-emerald-500")} />
-          {generating ? "Construindo…" : "Pronto"}
+          {stageStatus
+            ? `Etapa ${stageStatus.current}/${stageStatus.total} · ${stageStatus.label}`
+            : generating ? "Construindo…" : "Pronto"}
         </span>
       </div>
 
@@ -520,6 +672,28 @@ export function ChatPanel({
                 </div>
               ))
             )}
+          </div>
+        )}
+        {!generating && resumeJob && (
+          <div className="space-y-3 rounded-xl border border-brand-500/30 bg-brand-500/10 p-3.5">
+            <div className="flex items-start gap-2">
+              <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-brand-500" />
+              <div>
+                <p className="text-sm font-medium">Construção por etapas pausada</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  As etapas anteriores estão salvas. A próxima é {resumeJob.nextStage + 1} de {stagedBuildStages().length}.
+                </p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="brand"
+              className="w-full"
+              onClick={() => send(resumeJob.originalPrompt, false, [], resumeJob)}
+            >
+              Continuar construção
+            </Button>
           </div>
         )}
         <div ref={bottomRef} />

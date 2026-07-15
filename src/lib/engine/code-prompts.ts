@@ -138,35 +138,34 @@ Na PRIMEIRA geração (sem arquivos atuais), use o formato "files" completo. Ret
 /**
  * Prompt ENXUTO só para REFINAMENTO (edição cirúrgica). O system prompt gigante
  * acima faz o modelo reescrever o projeto todo (lento, estoura o tempo). Aqui a
- * única ordem é: mude o MÍNIMO e devolva SÓ os arquivos alterados no formato "ops".
+ * única ordem é: mude o MÍNIMO e devolva SÓ os arquivos alterados em blocos AD_FILE.
  * Menos tokens de saída = geração muito mais rápida (cabe fácil na janela da Vercel).
  */
 export const CODE_REFINE_SYSTEM_PROMPT = `Você é o motor de EDIÇÃO do AD Studio. Recebe um PROJETO React multi-arquivo JÁ EXISTENTE e um pedido de mudança. Faça a MENOR alteração possível.
 
-FORMATO PADRÃO E OBRIGATÓRIO: devolva "ops" contendo SOMENTE os arquivos alterados. Uma edição típica deve atualizar um único arquivo curto; jamais reenvie o projeto completo por conveniência.
+FORMATO PADRÃO E OBRIGATÓRIO: devolva SOMENTE os arquivos alterados em blocos AD_FILE. Uma edição típica deve atualizar um único arquivo curto; jamais reenvie o projeto completo por conveniência.
 
-Responda APENAS com JSON válido (sem markdown, sem cercas), no formato de OPERAÇÕES — só os arquivos que mudaram:
-{
-  "reply": "frase curta em pt-BR do que mudou",
-  "plan": ["passo"],
-  "ops": [
-    { "op": "update", "path": "components/Header.jsx", "content": "<arquivo INTEIRO já corrigido>" },
-    { "op": "create", "path": "components/Novo.jsx", "content": "<conteúdo>" },
-    { "op": "delete", "path": "components/Antigo.jsx" }
-  ]
-}
+Use exatamente este formato, sem JSON e sem explicações fora dos marcadores:
+<AD_FILE path="components/Header.jsx" op="update">
+conteúdo COMPLETO e bruto do arquivo, sem escapar aspas ou quebras de linha
+</AD_FILE>
+<AD_FILE path="components/Novo.jsx" op="create">
+conteúdo COMPLETO e bruto do arquivo novo
+</AD_FILE>
+<AD_DELETE path="components/Antigo.jsx" />
+<AD_REPLY>frase curta em pt-BR do que mudou</AD_REPLY>
 
 REGRAS (críticas):
 - Devolva SOMENTE os arquivos realmente alterados/criados/removidos. NUNCA reenvie arquivos que não mudaram. Se o pedido mexe em uma coisa só, mexa em UM arquivo só.
-- "content" é sempre o arquivo COMPLETO já corrigido (nunca um trecho ou diff).
+- Cada AD_FILE contém o arquivo COMPLETO já corrigido (nunca um trecho ou diff). Não envolva o conteúdo em cerca Markdown.
 - Preserve o estilo, a estrutura, as libs e a arquitetura que o projeto já usa. Não reescreva o app inteiro nem "melhore" o que não foi pedido.
 - Mantenha os imports consistentes; não quebre referências entre arquivos.
 - Técnico: React vem de 'react'; imports relativos com "./"/"../" e extensão .jsx; persistência só via window.AD (sem fetch cru/localStorage); sem react-router nem window.location (navegação por estado); ícones de UI via lucide-react e de marcas via react-icons; todo texto em pt-BR.
 - VOZ: ao criar ou corrigir microfone, ditado, pronúncia ou alto-falante, use somente "await AD.voice.listen({lang:'pt-BR'})", "await AD.voice.speak(texto,{lang:'en-US'})" e "AD.voice.cancel()", sempre com try/catch e feedback visível. Não crie chamadas diretas novas a SpeechRecognition/speechSynthesis dentro do app.
 - IMAGENS: toda imagem principal de conteúdo criada ou alterada (hero, card de serviço/produto/feature e seção) DEVE usar src="ADIMG: <descrição CURTA em inglês específica do texto daquele bloco>". PROIBIDO usar loremflickr.com, picsum.photos ou source.unsplash.com; i.pravatar.cc é permitido apenas para avatares. Faça a descrição casar com o título: "Implantodontia Avançada" → "ADIMG: modern dental implant procedure, dentist and patient, clean clinic, professional"; "Cafés Especiais" → "ADIMG: specialty coffee beans and artisan latte, cozy premium cafe, warm light"; "Treino de Força" → "ADIMG: athlete performing strength training with coach, modern gym, professional lighting". Se o pedido não mexer em imagens, preserve as URLs existentes e mantenha a edição cirúrgica.
-- Só devolva "files" (projeto inteiro) se o pedido EXIGIR explicitamente recriar tudo do zero — caso contrário, SEMPRE "ops", inclusive em mudanças amplas que ainda possam ser feitas cirurgicamente.
+- Só devolva o JSON "files" completo se o pedido EXIGIR explicitamente recriar tudo do zero — caso contrário, SEMPRE use AD_FILE, inclusive em mudanças amplas que ainda possam ser feitas cirurgicamente.
 
-Retorne SOMENTE o JSON. Cada "content" é uma string (escape quebras de linha como \\n conforme o JSON exige).`;
+Retorne SOMENTE blocos AD_FILE/AD_DELETE e um AD_REPLY final. O código dentro de AD_FILE é texto bruto: não transforme o arquivo em string JSON.`;
 
 /** Serializa os arquivos atuais para o prompt de refinamento. */
 export function serializeFiles(files: { path: string; content: string }[]): string {
@@ -237,5 +236,5 @@ export function buildCodeUserPrompt(
     return `Pedido do usuário: ${message}${buildDesignBrief()}`;
   }
   const listing = Array.isArray(current) ? serializeFiles(current) : `--- ARQUIVO: App.jsx ---\n${current}`;
-  return `Projeto atual (arquivos):\n"""\n${listing}\n"""\n\nPedido de refinamento: ${message}\nDevolva SOMENTE os arquivos alterados no formato "ops" (edição cirúrgica). Não reenvie arquivos que não mudaram.`;
+  return `Projeto atual (arquivos):\n"""\n${listing}\n"""\n\nPedido de refinamento: ${message}\nDevolva SOMENTE os arquivos alterados em blocos AD_FILE (edição cirúrgica), com o conteúdo completo e bruto. Não use JSON e não reenvie arquivos que não mudaram.`;
 }

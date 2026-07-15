@@ -8,7 +8,7 @@
 import { AppFile, AppGenerationResult, codeStats, projectStats } from "./app-types";
 import { CODE_SYSTEM_PROMPT, CODE_REFINE_SYSTEM_PROMPT, buildCodeUserPrompt } from "./code-prompts";
 import { matchTemplate } from "./code-templates";
-import { CostMode, pickTier, modelFor, estimateCost } from "./models";
+import { CostMode, pickTier, modelFor, estimateCost, isFunctionalRefinement } from "./models";
 import type { PromptAttachment } from "./prompt-attachments";
 
 interface Args {
@@ -251,30 +251,80 @@ function reasonFromException(provider: string, model: string, e: any): string {
   return `${provider}: falha ao chamar ${model} — ${e?.message || "erro de rede"}.`;
 }
 
+function responseText(value: any): string | null {
+  if (typeof value === "string" && value.trim()) return value;
+  if (!Array.isArray(value)) return null;
+  const joined = value
+    .map((part) => typeof part?.text === "string" ? part.text : typeof part?.content === "string" ? part.content : "")
+    .filter(Boolean)
+    .join("\n");
+  return joined.trim() ? joined : null;
+}
+
+/** Segunda passagem usada somente quando um refinamento veio com conteúdo útil,
+ * mas fora do JSON ops exigido. Mantém a correção no mesmo modelo forte e evita
+ * descartar uma edição por cerca Markdown, aspas ou quebras não escapadas. */
+function formatRepairInstruction(): string {
+  return [
+    "A resposta anterior não pôde ser aplicada porque não era um JSON ops válido.",
+    "Reenvie a MESMA alteração, sem ampliar o escopo, como um único objeto JSON válido.",
+    "Não use Markdown nem explicações. Inclua somente os arquivos realmente alterados, com o conteúdo completo e quebras escapadas corretamente.",
+  ].join("\n\n");
+}
+
 async function callClaude(apiKey: string, a: Args, model: string, diag: string[]): Promise<AppGenerationResult | null> {
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const initialMessages = [{ role: "user", content: claudeUserContent(a) }];
+    const send = (messages: any[]) => fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
         model,
         max_tokens: maxOutputTokens(a),
         system: systemPromptFor(a),
-        messages: [{ role: "user", content: claudeUserContent(a) }],
+        messages,
       }),
       signal: AbortSignal.timeout(120_000),
     });
+    const res = await send(initialMessages);
     if (!res.ok) {
       diag.push(`Claude: modelo ${model} → HTTP ${res.status}${res.status === 401 ? " (chave rejeitada)" : ""}. ${await errDetail(res)}`);
       return null;
     }
     const data = await res.json();
-    const text = data?.content?.[0]?.text;
+    const text = responseText(data?.content?.[0]?.text ?? data?.content);
     const cost = estimateCost(model, data?.usage?.input_tokens ?? 0, data?.usage?.output_tokens ?? 0);
     if (!text) { diag.push(`Claude: ${model} respondeu vazio.`); return null; }
     const r = parse(text, "claude", cost, model, a.currentFiles ?? null);
-    if (!r) diag.push(`Claude: resposta de ${model} não pôde ser interpretada como código.`);
-    return r;
+    if (r) return r;
+
+    const isRefinement = !!(a.currentFiles?.length || a.currentCode);
+    const shouldRepair = isRefinement && (isFunctionalRefinement(a.message) || /sonnet/i.test(model));
+    if (!shouldRepair) {
+      diag.push(`Claude: resposta de ${model} não pôde ser interpretada como código.`);
+      return null;
+    }
+
+    diag.push(`Claude: resposta inicial de ${model} veio fora do JSON ops; recuperação automática iniciada.`);
+    const repairRes = await send([
+      ...initialMessages,
+      { role: "assistant", content: text.slice(0, 60_000) },
+      { role: "user", content: formatRepairInstruction() },
+    ]);
+    if (!repairRes.ok) {
+      diag.push(`Claude: recuperação com ${model} → HTTP ${repairRes.status}. ${await errDetail(repairRes)}`);
+      return null;
+    }
+    const repairData = await repairRes.json();
+    const repairText = responseText(repairData?.content?.[0]?.text ?? repairData?.content);
+    const repairCost = estimateCost(model, repairData?.usage?.input_tokens ?? 0, repairData?.usage?.output_tokens ?? 0);
+    if (!repairText) {
+      diag.push(`Claude: recuperação com ${model} respondeu vazia.`);
+      return null;
+    }
+    const repaired = parse(repairText, "claude", cost + repairCost, model, a.currentFiles ?? null);
+    if (!repaired) diag.push(`Claude: resposta de ${model} continuou inválida após a recuperação automática.`);
+    return repaired;
   } catch (e) {
     diag.push(reasonFromException("Claude", model, e));
     return null;
@@ -283,20 +333,22 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
 
 async function callOpenRouter(apiKey: string, a: Args, model: string, diag: string[]): Promise<AppGenerationResult | null> {
   try {
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const initialMessages = [
+      { role: "system", content: systemPromptFor(a) },
+      { role: "user", content: openRouterUserContent(a) },
+    ];
+    const send = (messages: any[]) => fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
         max_tokens: maxOutputTokens(a),
         usage: { include: true },
-        messages: [
-          { role: "system", content: systemPromptFor(a) },
-          { role: "user", content: openRouterUserContent(a) },
-        ],
+        messages,
       }),
       signal: AbortSignal.timeout(120_000),
     });
+    const res = await send(initialMessages);
     if (!res.ok) {
       const detail = await errDetail(res);
       const hint =
@@ -307,7 +359,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
       return null;
     }
     const data = await res.json();
-    const text = data?.choices?.[0]?.message?.content;
+    const text = responseText(data?.choices?.[0]?.message?.content);
     // OpenRouter devolve usage.cost (USD) quando disponível.
     const cost =
       typeof data?.usage?.cost === "number"
@@ -315,8 +367,39 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
         : estimateCost(model, data?.usage?.prompt_tokens ?? 0, data?.usage?.completion_tokens ?? 0);
     if (!text) { diag.push(`OpenRouter: ${model} respondeu vazio.`); return null; }
     const r = parse(text, "openrouter", cost, model, a.currentFiles ?? null);
-    if (!r) diag.push(`OpenRouter: resposta de ${model} não pôde ser interpretada como código.`);
-    return r;
+    if (r) return r;
+
+    const isRefinement = !!(a.currentFiles?.length || a.currentCode);
+    const shouldRepair = isRefinement && (isFunctionalRefinement(a.message) || /sonnet/i.test(model));
+    if (!shouldRepair) {
+      diag.push(`OpenRouter: resposta de ${model} não pôde ser interpretada como código.`);
+      return null;
+    }
+
+    diag.push(`OpenRouter: resposta inicial de ${model} veio fora do JSON ops; recuperação automática iniciada.`);
+    const repairRes = await send([
+      ...initialMessages,
+      { role: "assistant", content: text.slice(0, 60_000) },
+      { role: "user", content: formatRepairInstruction() },
+    ]);
+    if (!repairRes.ok) {
+      const detail = await errDetail(repairRes);
+      diag.push(`OpenRouter: recuperação com ${model} → HTTP ${repairRes.status}. ${detail}`);
+      return null;
+    }
+    const repairData = await repairRes.json();
+    const repairText = responseText(repairData?.choices?.[0]?.message?.content);
+    const repairCost =
+      typeof repairData?.usage?.cost === "number"
+        ? repairData.usage.cost
+        : estimateCost(model, repairData?.usage?.prompt_tokens ?? 0, repairData?.usage?.completion_tokens ?? 0);
+    if (!repairText) {
+      diag.push(`OpenRouter: recuperação com ${model} respondeu vazia.`);
+      return null;
+    }
+    const repaired = parse(repairText, "openrouter", cost + repairCost, model, a.currentFiles ?? null);
+    if (!repaired) diag.push(`OpenRouter: resposta de ${model} continuou inválida após a recuperação automática.`);
+    return repaired;
   } catch (e) {
     diag.push(reasonFromException("OpenRouter", model, e));
     return null;
@@ -355,10 +438,12 @@ function App(){
 export async function generateAppWithProviders(a: Args): Promise<AppGenerationResult> {
   const isRefinement = !!(a.currentFiles?.length || a.currentCode);
   const isStagedBuild = /CONSTRUÇÃO POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
+  const functionalRefinement = isRefinement && isFunctionalRefinement(a.message);
+  const premiumOnly = isStagedBuild || functionalRefinement;
   // Um superprompt já foi dividido justamente para preservar qualidade. Nestas
-  // etapas o modo econômico não é adequado e não pode substituir o modelo forte
-  // silenciosamente, mesmo que a preferência global esteja em "Econômico".
-  const tier = isStagedBuild
+  // etapas — e em mudanças funcionais de navegação, botões, fluxo ou correção —
+  // o modo econômico não pode substituir o modelo forte silenciosamente.
+  const tier = premiumOnly
     ? "premium"
     : pickTier(a.costMode ?? "auto", { isApp: true, isRefinement, message: a.message });
   // Coletor de motivos técnicos de falha (para dar um erro honesto, não genérico).
@@ -377,14 +462,13 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
   ): Promise<AppGenerationResult | null> {
     const primary = modelFor(tier, provider);
     const secondary = modelFor(tier === "premium" ? "economy" : "premium", provider);
-    // Construção por etapas: permanece no Premium. O cliente já possui uma
-    // segunda tentativa automática com escopo menor; cair para Haiku escondido
-    // reduz qualidade e torna o diagnóstico enganoso.
-    const chain = isStagedBuild || primary === secondary ? [primary] : [primary, secondary];
+    // Superprompts e alterações funcionais permanecem no Premium. Cair para
+    // Haiku escondido reduz qualidade e torna o diagnóstico enganoso.
+    const chain = premiumOnly || primary === secondary ? [primary] : [primary, secondary];
     for (let i = 0; i < chain.length; i++) {
       // Refinamento: 1 tentativa no principal (rápido, cabe nos 60s do Hobby).
       // Primeira geração: 2 tentativas (mais robusto, vale a espera).
-      const attempts = isStagedBuild ? 1 : i === 0 && !isRefinement ? 2 : 1;
+      const attempts = premiumOnly ? 1 : i === 0 && !isRefinement ? 2 : 1;
       for (let t = 0; t < attempts; t++) {
         const r = await call(key, a, chain[i], diag);
         if (r) return r;

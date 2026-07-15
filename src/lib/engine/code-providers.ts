@@ -176,6 +176,18 @@ function systemPromptFor(a: Args): string {
   return a.currentFiles?.length || a.currentCode ? CODE_REFINE_SYSTEM_PROMPT : CODE_SYSTEM_PROMPT;
 }
 
+/** Não reserva 24k tokens no OpenRouter para uma etapa que foi deliberadamente
+ * limitada a poucos arquivos. O provedor valida o saldo contra o máximo pedido,
+ * então um teto proporcional evita HTTP 402 prematuro e controla o custo. */
+function maxOutputTokens(a: Args): number {
+  const isRefinement = !!(a.currentFiles?.length || a.currentCode);
+  const isStaged = /CONSTRUÇÃO POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
+  if (isStaged && isRefinement) return 6_000;
+  if (isStaged) return 12_000;
+  if (isRefinement) return 8_000;
+  return 24_000;
+}
+
 function textPromptFor(a: Args): string {
   const base = buildCodeUserPrompt(a.message, currentOf(a));
   const textAttachments = (a.attachments ?? []).filter((attachment) => attachment.kind === "text");
@@ -246,7 +258,7 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
       headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
         model,
-        max_tokens: 24000,
+        max_tokens: maxOutputTokens(a),
         system: systemPromptFor(a),
         messages: [{ role: "user", content: claudeUserContent(a) }],
       }),
@@ -276,7 +288,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
-        max_tokens: 24000,
+        max_tokens: maxOutputTokens(a),
         usage: { include: true },
         messages: [
           { role: "system", content: systemPromptFor(a) },
@@ -342,7 +354,13 @@ function App(){
 
 export async function generateAppWithProviders(a: Args): Promise<AppGenerationResult> {
   const isRefinement = !!(a.currentFiles?.length || a.currentCode);
-  const tier = pickTier(a.costMode ?? "auto", { isApp: true, isRefinement, message: a.message });
+  const isStagedBuild = /CONSTRUÇÃO POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
+  // Um superprompt já foi dividido justamente para preservar qualidade. Nestas
+  // etapas o modo econômico não é adequado e não pode substituir o modelo forte
+  // silenciosamente, mesmo que a preferência global esteja em "Econômico".
+  const tier = isStagedBuild
+    ? "premium"
+    : pickTier(a.costMode ?? "auto", { isApp: true, isRefinement, message: a.message });
   // Coletor de motivos técnicos de falha (para dar um erro honesto, não genérico).
   const diag: string[] = [];
   const hadKey = !!(a.userKey || process.env.ANTHROPIC_API_KEY || process.env.OPENROUTER_API_KEY);
@@ -359,11 +377,14 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
   ): Promise<AppGenerationResult | null> {
     const primary = modelFor(tier, provider);
     const secondary = modelFor(tier === "premium" ? "economy" : "premium", provider);
-    const chain = primary === secondary ? [primary] : [primary, secondary];
+    // Construção por etapas: permanece no Premium. O cliente já possui uma
+    // segunda tentativa automática com escopo menor; cair para Haiku escondido
+    // reduz qualidade e torna o diagnóstico enganoso.
+    const chain = isStagedBuild || primary === secondary ? [primary] : [primary, secondary];
     for (let i = 0; i < chain.length; i++) {
       // Refinamento: 1 tentativa no principal (rápido, cabe nos 60s do Hobby).
       // Primeira geração: 2 tentativas (mais robusto, vale a espera).
-      const attempts = i === 0 && !isRefinement ? 2 : 1;
+      const attempts = isStagedBuild ? 1 : i === 0 && !isRefinement ? 2 : 1;
       for (let t = 0; t < attempts; t++) {
         const r = await call(key, a, chain[i], diag);
         if (r) return r;
@@ -395,7 +416,7 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
   if (a.forceReal) {
     // Se havia chave mas a IA falhou, o motivo real é a última falha coletada —
     // não é "nenhuma IA conectada". Se não havia chave, aí sim é falta de chave.
-    const reason = hadKey && diag.length ? diag[diag.length - 1] : undefined;
+    const reason = hadKey && diag.length ? diag.join(" | ") : undefined;
     return demoFallback(a.message, reason);
   }
 
@@ -415,5 +436,5 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
       };
     }
   }
-  return demoFallback(a.message, hadKey && diag.length ? diag[diag.length - 1] : undefined);
+  return demoFallback(a.message, hadKey && diag.length ? diag.join(" | ") : undefined);
 }

@@ -274,10 +274,9 @@ export async function POST(req: NextRequest) {
     { status: 402 }
   );
 
-  // No plano Hobby da Vercel a função é cortada em ~60s (o maxDuration=300 é
-  // IGNORADO nesse plano). Se a geração passar disso, a Vercel devolve uma página
-  // de erro crua ("An error occurred") que o cliente não consegue ler como JSON.
-  // Então cortamos NÓS em 50s e devolvemos um aviso claro em JSON.
+  // Encerramos de forma controlada antes do limite da função, preservando uma
+  // resposta JSON legível. Superprompts são divididos pelo cliente em etapas
+  // independentes; portanto um timeout não apaga as etapas já salvas.
   const DEADLINE = { __timeout: true as const };
   let raced: Awaited<ReturnType<typeof generateAppWithProviders>> | typeof DEADLINE;
   try {
@@ -296,10 +295,14 @@ export async function POST(req: NextRequest) {
   }
   if ((raced as any).__timeout) {
     await finalizeGeneration(supabase, reservation.id, { status: "failed" });
+    const extendedRuntime = GEN_MAX_MS >= 240_000 || configuredMaxMs >= 240_000;
+    const advice = extendedRuntime
+      ? "Esta etapa ficou grande demais para uma única resposta. Se for uma construção por etapas, o progresso anterior foi preservado e você poderá continuar do ponto em que parou."
+      : "Para gerações grandes, use o plano Pro da Vercel e defina GEN_MAX_MS=280000.";
     return NextResponse.json(
       {
         error:
-          `A geração passou do tempo limite (~${Math.round(GEN_MAX_MS / 1000)}s) e parei antes para te dar um aviso claro em vez de um erro quebrado. Tente um pedido menor ou o modo Econômico. Para gerações grandes (sites complexos, vídeo, imagens pesadas), ative o plano Pro da Vercel e defina a env GEN_MAX_MS=280000.`,
+          `A geração passou do tempo limite (~${Math.round(GEN_MAX_MS / 1000)}s). ${advice}`,
         timeout: true,
         engineMode: "template",
       },
@@ -313,12 +316,15 @@ export async function POST(req: NextRequest) {
   // "nenhuma IA conectada" genérico quando na verdade a chamada falhou.
   if (forceReal !== false && result.engineMode !== "real") {
     const reason = (result as any).failureReason as string | undefined;
-    const error = reason
+    const insufficientCredits = !!reason && /HTTP 402|sem cr[eé]dito|sem saldo/i.test(reason);
+    const error = insufficientCredits
+      ? "A construção foi pausada porque o OpenRouter está sem saldo suficiente para esta etapa. O Vercel Pro cobre a hospedagem, mas não inclui os créditos da IA. Recarregue o OpenRouter e use “Continuar construção”; o progresso já salvo será preservado."
+      : reason
       ? `A geração real falhou: ${reason} — não vou te entregar um demo disfarçado. Verifique sua chave/modelo em Configurações, ou troque para o modo Template/Demo.`
       : "Modo de geração real ativo, mas nenhuma IA está conectada — não vou te entregar um demo disfarçado. Conecte uma chave de IA em Configurações (ou troque para o modo Template/Demo explicitamente).";
     await finalizeGeneration(supabase, reservation.id, { status: "failed", provider: result.provider });
     return NextResponse.json(
-      { error, needsKey: !reason, generationFailed: !!reason, engineMode: result.engineMode },
+      { error, needsKey: !reason, needsCredits: insufficientCredits, generationFailed: !!reason, engineMode: result.engineMode },
       { status: 422 }
     );
   }

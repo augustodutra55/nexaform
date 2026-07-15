@@ -264,6 +264,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: access.error }, { status: access.status ?? 403 });
   }
   const attachments = sanitizePromptAttachments(body?.attachments);
+  const isRefinementRequest =
+    (Array.isArray(currentFiles) && currentFiles.length > 0) ||
+    (typeof currentCode === "string" && currentCode.trim().length > 0);
+  const isStagedRequest = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(message);
 
   const { data: sub } = owner ? { data: null } : await supabase.from("subscriptions").select("plan").eq("user_id", user.id).maybeSingle();
   const plan = resolvePlan({ plan: sub?.plan, role: profile?.role, email: user.email });
@@ -296,8 +300,12 @@ export async function POST(req: NextRequest) {
   if ((raced as any).__timeout) {
     await finalizeGeneration(supabase, reservation.id, { status: "failed" });
     const extendedRuntime = GEN_MAX_MS >= 240_000 || configuredMaxMs >= 240_000;
-    const advice = extendedRuntime
-      ? "Esta etapa ficou grande demais para uma única resposta. Se for uma construção por etapas, o progresso anterior foi preservado e você poderá continuar do ponto em que parou."
+    const advice = extendedRuntime && isStagedRequest
+      ? "Esta etapa não concluiu, mas o progresso anterior foi preservado. Use “Continuar construção” para retomar exatamente deste ponto."
+      : extendedRuntime && isRefinementRequest
+      ? "Este refinamento ficou grande demais para uma resposta única. O projeto anterior foi preservado; divida o pedido em partes menores."
+      : extendedRuntime
+      ? "Esta geração ficou grande demais para uma única resposta. Use uma especificação menor ou a construção automática por etapas."
       : "Para gerações grandes, use o plano Pro da Vercel e defina GEN_MAX_MS=280000.";
     return NextResponse.json(
       {
@@ -317,9 +325,6 @@ export async function POST(req: NextRequest) {
   if (forceReal !== false && result.engineMode !== "real") {
     const reason = (result as any).failureReason as string | undefined;
     const insufficientCredits = !!reason && /HTTP 402|sem cr[eé]dito|sem saldo/i.test(reason);
-    const isRefinementRequest =
-      (Array.isArray(currentFiles) && currentFiles.length > 0) ||
-      (typeof currentCode === "string" && currentCode.trim().length > 0);
     const invalidRefinementFormat = !!reason && isRefinementRequest &&
       /n[aã]o p[oô]de ser interpretada como c[oó]digo|fora do JSON ops|continuou inv[aá]lida ap[oó]s a recupera[çc][aã]o/i.test(reason);
     if (invalidRefinementFormat) {

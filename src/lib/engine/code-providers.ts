@@ -181,7 +181,7 @@ function systemPromptFor(a: Args): string {
  * então um teto proporcional evita HTTP 402 prematuro e controla o custo. */
 function maxOutputTokens(a: Args): number {
   const isRefinement = !!(a.currentFiles?.length || a.currentCode);
-  const isStaged = /CONSTRUÇÃO POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
+  const isStaged = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
   if (isStaged && isRefinement) return 6_000;
   if (isStaged) return 12_000;
   if (isRefinement) return 8_000;
@@ -247,8 +247,17 @@ async function errDetail(res: Response): Promise<string> {
 function reasonFromException(provider: string, model: string, e: any): string {
   const name = e?.name || "";
   if (name === "TimeoutError" || /timeout|aborted/i.test(String(e?.message)))
-    return `${provider}: modelo ${model} não respondeu a tempo (120s).`;
+    return `${provider}: modelo ${model} não respondeu dentro do limite desta etapa.`;
   return `${provider}: falha ao chamar ${model} — ${e?.message || "erro de rede"}.`;
+}
+
+/** Mantém espaço para a rota finalizar e para uma tentativa reduzida da etapa. */
+function providerTimeoutMs(a: Args, repair = false): number {
+  const isRefinement = !!(a.currentFiles?.length || a.currentCode);
+  const isStaged = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
+  if (isStaged) return repair ? 45_000 : 75_000;
+  if (isRefinement) return repair ? 60_000 : 90_000;
+  return 120_000;
 }
 
 function responseText(value: any): string | null {
@@ -275,7 +284,7 @@ function formatRepairInstruction(): string {
 async function callClaude(apiKey: string, a: Args, model: string, diag: string[]): Promise<AppGenerationResult | null> {
   try {
     const initialMessages = [{ role: "user", content: claudeUserContent(a) }];
-    const send = (messages: any[]) => fetch("https://api.anthropic.com/v1/messages", {
+    const send = (messages: any[], timeoutMs = providerTimeoutMs(a)) => fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
@@ -284,7 +293,7 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
         system: systemPromptFor(a),
         messages,
       }),
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const res = await send(initialMessages);
     if (!res.ok) {
@@ -310,7 +319,7 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
       ...initialMessages,
       { role: "assistant", content: text.slice(0, 60_000) },
       { role: "user", content: formatRepairInstruction() },
-    ]);
+    ], providerTimeoutMs(a, true));
     if (!repairRes.ok) {
       diag.push(`Claude: recuperação com ${model} → HTTP ${repairRes.status}. ${await errDetail(repairRes)}`);
       return null;
@@ -337,7 +346,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
       { role: "system", content: systemPromptFor(a) },
       { role: "user", content: openRouterUserContent(a) },
     ];
-    const send = (messages: any[]) => fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const send = (messages: any[], timeoutMs = providerTimeoutMs(a)) => fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
@@ -346,7 +355,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
         usage: { include: true },
         messages,
       }),
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const res = await send(initialMessages);
     if (!res.ok) {
@@ -381,7 +390,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
       ...initialMessages,
       { role: "assistant", content: text.slice(0, 60_000) },
       { role: "user", content: formatRepairInstruction() },
-    ]);
+    ], providerTimeoutMs(a, true));
     if (!repairRes.ok) {
       const detail = await errDetail(repairRes);
       diag.push(`OpenRouter: recuperação com ${model} → HTTP ${repairRes.status}. ${detail}`);
@@ -437,7 +446,7 @@ function App(){
 
 export async function generateAppWithProviders(a: Args): Promise<AppGenerationResult> {
   const isRefinement = !!(a.currentFiles?.length || a.currentCode);
-  const isStagedBuild = /CONSTRUÇÃO POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
+  const isStagedBuild = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
   const functionalRefinement = isRefinement && isFunctionalRefinement(a.message);
   const premiumOnly = isStagedBuild || functionalRefinement;
   // Um superprompt já foi dividido justamente para preservar qualidade. Nestas
@@ -486,12 +495,16 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
     const r = await tryChain("openrouter", a.userKey, callOpenRouter);
     if (r) return r;
   }
-  // 2/3) ambiente
-  if (process.env.ANTHROPIC_API_KEY && a.userProvider !== "local") {
+  // 2/3) ambiente. Em refinamento, uma chave explicitamente escolhida é a
+  // autoridade: repetir a chamada com chaves do servidor só duplica tempo/custo
+  // e pode consumir todo o prazo antes de devolver um diagnóstico útil.
+  const explicitProvider = !!a.userKey && (a.userProvider === "claude" || a.userProvider === "openrouter");
+  const allowEnvironmentFallback = !explicitProvider || !isRefinement;
+  if (allowEnvironmentFallback && process.env.ANTHROPIC_API_KEY && a.userProvider !== "local") {
     const r = await tryChain("claude", process.env.ANTHROPIC_API_KEY, callClaude);
     if (r) return r;
   }
-  if (process.env.OPENROUTER_API_KEY && a.userProvider !== "local") {
+  if (allowEnvironmentFallback && process.env.OPENROUTER_API_KEY && a.userProvider !== "local") {
     const r = await tryChain("openrouter", process.env.OPENROUTER_API_KEY, callOpenRouter);
     if (r) return r;
   }

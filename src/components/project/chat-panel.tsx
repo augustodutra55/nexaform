@@ -24,7 +24,8 @@ import {
   buildStagePrompt,
   buildStageRetryPrompt,
   shouldStageInitialBuild,
-  stagedBuildStages,
+  shouldStageRefinement,
+  stagedStages,
   STAGED_BUILD_VERSION,
   type StagedBuildJob,
 } from "@/lib/engine/staged-generation";
@@ -162,7 +163,7 @@ export function ChatPanel({
       const raw = localStorage.getItem(stagedStorageKey);
       if (!raw) return;
       const job = JSON.parse(raw) as StagedBuildJob;
-      const total = stagedBuildStages().length;
+      const total = stagedStages(job.kind ?? "initial").length;
       if (
         job.version === STAGED_BUILD_VERSION &&
         job.projectId === projectId &&
@@ -319,8 +320,10 @@ export function ChatPanel({
       modeRef.current === "app" ||
       (modeRef.current !== "site" && (genModeRef.current === "real" || looksLikeApp(content)));
     const hasCurrentProject = !!(codeRef.current || filesRef.current?.length);
-    const useStagedBuild = useApp && genModeRef.current === "real" && !!(
-      resumedJob || shouldStageInitialBuild(content, requestAttachments, hasCurrentProject)
+    const useStagedBuild = !isAutoFix && useApp && genModeRef.current === "real" && !!(
+      resumedJob ||
+      shouldStageInitialBuild(content, requestAttachments, hasCurrentProject) ||
+      shouldStageRefinement(content, requestAttachments, hasCurrentProject)
     );
 
     setInput("");
@@ -380,13 +383,15 @@ export function ChatPanel({
       });
 
       if (useStagedBuild) {
-        const stages = stagedBuildStages();
+        const jobKind = resumedJob?.kind ?? (hasCurrentProject ? "refinement" : "initial");
+        const stages = stagedStages(jobKind);
         let job: StagedBuildJob = resumedJob ?? {
           version: STAGED_BUILD_VERSION,
           projectId,
           threadId,
           originalPrompt: content,
           masterPrompt: buildMasterPrompt(content, requestAttachments),
+          kind: jobKind,
           imageAttachments: requestAttachments.filter((attachment) => attachment.kind === "image"),
           nextStage: 0,
           startedAt: new Date().toISOString(),
@@ -403,7 +408,7 @@ export function ChatPanel({
           const stage = stages[index];
           activeStageLabel = stage.label;
           setStageStatus({ current: index + 1, total: stages.length, label: stage.label });
-          const stagePrompt = buildStagePrompt(job.masterPrompt, stage, index, stages.length);
+          const stagePrompt = buildStagePrompt(job.masterPrompt, stage, index, stages.length, jobKind);
           // O texto dos anexos já foi incorporado à especificação mestra. Imagens
           // de referência seguem apenas na primeira etapa para não multiplicar payloads.
           const stageAttachments = index === 0
@@ -415,7 +420,7 @@ export function ChatPanel({
           } catch (firstError) {
             if (!canRetryStagedFailure(firstError)) throw firstError;
             setStageStatus({ current: index + 1, total: stages.length, label: `${stage.label} · nova tentativa` });
-            const retryPrompt = buildStageRetryPrompt(job.masterPrompt, stage, index, stages.length);
+            const retryPrompt = buildStageRetryPrompt(job.masterPrompt, stage, index, stages.length, jobKind);
             data = await request(appPayload(retryPrompt, workingCode, workingFiles, stageAttachments));
           }
           lastData = data;
@@ -456,7 +461,9 @@ export function ChatPanel({
           storeStagedJob(job.nextStage < stages.length ? job : null);
         }
 
-        const completion = `✅ Projeto construído em ${stages.length} etapas, com salvamento após cada uma. ${lastData?.reply ?? "A base funcional está pronta para novos refinamentos."}`;
+        const completion = jobKind === "refinement"
+          ? `✅ Refinamento concluído em ${stages.length} etapas, com salvamento após cada uma. ${lastData?.reply ?? "As alterações foram integradas ao projeto."}`
+          : `✅ Projeto construído em ${stages.length} etapas, com salvamento após cada uma. ${lastData?.reply ?? "A base funcional está pronta para novos refinamentos."}`;
         setMessages((messages) => [...messages, { id: crypto.randomUUID(), role: "assistant", content: completion }]);
         persist("assistant", completion);
         storeStagedJob(null);
@@ -508,7 +515,7 @@ export function ChatPanel({
     } catch (err: any) {
       if (activeStagedJob) {
         storeStagedJob(activeStagedJob);
-        const current = Math.min(activeStagedJob.nextStage + 1, stagedBuildStages().length);
+        const current = Math.min(activeStagedJob.nextStage + 1, stagedStages(activeStagedJob.kind ?? "initial").length);
         const paused = err?.name === "AbortError"
           ? `⏸️ Construção pausada antes da etapa ${current}. Todo o progresso anterior foi salvo.`
           : `A construção parou na etapa ${current} (${activeStageLabel || "continuação"}), mas todo o progresso anterior foi salvo. Clique em “Continuar construção” para retomar deste ponto. Motivo: ${err?.message ?? "falha temporária"}`;
@@ -703,7 +710,7 @@ export function ChatPanel({
               <div>
                 <p className="text-sm font-medium">Construção por etapas pausada</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  As etapas anteriores estão salvas. A próxima é {resumeJob.nextStage + 1} de {stagedBuildStages().length}.
+                  As etapas anteriores estão salvas. A próxima é {resumeJob.nextStage + 1} de {stagedStages(resumeJob.kind ?? "initial").length}.
                 </p>
               </div>
             </div>

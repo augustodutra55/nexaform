@@ -14,6 +14,8 @@ export interface StagedBuildJob {
   threadId: string;
   originalPrompt: string;
   masterPrompt: string;
+  /** Projetos existentes usam um roteiro menor e exclusivamente cirúrgico. */
+  kind?: "initial" | "refinement";
   /** Referências visuais preservadas somente enquanto a primeira etapa não concluiu. */
   imageAttachments?: PromptAttachment[];
   nextStage: number;
@@ -51,6 +53,27 @@ export function shouldStageInitialBuild(
   return specification.length >= 8_000
     || bulletCount >= 45
     || (specification.length >= 3_500 && (scopeScore >= 5 || headingCount >= 10));
+}
+
+/** Detecta refinamentos amplos que precisam ser aplicados e salvos em partes. */
+export function shouldStageRefinement(
+  message: string,
+  attachments: PromptAttachment[],
+  hasCurrentProject: boolean
+): boolean {
+  if (!hasCurrentProject) return false;
+  const attachmentText = attachments
+    .filter((attachment) => attachment.kind === "text")
+    .map((attachment) => attachment.content)
+    .join("\n");
+  const specification = `${message}\n${attachmentText}`;
+  const bulletCount = (specification.match(/^\s*(?:[-*]|\d+[.)])\s+/gm) || []).length;
+  const headingCount = (specification.match(/^\s*[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s/()-]{5,}$/gm) || []).length;
+  const scopeScore = COMPLEX_SCOPE.reduce((score, pattern) => score + (pattern.test(specification) ? 1 : 0), 0);
+
+  return specification.length >= 2_000
+    || bulletCount >= 12
+    || (specification.length >= 900 && (scopeScore >= 2 || headingCount >= 4));
 }
 
 /** Incorpora anexos de texto à especificação que acompanhará todas as etapas. */
@@ -114,11 +137,47 @@ export function stagedBuildStages(): StagedBuildStage[] {
   ];
 }
 
-export function buildStagePrompt(masterPrompt: string, stage: StagedBuildStage, index: number, total: number): string {
+/** Refinamentos usam poucas etapas e no máximo dois arquivos por resposta. */
+export function stagedRefinementStages(): StagedBuildStage[] {
   return [
-    `CONSTRUÇÃO POR ETAPAS — ETAPA ${index + 1} DE ${total}: ${stage.label}.`,
+    {
+      id: "refine-structure",
+      label: "Estrutura e navegação",
+      instruction:
+        "Implemente somente a estrutura, navegação, perfis e telas indispensáveis pedidos na especificação. Preserve o visual, os dados e tudo que já funciona. Use obrigatoriamente ops e altere no máximo 2 arquivos curtos; não reescreva o projeto.",
+    },
+    {
+      id: "refine-behavior",
+      label: "Fluxos e dados",
+      instruction:
+        "Implemente somente os comportamentos, estados, formulários e dados centrais ainda ausentes na especificação. Integre com a estrutura existente e window.AD quando aplicável. Use obrigatoriamente ops e altere no máximo 2 arquivos curtos.",
+    },
+    {
+      id: "refine-quality",
+      label: "Integração e revisão",
+      instruction:
+        "Revise exclusivamente a integração do refinamento: imports, navegação, estados, responsividade, textos e ações críticas. Corrija o indispensável sem criar módulos grandes. Use obrigatoriamente ops e altere no máximo 2 arquivos curtos.",
+    },
+  ];
+}
+
+export function stagedStages(kind: "initial" | "refinement" = "initial"): StagedBuildStage[] {
+  return kind === "refinement" ? stagedRefinementStages() : stagedBuildStages();
+}
+
+export function buildStagePrompt(
+  masterPrompt: string,
+  stage: StagedBuildStage,
+  index: number,
+  total: number,
+  kind: "initial" | "refinement" = "initial"
+): string {
+  return [
+    `${kind === "refinement" ? "REFINAMENTO" : "CONSTRUÇÃO"} POR ETAPAS — ETAPA ${index + 1} DE ${total}: ${stage.label}.`,
     stage.instruction,
-    index === 0
+    kind === "refinement"
+      ? "O projeto atual já existe. Use obrigatoriamente ops, não reenvie arquivos inalterados e não recrie a aplicação."
+      : index === 0
       ? "Esta é a primeira geração. Entregue uma base utilizável agora; as próximas etapas completarão o projeto."
       : "O projeto atual já contém as etapas anteriores. Use obrigatoriamente ops e mude somente o necessário para esta etapa.",
     "A especificação completa é a referência do produto, mas NÃO deve ser implementada inteira nesta resposta:",
@@ -129,9 +188,15 @@ export function buildStagePrompt(masterPrompt: string, stage: StagedBuildStage, 
 }
 
 /** Segunda tentativa deliberadamente menor quando uma etapa não conclui. */
-export function buildStageRetryPrompt(masterPrompt: string, stage: StagedBuildStage, index: number, total: number): string {
+export function buildStageRetryPrompt(
+  masterPrompt: string,
+  stage: StagedBuildStage,
+  index: number,
+  total: number,
+  kind: "initial" | "refinement" = "initial"
+): string {
   return [
-    buildStagePrompt(masterPrompt, stage, index, total),
+    buildStagePrompt(masterPrompt, stage, index, total, kind),
     "RECUPERAÇÃO AUTOMÁTICA: a tentativa anterior desta etapa não concluiu.",
     "Reduza o escopo agora: implemente somente a parte mais importante desta etapa e altere/crie no máximo 2 arquivos curtos. Não reenvie arquivos inalterados, não reescreva o projeto e não tente compensar recursos de etapas futuras. Entregue JSON ops válido e pequeno.",
   ].join("\n\n");

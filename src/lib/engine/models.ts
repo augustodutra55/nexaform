@@ -12,6 +12,13 @@
 export type CostMode = "auto" | "economy" | "premium";
 export type Tier = "economy" | "premium";
 
+/** Alterações que mudam comportamento não devem ser tratadas como copy/estilo.
+ * Mesmo quando o pedido é curto, navegação, botões e correções exigem o modelo
+ * forte para preservar o restante de um app multi-arquivo. */
+export function isFunctionalRefinement(message: string): boolean {
+  return /\b(?:voltar|retornar|p[aá]gina anterior|tela anterior|seta|navega(?:r|[çc][aã]o)|menu|rota|link|bot[aã]o|clique|clicar|a[çc][aã]o|n[aã]o funciona|funcionalidade|erro|bug|corrig(?:ir|a)|consert(?:ar|e)|quebr(?:ou|ado|ar)|fluxo|formul[aá]rio|salvar|excluir|cadastro|login|senha|autentica[çc][aã]o|permiss[aã]o|validar|valida[çc][aã]o|c[aá]lculo|filtro|busca|pesquisa|estado|modal|toast|api|integra[çc][aã]o|upload|download|[aá]udio|microfone|voz|som)\b/i.test(message);
+}
+
 /** Modelo OpenRouter barato — bom para copy/estrutura/sites.
  *  (O slug antigo "anthropic/claude-3.5-haiku" foi descontinuado no OpenRouter e
  *   retornava 404 "No endpoints found", quebrando toda geração de site/landing.) */

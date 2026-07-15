@@ -317,14 +317,31 @@ export async function POST(req: NextRequest) {
   if (forceReal !== false && result.engineMode !== "real") {
     const reason = (result as any).failureReason as string | undefined;
     const insufficientCredits = !!reason && /HTTP 402|sem cr[eé]dito|sem saldo/i.test(reason);
+    const isRefinementRequest =
+      (Array.isArray(currentFiles) && currentFiles.length > 0) ||
+      (typeof currentCode === "string" && currentCode.trim().length > 0);
+    const invalidRefinementFormat = !!reason && isRefinementRequest &&
+      /n[aã]o p[oô]de ser interpretada como c[oó]digo|fora do JSON ops|continuou inv[aá]lida ap[oó]s a recupera[çc][aã]o/i.test(reason);
+    if (invalidRefinementFormat) {
+      console.warn("[generation] edição preservada após respostas inválidas dos provedores:", reason);
+    }
     const error = insufficientCredits
       ? "A construção foi pausada porque o OpenRouter está sem saldo suficiente para esta etapa. O Vercel Pro cobre a hospedagem, mas não inclui os créditos da IA. Recarregue o OpenRouter e use “Continuar construção”; o progresso já salvo será preservado."
+      : invalidRefinementFormat
+      ? "A edição não foi aplicada porque a IA não devolveu uma alteração válida, mesmo após a recuperação automática. Seu projeto anterior foi preservado. Tente novamente com um pedido mais específico."
       : reason
       ? `A geração real falhou: ${reason} — não vou te entregar um demo disfarçado. Verifique sua chave/modelo em Configurações, ou troque para o modo Template/Demo.`
       : "Modo de geração real ativo, mas nenhuma IA está conectada — não vou te entregar um demo disfarçado. Conecte uma chave de IA em Configurações (ou troque para o modo Template/Demo explicitamente).";
     await finalizeGeneration(supabase, reservation.id, { status: "failed", provider: result.provider });
     return NextResponse.json(
-      { error, needsKey: !reason, needsCredits: insufficientCredits, generationFailed: !!reason, engineMode: result.engineMode },
+      {
+        error,
+        needsKey: !reason,
+        needsCredits: insufficientCredits,
+        editPreserved: invalidRefinementFormat,
+        generationFailed: !!reason,
+        engineMode: result.engineMode,
+      },
       { status: 422 }
     );
   }

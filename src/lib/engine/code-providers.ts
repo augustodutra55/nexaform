@@ -10,6 +10,7 @@ import { CODE_SYSTEM_PROMPT, CODE_REFINE_SYSTEM_PROMPT, buildCodeUserPrompt } fr
 import { matchTemplate } from "./code-templates";
 import { CostMode, pickTier, modelFor, estimateCost, isFunctionalRefinement } from "./models";
 import type { PromptAttachment } from "./prompt-attachments";
+import { parseOperationBlocks } from "./operation-blocks";
 
 interface Args {
   message: string;
@@ -81,19 +82,22 @@ function parse(
   current?: AppFile[] | null
 ): AppGenerationResult | null {
   try {
+    const operationBlocks = current?.length ? parseOperationBlocks(text) : null;
     const cleaned = text.replace(/^```(?:json)?/m, "").replace(/```\s*$/m, "").trim();
     // Interpretação ROBUSTA: tenta o texto direto; se falhar (o modelo às vezes
     // manda uma frase antes/depois do JSON, ou cerca a mais), isola do primeiro
     // "{" até o último "}" e tenta de novo. Assim uma resposta boa não é
     // descartada só por causa de texto em volta.
-    let j: any;
-    try {
-      j = JSON.parse(cleaned);
-    } catch {
-      const first = cleaned.indexOf("{");
-      const last = cleaned.lastIndexOf("}");
-      if (first < 0 || last <= first) throw new Error("sem objeto JSON");
-      j = JSON.parse(cleaned.slice(first, last + 1));
+    let j: any = operationBlocks;
+    if (!j) {
+      try {
+        j = JSON.parse(cleaned);
+      } catch {
+        const first = cleaned.indexOf("{");
+        const last = cleaned.lastIndexOf("}");
+        if (first < 0 || last <= first) throw new Error("sem objeto JSON");
+        j = JSON.parse(cleaned.slice(first, last + 1));
+      }
     }
 
     // Edição cirúrgica: aplica ops sobre os arquivos atuais (refinamento).
@@ -270,14 +274,24 @@ function responseText(value: any): string | null {
   return joined.trim() ? joined : null;
 }
 
+function responseFormatSummary(text: string): string {
+  const markers = [
+    /<AD_FILE\b/i.test(text) ? "AD_FILE" : "",
+    /```/.test(text) ? "markdown" : "",
+    /\{/.test(text) ? "json-like" : "",
+  ].filter(Boolean);
+  return `${text.length} caracteres; formato ${markers.join("+") || "texto"}`;
+}
+
 /** Segunda passagem usada somente quando um refinamento veio com conteúdo útil,
  * mas fora do JSON ops exigido. Mantém a correção no mesmo modelo forte e evita
  * descartar uma edição por cerca Markdown, aspas ou quebras não escapadas. */
 function formatRepairInstruction(): string {
   return [
-    "A resposta anterior não pôde ser aplicada porque não era um JSON ops válido.",
-    "Reenvie a MESMA alteração, sem ampliar o escopo, como um único objeto JSON válido.",
-    "Não use Markdown nem explicações. Inclua somente os arquivos realmente alterados, com o conteúdo completo e quebras escapadas corretamente.",
+    "A resposta anterior não pôde ser aplicada no projeto.",
+    "Reenvie a MESMA alteração, sem ampliar o escopo, usando blocos AD_FILE; não use JSON.",
+    "Para cada arquivo alterado, escreva <AD_FILE path=\"caminho.jsx\" op=\"update\">, o conteúdo COMPLETO bruto e </AD_FILE>. Para arquivo novo use op=\"create\". Para remover use <AD_DELETE path=\"caminho.jsx\" />.",
+    "Finalize com <AD_REPLY>resumo curto em pt-BR</AD_REPLY>. Não use explicações fora desses blocos e não reenvie arquivos inalterados.",
   ].join("\n\n");
 }
 
@@ -308,9 +322,9 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
     if (r) return r;
 
     const isRefinement = !!(a.currentFiles?.length || a.currentCode);
-    const shouldRepair = isRefinement && (isFunctionalRefinement(a.message) || /sonnet/i.test(model));
+    const shouldRepair = isRefinement;
     if (!shouldRepair) {
-      diag.push(`Claude: resposta de ${model} não pôde ser interpretada como código.`);
+      diag.push(`Claude: resposta de ${model} não pôde ser interpretada como código (${responseFormatSummary(text)}).`);
       return null;
     }
 
@@ -332,7 +346,7 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
       return null;
     }
     const repaired = parse(repairText, "claude", cost + repairCost, model, a.currentFiles ?? null);
-    if (!repaired) diag.push(`Claude: resposta de ${model} continuou inválida após a recuperação automática.`);
+    if (!repaired) diag.push(`Claude: resposta de ${model} continuou inválida após a recuperação automática (${responseFormatSummary(repairText)}).`);
     return repaired;
   } catch (e) {
     diag.push(reasonFromException("Claude", model, e));
@@ -379,9 +393,9 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
     if (r) return r;
 
     const isRefinement = !!(a.currentFiles?.length || a.currentCode);
-    const shouldRepair = isRefinement && (isFunctionalRefinement(a.message) || /sonnet/i.test(model));
+    const shouldRepair = isRefinement;
     if (!shouldRepair) {
-      diag.push(`OpenRouter: resposta de ${model} não pôde ser interpretada como código.`);
+      diag.push(`OpenRouter: resposta de ${model} não pôde ser interpretada como código (${responseFormatSummary(text)}).`);
       return null;
     }
 
@@ -407,7 +421,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
       return null;
     }
     const repaired = parse(repairText, "openrouter", cost + repairCost, model, a.currentFiles ?? null);
-    if (!repaired) diag.push(`OpenRouter: resposta de ${model} continuou inválida após a recuperação automática.`);
+    if (!repaired) diag.push(`OpenRouter: resposta de ${model} continuou inválida após a recuperação automática (${responseFormatSummary(repairText)}).`);
     return repaired;
   } catch (e) {
     diag.push(reasonFromException("OpenRouter", model, e));

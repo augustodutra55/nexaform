@@ -11,7 +11,7 @@
  * O iframe roda com sandbox="allow-scripts" (sem allow-same-origin), então
  * o código do usuário fica isolado da app e dos cookies/sessão.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Loader2, Monitor, Smartphone, RefreshCw, Cpu, Layout, Maximize2, Minimize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AppFile, EngineMode } from "@/lib/engine/app-types";
@@ -72,6 +72,7 @@ ${adScript}
   // para conseguir reportar erros ao app (auto-correção).
   var _nxHost = window.parent;
   var _nxReported = false;
+  function nxReady(){ if(_nxReported) return; try { _nxHost.postMessage({ __nx_ready: true }, '*'); } catch(e){} }
   function nxReport(msg){
     if (_nxReported) return; _nxReported = true;
     try { _nxHost.postMessage({ __nx_error: String(msg).slice(0, 800) }, '*'); } catch(e){}
@@ -100,6 +101,7 @@ ${adScript}
       var App = factory(React, ReactDOM);
       if (!App) { showError('O código não definiu um componente App.'); nxReport('O código não definiu um componente App.'); return; }
       ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+      setTimeout(nxReady, 500);
     } catch (err) {
       var m = (err && err.message) || String(err);
       showError(m); nxReport(m);
@@ -182,6 +184,7 @@ ${adScript}
 <script>
   var _nxHost = window.parent;
   var _nxReported = false;
+  function nxReady(){ if(_nxReported) return; try { _nxHost.postMessage({ __nx_ready: true }, '*'); } catch(e){} }
   function nxReport(msg){ if(_nxReported) return; _nxReported=true; try{ _nxHost.postMessage({ __nx_error:String(msg).slice(0,800) }, '*'); }catch(e){} }
   try { Object.defineProperty(window, 'parent', { get: function(){ return window; } }); } catch(e){}
   try { Object.defineProperty(window, 'top', { get: function(){ return window; } }); } catch(e){}
@@ -282,6 +285,7 @@ ${adScript}
       var App = mod && (mod.default || mod.App);
       if(typeof App !== 'function'){ var m2='O arquivo de entrada ('+ENTRY+') precisa ter um export default de um componente React.'; showError(m2); nxReport(m2); return; }
       ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+      setTimeout(nxReady, 500);
     } catch(err){ var m=(err && err.message) || String(err); showError(m); nxReport(m); }
   })();
 </script>
@@ -299,7 +303,8 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
-  usePreviewBridge(iframeRef, projectId, (message) => onErrorRef.current?.(message), editorSession);
+  const reportPreviewError = useCallback((message: string) => onErrorRef.current?.(message), []);
+  usePreviewBridge(iframeRef, projectId, reportPreviewError, editorSession);
 
   const hasFiles = Array.isArray(files) && files.length > 0;
   const hasContent = hasFiles || !!code;

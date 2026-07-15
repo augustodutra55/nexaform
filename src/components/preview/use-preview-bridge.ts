@@ -40,6 +40,11 @@ export function usePreviewBridge(
   useEffect(() => {
     let activeRecognition: any = null;
     let activeSpeechRequest = 0;
+    let pendingPreviewError: number | null = null;
+    const clearPendingPreviewError = () => {
+      if (pendingPreviewError !== null) window.clearTimeout(pendingPreviewError);
+      pendingPreviewError = null;
+    };
     try { window.speechSynthesis?.getVoices(); } catch {}
     function reply(source: Window, id: string, result: Record<string, unknown>) {
       source.postMessage({ __ad_bridge_result: true, id, ...result }, "*");
@@ -132,7 +137,21 @@ export function usePreviewBridge(
     async function onMessage(event: MessageEvent) {
       const source = iframeRef.current?.contentWindow;
       if (!source || event.source !== source || !event.data || typeof event.data !== "object") return;
-      if (typeof event.data.__nx_error === "string") { onError?.(event.data.__nx_error.slice(0, 800)); return; }
+      if (event.data.__nx_ready === true) {
+        clearPendingPreviewError();
+        return;
+      }
+      if (typeof event.data.__nx_error === "string") {
+        const message = event.data.__nx_error.slice(0, 800);
+        clearPendingPreviewError();
+        // A montagem do iframe troca bundles e CDNs. Um erro da instância antiga
+        // não deve gastar créditos se a nova instância ficar saudável logo depois.
+        pendingPreviewError = window.setTimeout(() => {
+          pendingPreviewError = null;
+          onError?.(message);
+        }, 1800);
+        return;
+      }
       if (event.data.__ad_bridge !== true) return;
       const id = typeof event.data.id === "string" ? event.data.id.slice(0, 100) : "";
       const kind = event.data.kind as BridgeKind;
@@ -182,6 +201,7 @@ export function usePreviewBridge(
     window.addEventListener("message", onMessage);
     return () => {
       window.removeEventListener("message", onMessage);
+      clearPendingPreviewError();
       activeSpeechRequest++;
       try { activeRecognition?.abort(); } catch {}
       activeRecognition = null;

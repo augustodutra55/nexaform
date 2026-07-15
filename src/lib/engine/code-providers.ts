@@ -10,7 +10,7 @@ import { CODE_SYSTEM_PROMPT, CODE_REFINE_SYSTEM_PROMPT, buildCodeUserPrompt } fr
 import { matchTemplate } from "./code-templates";
 import { CostMode, pickTier, modelFor, estimateCost, isFunctionalRefinement } from "./models";
 import type { PromptAttachment } from "./prompt-attachments";
-import { parseOperationBlocks } from "./operation-blocks";
+import { applyFileOperations, parseOperationBlocks } from "./operation-blocks";
 
 interface Args {
   message: string;
@@ -52,28 +52,6 @@ function warnOversizedFiles(files: AppFile[]): void {
   }
 }
 
-/** Aplica ops de edição cirúrgica sobre os arquivos atuais. */
-function applyOps(current: AppFile[], ops: any[]): AppFile[] | null {
-  const map = new Map<string, string>();
-  for (const f of current) map.set(f.path.replace(/^\.?\//, ""), f.content);
-  let touched = 0;
-  for (const o of ops) {
-    if (!o || typeof o.path !== "string") continue;
-    const path = o.path.replace(/^\.?\//, "").trim();
-    if (!path) continue;
-    const op = o.op || (o.content != null ? "update" : "delete");
-    if (op === "delete") {
-      if (map.delete(path)) touched++;
-    } else {
-      if (typeof o.content !== "string") continue;
-      map.set(path, o.content);
-      touched++;
-    }
-  }
-  if (!touched || map.size === 0) return null;
-  return Array.from(map.entries()).map(([path, content]) => ({ path, content }));
-}
-
 function parse(
   text: string,
   provider: "claude" | "openrouter",
@@ -102,7 +80,7 @@ function parse(
 
     // Edição cirúrgica: aplica ops sobre os arquivos atuais (refinamento).
     if (Array.isArray(j.ops) && current && current.length) {
-      const merged = applyOps(current, j.ops);
+      const merged = applyFileOperations(current, j.ops);
       if (merged) {
         const changedFiles = normalizeFiles(j.ops);
         if (changedFiles) warnOversizedFiles(changedFiles);
@@ -188,7 +166,10 @@ function maxOutputTokens(a: Args): number {
   const isStaged = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
   if (isStaged && isRefinement) return 6_000;
   if (isStaged) return 12_000;
-  if (isRefinement) return 8_000;
+  // Refinamentos comuns agora usam patches curtos. Reservar 8k tokens fazia o
+  // OpenRouter recusar pedidos por saldo mesmo quando a resposta precisava de
+  // poucas centenas de tokens.
+  if (isRefinement) return 4_000;
   return 24_000;
 }
 
@@ -276,6 +257,7 @@ function responseText(value: any): string | null {
 
 function responseFormatSummary(text: string): string {
   const markers = [
+    /<AD_PATCH\b/i.test(text) ? "AD_PATCH" : "",
     /<AD_FILE\b/i.test(text) ? "AD_FILE" : "",
     /```/.test(text) ? "markdown" : "",
     /\{/.test(text) ? "json-like" : "",
@@ -289,8 +271,8 @@ function responseFormatSummary(text: string): string {
 function formatRepairInstruction(): string {
   return [
     "A resposta anterior não pôde ser aplicada no projeto.",
-    "Reenvie a MESMA alteração, sem ampliar o escopo, usando blocos AD_FILE; não use JSON.",
-    "Para cada arquivo alterado, escreva <AD_FILE path=\"caminho.jsx\" op=\"update\">, o conteúdo COMPLETO bruto e </AD_FILE>. Para arquivo novo use op=\"create\". Para remover use <AD_DELETE path=\"caminho.jsx\" />.",
+    "Reenvie a MESMA alteração, sem ampliar o escopo e sem usar JSON.",
+    "Para arquivo existente, use <AD_PATCH path=\"caminho.jsx\"><AD_SEARCH>trecho literal e único do arquivo atual</AD_SEARCH><AD_REPLACE>novo trecho bruto</AD_REPLACE></AD_PATCH>. Para arquivo novo use <AD_FILE path=\"caminho.jsx\" op=\"create\">conteúdo completo</AD_FILE>. Para remover use <AD_DELETE path=\"caminho.jsx\" />.",
     "Finalize com <AD_REPLY>resumo curto em pt-BR</AD_REPLY>. Não use explicações fora desses blocos e não reenvie arquivos inalterados.",
   ].join("\n\n");
 }
@@ -328,7 +310,7 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
       return null;
     }
 
-    diag.push(`Claude: resposta inicial de ${model} veio fora do JSON ops; recuperação automática iniciada.`);
+    diag.push(`Claude: resposta inicial de ${model} não pôde ser aplicada; recuperação de formato iniciada.`);
     const repairRes = await send([
       ...initialMessages,
       { role: "assistant", content: text.slice(0, 60_000) },
@@ -399,7 +381,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
       return null;
     }
 
-    diag.push(`OpenRouter: resposta inicial de ${model} veio fora do JSON ops; recuperação automática iniciada.`);
+    diag.push(`OpenRouter: resposta inicial de ${model} não pôde ser aplicada; recuperação de formato iniciada.`);
     const repairRes = await send([
       ...initialMessages,
       { role: "assistant", content: text.slice(0, 60_000) },

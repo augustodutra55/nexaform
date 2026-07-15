@@ -275,6 +275,7 @@ ${adScript}
 <script>
   var _nxHost = window.parent;
   var _nxReported = false;
+  function nxReady(){ if(_nxReported) return; try{ _nxHost.postMessage({ __nx_ready:true }, '*'); }catch(e){} }
   function nxReport(msg){ if(_nxReported) return; _nxReported=true; try{ _nxHost.postMessage({ __nx_error:String(msg).slice(0,800) }, '*'); }catch(e){} }
   function showError(msg){ var r=document.getElementById('root'); if(r) r.innerHTML='<div class="nx-error">⚠ Erro ao executar o app:\\n\\n'+String(msg).replace(/</g,'&lt;')+'</div>'; }
   window.addEventListener('error', function(e){ var m=(e.error && e.error.message) || e.message; showError(m); nxReport(m); });
@@ -288,11 +289,12 @@ ${adScript}
     const blob = new Blob([${codeJson}], { type: 'text/javascript' });
     const url = URL.createObjectURL(blob);
     await import(url);
+    setTimeout(nxReady, 500);
   } catch (e) {
     var m = (e && e.message) || String(e);
     var r = document.getElementById('root');
     if (r) r.innerHTML = '<div class="nx-error">⚠ Erro ao executar o app:\\n\\n'+String(m).replace(/</g,'&lt;')+'</div>';
-    try{ window.parent.postMessage({ __nx_error:String(m).slice(0,800) }, '*'); }catch(_){}
+    nxReport(m);
   }
 })();
 </script>

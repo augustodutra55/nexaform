@@ -176,6 +176,18 @@ function systemPromptFor(a: Args): string {
   return a.currentFiles?.length || a.currentCode ? CODE_REFINE_SYSTEM_PROMPT : CODE_SYSTEM_PROMPT;
 }
 
+/** Não reserva 24k tokens no OpenRouter para uma etapa que foi deliberadamente
+ * limitada a poucos arquivos. O provedor valida o saldo contra o máximo pedido,
+ * então um teto proporcional evita HTTP 402 prematuro e controla o custo. */
+function maxOutputTokens(a: Args): number {
+  const isRefinement = !!(a.currentFiles?.length || a.currentCode);
+  const isStaged = /CONSTRUÇÃO POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
+  if (isStaged && isRefinement) return 6_000;
+  if (isStaged) return 12_000;
+  if (isRefinement) return 8_000;
+  return 24_000;
+}
+
 function textPromptFor(a: Args): string {
   const base = buildCodeUserPrompt(a.message, currentOf(a));
   const textAttachments = (a.attachments ?? []).filter((attachment) => attachment.kind === "text");
@@ -246,7 +258,7 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
       headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
         model,
-        max_tokens: 24000,
+        max_tokens: maxOutputTokens(a),
         system: systemPromptFor(a),
         messages: [{ role: "user", content: claudeUserContent(a) }],
       }),
@@ -276,7 +288,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
-        max_tokens: 24000,
+        max_tokens: maxOutputTokens(a),
         usage: { include: true },
         messages: [
           { role: "system", content: systemPromptFor(a) },

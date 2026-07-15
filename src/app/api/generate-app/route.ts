@@ -316,12 +316,15 @@ export async function POST(req: NextRequest) {
   // "nenhuma IA conectada" genérico quando na verdade a chamada falhou.
   if (forceReal !== false && result.engineMode !== "real") {
     const reason = (result as any).failureReason as string | undefined;
-    const error = reason
+    const insufficientCredits = !!reason && /HTTP 402|sem cr[eé]dito|sem saldo/i.test(reason);
+    const error = insufficientCredits
+      ? "A construção foi pausada porque o OpenRouter está sem saldo suficiente para esta etapa. O Vercel Pro cobre a hospedagem, mas não inclui os créditos da IA. Recarregue o OpenRouter e use “Continuar construção”; o progresso já salvo será preservado."
+      : reason
       ? `A geração real falhou: ${reason} — não vou te entregar um demo disfarçado. Verifique sua chave/modelo em Configurações, ou troque para o modo Template/Demo.`
       : "Modo de geração real ativo, mas nenhuma IA está conectada — não vou te entregar um demo disfarçado. Conecte uma chave de IA em Configurações (ou troque para o modo Template/Demo explicitamente).";
     await finalizeGeneration(supabase, reservation.id, { status: "failed", provider: result.provider });
     return NextResponse.json(
-      { error, needsKey: !reason, generationFailed: !!reason, engineMode: result.engineMode },
+      { error, needsKey: !reason, needsCredits: insufficientCredits, generationFailed: !!reason, engineMode: result.engineMode },
       { status: 422 }
     );
   }

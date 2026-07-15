@@ -22,6 +22,7 @@ import {
 import {
   buildMasterPrompt,
   buildStagePrompt,
+  buildStageRetryPrompt,
   shouldStageInitialBuild,
   stagedBuildStages,
   STAGED_BUILD_VERSION,
@@ -85,6 +86,12 @@ const REFINE_SITE = ["Mude a cor para azul", "Adicione uma seção de FAQ", "Cri
 const REFINE_APP = ["Melhore a experiência de uso", "Adicione validações e feedbacks", "Otimize a versão mobile"];
 const REFINE_GAME = ["Adicione um placar", "Crie níveis de dificuldade", "Adicione um botão de reiniciar"];
 const REFINE_CODE_SITE = ["Melhore a versão mobile", "Deixe o visual mais premium", "Revise os textos e chamadas"];
+
+function canRetryStagedFailure(error: any): boolean {
+  if (error?.name === "AbortError") return false;
+  const message = String(error?.message || "").toLowerCase();
+  return !/(?:n[aã]o autenticado|chave rejeitada|sem cr[eé]dito|sem saldo|limite de .* gera[çc][oõ]es|muitas gera[çc][oõ]es|project_not_owned|projeto n[aã]o encontrado)/i.test(message);
+}
 
 export function ChatPanel({
   projectId,
@@ -399,7 +406,15 @@ export function ChatPanel({
           const stageAttachments = index === 0
             ? requestAttachments.filter((attachment) => attachment.kind === "image")
             : [];
-          const data = await request(appPayload(stagePrompt, workingCode, workingFiles, stageAttachments));
+          let data: any;
+          try {
+            data = await request(appPayload(stagePrompt, workingCode, workingFiles, stageAttachments));
+          } catch (firstError) {
+            if (!canRetryStagedFailure(firstError)) throw firstError;
+            setStageStatus({ current: index + 1, total: stages.length, label: `${stage.label} · nova tentativa` });
+            const retryPrompt = buildStageRetryPrompt(job.masterPrompt, stage, index, stages.length);
+            data = await request(appPayload(retryPrompt, workingCode, workingFiles, []));
+          }
           lastData = data;
 
           if (typeof data.cost === "number") setLastCost(data.cost);

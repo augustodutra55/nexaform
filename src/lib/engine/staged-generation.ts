@@ -87,15 +87,21 @@ export function stagedBuildStages(): StagedBuildStage[] {
     },
     {
       id: "roles-admin",
-      label: "Perfis e administração",
+      label: "Perfis e acessos",
       instruction:
-        "Implemente perfis, permissões de interface e painel administrativo/gerencial pedidos. Cada usuário final deve ver apenas as áreas coerentes com seu perfil. Não simule segurança de servidor: use AD.auth e window.AD e deixe explícito no código o que depende da configuração das coleções. Crie ou altere no máximo 5 arquivos curtos.",
+        "Implemente somente autenticação, perfis e permissões de interface pedidos. Cada usuário final deve ver apenas as áreas coerentes com seu perfil. Não simule segurança de servidor: use AD.auth e window.AD e deixe explícito no código o que depende da configuração das coleções. Crie ou altere no máximo 3 arquivos curtos.",
+    },
+    {
+      id: "admin",
+      label: "Painel administrativo",
+      instruction:
+        "Implemente o painel administrativo ou gerencial, métricas essenciais e ferramentas de operação solicitadas. Use dados reais das coleções já existentes e preserve os fluxos dos demais perfis. Crie ou altere no máximo 3 arquivos curtos.",
     },
     {
       id: "automation",
       label: "Alertas e regras de negócio",
       instruction:
-        "Implemente notificações internas, cálculos, lembretes e regras de negócio possíveis no runtime atual. Para WhatsApp, e-mail, SMS, pagamentos ou APIs externas, crie pontos de integração e estados de interface honestos, sem fingir que um serviço externo foi enviado. Crie ou altere no máximo 5 arquivos curtos.",
+        "Implemente notificações internas, cálculos, lembretes e regras de negócio possíveis no runtime atual. Para WhatsApp, e-mail, SMS, pagamentos ou APIs externas, crie pontos de integração e estados de interface honestos, sem fingir que um serviço externo foi enviado. Crie ou altere no máximo 3 arquivos curtos.",
     },
     {
       id: "quality",
@@ -117,5 +123,14 @@ export function buildStagePrompt(masterPrompt: string, stage: StagedBuildStage, 
     "--- ESPECIFICAÇÃO MESTRA ---",
     masterPrompt,
     "--- FIM DA ESPECIFICAÇÃO MESTRA ---",
+  ].join("\n\n");
+}
+
+/** Segunda tentativa deliberadamente menor quando uma etapa não conclui. */
+export function buildStageRetryPrompt(masterPrompt: string, stage: StagedBuildStage, index: number, total: number): string {
+  return [
+    buildStagePrompt(masterPrompt, stage, index, total),
+    "RECUPERAÇÃO AUTOMÁTICA: a tentativa anterior desta etapa não concluiu.",
+    "Reduza o escopo agora: implemente somente a parte mais importante desta etapa e altere/crie no máximo 2 arquivos curtos. Não reenvie arquivos inalterados, não reescreva o projeto e não tente compensar recursos de etapas futuras. Entregue JSON ops válido e pequeno.",
   ].join("\n\n");
 }

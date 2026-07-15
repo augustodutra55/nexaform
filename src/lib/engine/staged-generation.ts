@@ -198,6 +198,6 @@ export function buildStageRetryPrompt(
   return [
     buildStagePrompt(masterPrompt, stage, index, total, kind),
     "RECUPERAÇÃO AUTOMÁTICA: a tentativa anterior desta etapa não concluiu.",
-    "Reduza o escopo agora: implemente somente a parte mais importante desta etapa e altere/crie no máximo 2 arquivos curtos. Não reenvie arquivos inalterados, não reescreva o projeto e não tente compensar recursos de etapas futuras. Entregue blocos AD_FILE pequenos e válidos, nunca JSON.",
+    "Reduza o escopo agora: implemente somente a parte mais importante desta etapa e altere/crie no máximo 2 arquivos curtos. Não reenvie arquivos inalterados, não reescreva o projeto e não tente compensar recursos de etapas futuras. Para arquivos existentes use AD_PATCH com AD_SEARCH literal e único; use AD_FILE apenas para arquivos novos. Nunca use JSON.",
   ].join("\n\n");
 }

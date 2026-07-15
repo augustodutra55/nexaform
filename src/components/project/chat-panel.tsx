@@ -280,7 +280,8 @@ export function ChatPanel({
     const msg =
       `⚙️ Correção automática: o app apresentou este erro ao executar:\n"${autoFixError}"\n` +
       `Corrija a CAUSA desse erro nos arquivos atuais e mantenha TODA a funcionalidade. ` +
-      `Devolva apenas os arquivos alterados no formato "ops" (edição cirúrgica). ` +
+      `Para arquivo existente, devolva apenas AD_PATCH com AD_SEARCH literal e único + AD_REPLACE. ` +
+      `Use AD_FILE somente se precisar criar um arquivo. ` +
       `Erros comuns: importar de 'lucide-react' um ícone que não existe (use 'react-icons' para marcas), ` +
       `variável/props indefinida, .map em algo que ainda não é array (inicialize com []), ou await sem async.`;
     onAutoFixHandled?.();
@@ -531,6 +532,17 @@ export function ChatPanel({
         setMessages((m) => [...m, { id: crypto.randomUUID(), role: "assistant", content: "⏹️ Interrompido. Pode mandar outro comando." }]);
       } else {
         const msg = err?.message ?? "Algo deu errado.";
+        if (isAutoFix) {
+          const notice =
+            `⚠️ A alteração principal e o projeto salvo foram preservados. ` +
+            `A verificação automática do preview não conseguiu produzir uma correção adicional: ${msg}`;
+          toast.error("Verificação automática não concluída", {
+            description: "A alteração principal foi preservada; não desfiz nem substituí o projeto.",
+          });
+          setMessages((messages) => [...messages, { id: crypto.randomUUID(), role: "assistant", content: notice }]);
+          persist("assistant", notice);
+          return;
+        }
         toast.error("Geração falhou", { description: msg });
         setMessages((m) => [...m, { id: crypto.randomUUID(), role: "assistant", content: `Ops — ${msg}` }]);
       }

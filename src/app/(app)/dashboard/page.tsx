@@ -23,6 +23,7 @@ import {
   X,
   FileCode2,
   Image as ImageIcon,
+  Upload,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { timeAgo } from "@/lib/utils";
@@ -60,6 +61,7 @@ import {
   PROMPT_ATTACHMENT_ACCEPT,
   type PromptAttachment,
 } from "@/lib/engine/prompt-attachments";
+import { importProjectArchive } from "@/lib/import/project-archive";
 
 interface Project {
   id: string;
@@ -84,6 +86,8 @@ export default function DashboardPage() {
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [quickPrompt, setQuickPrompt] = useState("");
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
   const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
 
@@ -327,6 +331,45 @@ export default function DashboardPage() {
     load();
   }
 
+  async function handleImportProject(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!importFile || busy) return;
+    const plan = resolvePlan(access);
+    if (plan.maxProjects !== -1 && (projects?.length ?? 0) >= plan.maxProjects) {
+      toast.error(`Limite de ${plan.maxProjects} projetos no plano ${plan.name}`);
+      return;
+    }
+    setBusy(true);
+    try {
+      const imported = await importProjectArchive(importFile);
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) throw new Error("Sua sessão expirou. Entre novamente.");
+      const { data, error } = await supabase
+        .from("projects")
+        .insert({
+          user_id: userData.user.id,
+          name: imported.name,
+          description: imported.description,
+          schema: imported.schema,
+          published: false,
+          meta: { importedFrom: "ad-studio-zip", importedAt: new Date().toISOString() },
+        })
+        .select("id")
+        .single();
+      if (error || !data) throw new Error(error?.message || "Não foi possível salvar o projeto importado.");
+      setImportOpen(false);
+      setImportFile(null);
+      toast.success("Projeto importado", { description: "A cópia original foi preservada e o novo projeto já pode ser editado." });
+      router.push(`/projeto/${data.id}`);
+    } catch (error) {
+      toast.error("Não foi possível importar o projeto", {
+        description: error instanceof Error ? error.message : "Confira o arquivo ZIP e tente novamente.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="container max-w-6xl py-10">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -356,11 +399,47 @@ export default function DashboardPage() {
           <Button variant="outline" onClick={() => setGalleryOpen(true)}>
             <LayoutTemplate /> Começar de um modelo
           </Button>
+          <Button variant="outline" onClick={() => setImportOpen(true)}>
+            <Upload /> Importar ZIP
+          </Button>
           <Button variant="brand" onClick={() => setCreateOpen(true)}>
             <Plus /> {isOwner(access) ? "Novo projeto de cliente" : "Novo projeto"}
           </Button>
         </div>
       </div>
+
+      <Dialog open={importOpen} onOpenChange={(open) => { setImportOpen(open); if (!open) setImportFile(null); }}>
+        <DialogContent>
+          <form onSubmit={handleImportProject}>
+            <DialogHeader>
+              <DialogTitle>Importar projeto editável</DialogTitle>
+              <DialogDescription>
+                Selecione o ZIP exportado pelo AD Studio. Uma nova cópia será criada; nenhum projeto existente será alterado.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 py-5">
+              <Label htmlFor="project-zip">Arquivo ZIP</Label>
+              <Input
+                id="project-zip"
+                type="file"
+                accept=".zip,application/zip"
+                disabled={busy}
+                onChange={(event) => setImportFile(event.target.files?.[0] ?? null)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Compatível com projetos React + Vite baixados pelo botão de exportação do AD Studio. Limite de 15 MB.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setImportOpen(false)} disabled={busy}>Cancelar</Button>
+              <Button type="submit" variant="brand" disabled={!importFile || busy}>
+                {busy ? <Loader2 className="animate-spin" /> : <Upload />}
+                Criar projeto importado
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Entrada prompt-first: o jeito mais rápido de começar */}
       <form

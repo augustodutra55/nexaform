@@ -36,6 +36,36 @@ interface Message {
   content: string;
 }
 
+interface FailedRefinementRequest {
+  messageId: string;
+  prompt: string;
+}
+
+const REFINEMENT_FAILURE = /(?:edi[çc][aã]o n[aã]o foi aplicada|resposta[^.]*n[aã]o p[oô]de ser interpretada como c[oó]digo|gera[çc][aã]o passou do tempo limite)/i;
+
+function failedRefinementRequests(messages: Message[], recoveredIds: string[]): FailedRefinementRequest[] {
+  const recovered = new Set(recoveredIds);
+  const failed = new Map<string, FailedRefinementRequest>();
+  let pendingUser: Message | null = null;
+  for (const message of messages) {
+    if (message.role === "user") {
+      pendingUser = message.content.startsWith("⚙️ Correção automática:") ? null : message;
+      continue;
+    }
+    if (!pendingUser) continue;
+    const key = pendingUser.content.trim().replace(/\s+/g, " ");
+    if (REFINEMENT_FAILURE.test(message.content)) {
+      if (!recovered.has(pendingUser.id)) {
+        failed.set(key, { messageId: pendingUser.id, prompt: pendingUser.content });
+      }
+    } else if (!/^⚠️ A alteração principal/.test(message.content)) {
+      failed.delete(key);
+    }
+    pendingUser = null;
+  }
+  return Array.from(failed.values());
+}
+
 /** Geração de código: REAL (IA escreve) ou TEMPLATE (enlatado/demo permitido). */
 type GenMode = "real" | "template";
 
@@ -125,6 +155,16 @@ export function ChatPanel({
     } catch {}
     return initialMessages;
   });
+  const recoveredFailureKey = `adstudio:recovered-failures:${threadId}`;
+  const [recoveredFailureIds, setRecoveredFailureIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(recoveredFailureKey);
+      return raw ? JSON.parse(raw) as string[] : [];
+    } catch {
+      return [];
+    }
+  });
+  const [recoveryProgress, setRecoveryProgress] = useState<{ current: number; total: number } | null>(null);
   const [input, setInput] = useState(() => {
     // Rascunho: recupera o texto que estava sendo digitado (por thread), pra não
     // sumir se recarregar a página no meio de um pedido.
@@ -147,6 +187,10 @@ export function ChatPanel({
   const [resumeJob, setResumeJob] = useState<StagedBuildJob | null>(null);
   const [stageStatus, setStageStatus] = useState<{ current: number; total: number; label: string } | null>(null);
   const stagedStorageKey = `adstudio:staged-build:${projectId}`;
+  const failedRequests = useMemo(
+    () => failedRefinementRequests(messages, recoveredFailureIds),
+    [messages, recoveredFailureIds]
+  );
 
   // ── Modo de geração de código: REAL (IA escreve) vs TEMPLATE (enlatado/demo) ──
   const [genMode, setGenMode] = useState<GenMode>("real");
@@ -301,10 +345,11 @@ export function ChatPanel({
     text: string,
     isAutoFix = false,
     providedAttachments?: PromptAttachment[],
-    resumedJob?: StagedBuildJob
-  ) {
+    resumedJob?: StagedBuildJob,
+    isRecovery = false
+  ): Promise<boolean> {
     const content = (resumedJob?.originalPrompt ?? text).trim();
-    if (!content || generating) return;
+    if (!content || generating) return false;
     const requestAttachments = resumedJob
       ? resumedJob.imageAttachments ?? []
       : providedAttachments ?? (isAutoFix ? [] : attachments);
@@ -332,7 +377,7 @@ export function ChatPanel({
     const visibleContent = requestAttachments.length
       ? `${content}\n\n📎 ${requestAttachments.map(attachmentLabel).join(" · ")}`
       : content;
-    if (!resumedJob) {
+    if (!resumedJob && !isRecovery) {
       setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", content: visibleContent }]);
       persist("user", content);
     }
@@ -468,7 +513,7 @@ export function ChatPanel({
         setMessages((messages) => [...messages, { id: crypto.randomUUID(), role: "assistant", content: completion }]);
         persist("assistant", completion);
         storeStagedJob(null);
-        return;
+        return true;
       }
 
       const payload = useApp
@@ -513,6 +558,7 @@ export function ChatPanel({
         onEngineMode?.("template");
         onSiteResult(data as GenerationResult);
       }
+      return true;
     } catch (err: any) {
       if (activeStagedJob) {
         storeStagedJob(activeStagedJob);
@@ -524,7 +570,7 @@ export function ChatPanel({
         else toast.error("Etapa não concluída", { description: "O progresso anterior foi preservado." });
         setMessages((messages) => [...messages, { id: crypto.randomUUID(), role: "assistant", content: paused }]);
         persist("assistant", paused);
-        return;
+        return false;
       }
       // Interrompido pelo usuário (botão parar): não é erro, apenas devolve o controle.
       if (err?.name === "AbortError") {
@@ -541,11 +587,12 @@ export function ChatPanel({
           });
           setMessages((messages) => [...messages, { id: crypto.randomUUID(), role: "assistant", content: notice }]);
           persist("assistant", notice);
-          return;
+          return false;
         }
         toast.error("Geração falhou", { description: msg });
         setMessages((m) => [...m, { id: crypto.randomUUID(), role: "assistant", content: `Ops — ${msg}` }]);
       }
+      return false;
     } finally {
       abortRef.current = null;
       setGenerating(false);
@@ -554,6 +601,27 @@ export function ChatPanel({
       setPlan([]);
       setPlanDone(0);
     }
+  }
+
+  async function recoverFailedRefinements(): Promise<void> {
+    if (generating || recoveryProgress || !failedRequests.length) return;
+    const requests = failedRequests.slice();
+    let recovered = recoveredFailureIds.slice();
+    setRecoveryProgress({ current: 0, total: requests.length });
+    for (let index = 0; index < requests.length; index++) {
+      setRecoveryProgress({ current: index + 1, total: requests.length });
+      const success = await send(requests[index].prompt, false, [], undefined, true);
+      if (!success) {
+        toast.error("Recuperação pausada", {
+          description: `As ${index} alterações anteriores foram salvas. A próxima continua pendente.`,
+        });
+        break;
+      }
+      recovered = recovered.concat(requests[index].messageId);
+      setRecoveredFailureIds(recovered);
+      try { localStorage.setItem(recoveredFailureKey, JSON.stringify(recovered)); } catch {}
+    }
+    setRecoveryProgress(null);
   }
 
   const lastUserRequest = [...messages]
@@ -735,6 +803,36 @@ export function ChatPanel({
             >
               Continuar construção
             </Button>
+          </div>
+        )}
+        {!generating && !resumeJob && failedRequests.length > 0 && (
+          <div className="space-y-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+              <div>
+                <p className="text-sm font-medium">
+                  {failedRequests.length} {failedRequests.length === 1 ? "alteração pendente" : "alterações pendentes"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  O histórico mostra pedidos que não foram aplicados. O AD Studio pode refazê-los um por vez, salvando cada resultado antes de continuar.
+                </p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="brand"
+              className="w-full"
+              onClick={recoverFailedRefinements}
+              disabled={!!recoveryProgress}
+            >
+              {recoveryProgress
+                ? `Recuperando ${recoveryProgress.current}/${recoveryProgress.total}…`
+                : `Recuperar ${failedRequests.length === 1 ? "alteração" : `${failedRequests.length} alterações`}`}
+            </Button>
+            <p className="text-[10px] text-muted-foreground">
+              Usa o provedor de IA configurado. Nenhum pedido é agrupado ou descartado.
+            </p>
           </div>
         )}
         <div ref={bottomRef} />

@@ -9,12 +9,13 @@ import { AppSchema, GenerationResult, isValidSchema } from "@/lib/engine/types";
 import { AppCode, AppFile, AppGenerationResult, EngineMode, isAppCode, isMultiFile } from "@/lib/engine/app-types";
 import { useProjectStore } from "@/lib/store/project";
 import { resolvePlan, isOwner, type AccessProfile } from "@/lib/access";
-import { ProjectMeta, readMeta } from "@/lib/studio";
+import { ProjectMeta, ProjectAcceptanceSnapshot, readMeta } from "@/lib/studio";
 import { cn } from "@/lib/utils";
 import { ChatPanel, ProjectMode } from "@/components/project/chat-panel";
 import { CodePanel } from "@/components/project/code-panel";
 import { DataPanel } from "@/components/project/data-panel";
 import { MediaPanel } from "@/components/project/media-panel";
+import { AcceptancePanel } from "@/components/project/acceptance-panel";
 import { EditorPanel } from "@/components/project/editor-panel";
 import { ProjectTopbar, VersionRow } from "@/components/project/project-topbar";
 import { PreviewPane } from "@/components/preview/preview-pane";
@@ -24,6 +25,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { buildViteProject } from "@/lib/export/vite-project";
 import { replaceProjectMedia, type ProjectMediaAsset, type ProjectMediaItem } from "@/lib/media/project-media";
 import { sanitizePromptAttachments, type PromptAttachment } from "@/lib/engine/prompt-attachments";
+import { buildAcceptanceReport } from "@/lib/engine/acceptance-report";
+import type { RuntimeAuditReport } from "@/lib/preview/runtime-audit";
 
 interface ProjectRow {
   id: string;
@@ -60,7 +63,7 @@ export default function ProjectPage() {
   const [appName, setAppName] = useState<string>("App");
   const [appVer, setAppVer] = useState(0);
   const [engineMode, setEngineMode] = useState<EngineMode | null>(null);
-  const [appView, setAppView] = useState<"preview" | "code" | "data" | "media">("preview");
+  const [appView, setAppView] = useState<"preview" | "code" | "data" | "media" | "quality">("preview");
   const [views, setViews] = useState<number | null>(null);
 
   // Visitas do site publicado (analytics agregado). Só busca quando publicado.
@@ -92,7 +95,7 @@ export default function ProjectPage() {
   const autoFixCount = useRef(0);
   const [previewHealth, setPreviewHealth] = useState<"checking" | "healthy" | "error">("checking");
   const lastHealthyApp = useRef<AppCode | null>(null);
-  const pendingAppApproval = useRef<{ app: AppCode; label: string } | null>(null);
+  const pendingAppApproval = useRef<{ app: AppCode; label: string; acceptance?: ProjectAcceptanceSnapshot } | null>(null);
   const approvingApp = useRef(false);
 
   /* ── Carregamento ─────────────────────────────────────────── */
@@ -244,7 +247,19 @@ export default function ProjectPage() {
       }
       setAppVer((n) => n + 1);
       const label = result.plan[0] ?? "Geração de app";
-      pendingAppApproval.current = { app: result.app, label: label.slice(0, 120) };
+      const existingAcceptance = metaRef.current.acceptance;
+      pendingAppApproval.current = {
+        app: result.app,
+        label: label.slice(0, 120),
+        acceptance: {
+          // Um refinamento curto (ex.: "troque a cor") não deve apagar o
+          // contrato original do produto. Em um projeto novo, usamos o plano
+          // recém-criado pelo motor.
+          plan: previous && existingAcceptance?.plan ? existingAcceptance.plan : result.generationPlan || existingAcceptance?.plan,
+          structural: result.quality,
+          updatedAt: new Date().toISOString(),
+        },
+      };
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [currentApp, previewHealth, projectId, supabase]
@@ -295,6 +310,23 @@ export default function ProjectPage() {
           : "Aguarde alguns segundos enquanto o AD Studio verifica o aplicativo.",
       });
       return null;
+    }
+    if (mode === "app") {
+      const acceptance = metaRef.current.acceptance;
+      const report = buildAcceptanceReport({
+        app: appPayload,
+        plan: acceptance?.plan,
+        structural: acceptance?.structural,
+        runtime: acceptance?.runtime,
+        previewHealth,
+      });
+      if (report.blockers > 0) {
+        setAppView("quality");
+        toast.error("O Centro de Qualidade bloqueou a publicação", {
+          description: "Abra a aba Qualidade para ver a falha comprovada que precisa ser corrigida.",
+        });
+        return null;
+      }
     }
     const slug = project.share_slug ?? nanoid(10);
     const payload = mode === "app" ? appPayload : store.schema;
@@ -419,7 +451,14 @@ export default function ProjectPage() {
     setAppVer((n) => n + 1);
     setPreviewHealth("checking");
     setAppView("preview");
-    pendingAppApproval.current = { app, label: "Edição manual de código" };
+    pendingAppApproval.current = {
+      app,
+      label: "Edição manual de código",
+      acceptance: {
+        plan: metaRef.current.acceptance?.plan,
+        updatedAt: new Date().toISOString(),
+      },
+    };
     toast.info("Código em verificação", { description: "A alteração será salva depois que o preview for aprovado." });
   }
 
@@ -444,7 +483,14 @@ export default function ProjectPage() {
     setAppVer((value) => value + 1);
     setPreviewHealth("checking");
     setAppView("preview");
-    pendingAppApproval.current = { app, label: `Mídia: ${item.context}`.slice(0, 120) };
+    pendingAppApproval.current = {
+      app,
+      label: `Mídia: ${item.context}`.slice(0, 120),
+      acceptance: {
+        plan: metaRef.current.acceptance?.plan,
+        updatedAt: new Date().toISOString(),
+      },
+    };
     toast.info("Mídia aplicada ao preview", { description: "A versão será salva depois da verificação." });
   }
 
@@ -525,16 +571,42 @@ export default function ProjectPage() {
     void approvePendingApp();
   }
 
+  function handlePreviewAudit(report: RuntimeAuditReport) {
+    const pending = pendingAppApproval.current;
+    if (pending) {
+      pending.acceptance = {
+        ...pending.acceptance,
+        runtime: report,
+        updatedAt: new Date().toISOString(),
+      };
+      return;
+    }
+    void handleMetaChange({
+      acceptance: {
+        ...metaRef.current.acceptance,
+        runtime: report,
+        updatedAt: new Date().toISOString(),
+      },
+    });
+  }
+
   async function approvePendingApp() {
     const pending = pendingAppApproval.current;
     if (!pending || approvingApp.current) return;
     approvingApp.current = true;
     try {
+      const nextMeta = pending.acceptance
+        ? { ...metaRef.current, acceptance: pending.acceptance }
+        : metaRef.current;
       const { error } = await supabase
         .from("projects")
-        .update({ schema: pending.app, updated_at: new Date().toISOString() })
+        .update({ schema: pending.app, meta: nextMeta, updated_at: new Date().toISOString() })
         .eq("id", projectId);
       if (error) throw error;
+      if (pending.acceptance) {
+        metaRef.current = nextMeta;
+        setMeta(nextMeta);
+      }
       const { data } = await supabase
         .from("versions")
         .insert({ project_id: projectId, schema: pending.app, label: pending.label })
@@ -689,6 +761,16 @@ export default function ProjectPage() {
                   >
                     Mídia
                   </button>
+                  <button
+                    onClick={() => setAppView("quality")}
+                    title="Contrato, checklist funcional e liberação para publicação"
+                    className={cn(
+                      "rounded-md px-2.5 py-1 font-medium transition-colors",
+                      appView === "quality" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Qualidade
+                  </button>
                 </div>
                 {project?.published && views !== null && (
                   <span
@@ -712,6 +794,12 @@ export default function ProjectPage() {
                     onReplace={handleReplaceMedia}
                     onAssetsChange={handleMediaAssetsChange}
                   />
+                ) : appView === "quality" ? (
+                  <AcceptancePanel
+                    app={currentApp()}
+                    acceptance={meta.acceptance}
+                    previewHealth={previewHealth}
+                  />
                 ) : appView === "code" && codeFiles.length ? (
                   <CodePanel files={codeFiles} entry={appEntry} onApply={handleApplyCode} />
                 ) : (
@@ -725,6 +813,7 @@ export default function ProjectPage() {
                     editorSession
                     onError={handleAppError}
                     onReady={handleAppReady}
+                    onAudit={handlePreviewAudit}
                   />
                 )}
               </div>

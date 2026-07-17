@@ -35,15 +35,21 @@ function preferredSpeechVoice(voices: SpeechSynthesisVoice[], lang: string): Spe
 
 export function usePreviewBridge(
   iframeRef: RefObject<HTMLIFrameElement>, projectId?: string | null,
-  onError?: (message: string) => void, allowEditorSession = false
+  onError?: (message: string) => void, allowEditorSession = false,
+  onReady?: () => void
 ) {
   useEffect(() => {
     let activeRecognition: any = null;
     let activeSpeechRequest = 0;
     let pendingPreviewError: number | null = null;
+    let pendingPreviewReady: number | null = null;
     const clearPendingPreviewError = () => {
       if (pendingPreviewError !== null) window.clearTimeout(pendingPreviewError);
       pendingPreviewError = null;
+    };
+    const clearPendingPreviewReady = () => {
+      if (pendingPreviewReady !== null) window.clearTimeout(pendingPreviewReady);
+      pendingPreviewReady = null;
     };
     try { window.speechSynthesis?.getVoices(); } catch {}
     function reply(source: Window, id: string, result: Record<string, unknown>) {
@@ -139,11 +145,19 @@ export function usePreviewBridge(
       if (!source || event.source !== source || !event.data || typeof event.data !== "object") return;
       if (event.data.__nx_ready === true) {
         clearPendingPreviewError();
+        clearPendingPreviewReady();
+        // A montagem inicial pode disparar efeitos assíncronos que falham logo
+        // depois do primeiro render. Só aprovamos após uma pequena janela estável.
+        pendingPreviewReady = window.setTimeout(() => {
+          pendingPreviewReady = null;
+          onReady?.();
+        }, 2000);
         return;
       }
       if (typeof event.data.__nx_error === "string") {
         const message = event.data.__nx_error.slice(0, 800);
         clearPendingPreviewError();
+        clearPendingPreviewReady();
         // A montagem do iframe troca bundles e CDNs. Um erro da instância antiga
         // não deve gastar créditos se a nova instância ficar saudável logo depois.
         pendingPreviewError = window.setTimeout(() => {
@@ -202,10 +216,11 @@ export function usePreviewBridge(
     return () => {
       window.removeEventListener("message", onMessage);
       clearPendingPreviewError();
+      clearPendingPreviewReady();
       activeSpeechRequest++;
       try { activeRecognition?.abort(); } catch {}
       activeRecognition = null;
       try { window.speechSynthesis?.cancel(); } catch {}
     };
-  }, [allowEditorSession, iframeRef, onError, projectId]);
+  }, [allowEditorSession, iframeRef, onError, onReady, projectId]);
 }

@@ -95,6 +95,7 @@ interface ChatPanelProps {
   /** Mensagem de erro para auto-correção (disparada pelo preview). */
   autoFixError?: string | null;
   onAutoFixHandled?: () => void;
+  onAutoFixFailed?: (runtimeError: string) => void;
   /** Disparado quando o usuário envia um pedido MANUAL (para zerar o orçamento de auto-correções). */
   onUserSend?: () => void;
   onSiteResult: (result: GenerationResult) => void;
@@ -138,6 +139,7 @@ export function ChatPanel({
   starterAttachments,
   autoFixError,
   onAutoFixHandled,
+  onAutoFixFailed,
   onUserSend,
   onSiteResult,
   onAppResult,
@@ -330,7 +332,9 @@ export function ChatPanel({
       `Erros comuns: importar de 'lucide-react' um ícone que não existe (use 'react-icons' para marcas), ` +
       `variável/props indefinida, .map em algo que ainda não é array (inicialize com []), ou await sem async.`;
     onAutoFixHandled?.();
-    send(msg, true);
+    void send(msg, true).then((success) => {
+      if (!success) onAutoFixFailed?.(autoFixError);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFixError, generating]);
 

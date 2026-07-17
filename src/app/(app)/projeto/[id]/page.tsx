@@ -90,6 +90,10 @@ export default function ProjectPage() {
   // Auto-correção de erros do app
   const [autoFixError, setAutoFixError] = useState<string | null>(null);
   const autoFixCount = useRef(0);
+  const [previewHealth, setPreviewHealth] = useState<"checking" | "healthy" | "error">("checking");
+  const lastHealthyApp = useRef<AppCode | null>(null);
+  const pendingAppApproval = useRef<{ app: AppCode; label: string } | null>(null);
+  const approvingApp = useRef(false);
 
   /* ── Carregamento ─────────────────────────────────────────── */
   useEffect(() => {
@@ -224,6 +228,9 @@ export default function ProjectPage() {
 
   const handleAppResult = useCallback(
     async (result: AppGenerationResult) => {
+      const previous = currentApp();
+      if (previewHealth === "healthy" && previous) lastHealthyApp.current = previous;
+      setPreviewHealth("checking");
       setMode("app");
       setAppName(result.app.name ?? "App");
       if (isMultiFile(result.app)) {
@@ -236,18 +243,11 @@ export default function ProjectPage() {
         setAppEntry(null);
       }
       setAppVer((n) => n + 1);
-      // salva o AppCode no campo schema (jsonb)
-      await supabase.from("projects").update({ schema: result.app, updated_at: new Date().toISOString() }).eq("id", projectId);
       const label = result.plan[0] ?? "Geração de app";
-      const { data } = await supabase
-        .from("versions")
-        .insert({ project_id: projectId, schema: result.app, label: label.slice(0, 120) })
-        .select("id, label, created_at, schema")
-        .single();
-      if (data) setVersions((v) => [data as any, ...v]);
+      pendingAppApproval.current = { app: result.app, label: label.slice(0, 120) };
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, supabase]
+    [currentApp, previewHealth, projectId, supabase]
   );
 
   async function handleRename(name: string) {
@@ -286,6 +286,14 @@ export default function ProjectPage() {
     const hasContent = mode === "app" ? !!appPayload : !!store.schema;
     if (!hasContent) {
       toast.error("Nada para publicar ainda", { description: "Gere a primeira versão pelo chat." });
+      return null;
+    }
+    if (mode === "app" && previewHealth !== "healthy") {
+      toast.error("O preview ainda não foi aprovado", {
+        description: previewHealth === "error"
+          ? "Corrija o erro de execução antes de publicar. A última versão saudável continua protegida."
+          : "Aguarde alguns segundos enquanto o AD Studio verifica o aplicativo.",
+      });
       return null;
     }
     const slug = project.share_slug ?? nanoid(10);
@@ -409,9 +417,10 @@ export default function ProjectPage() {
       app = { kind: "app", name: appName, description: "", code };
     }
     setAppVer((n) => n + 1);
+    setPreviewHealth("checking");
     setAppView("preview");
-    await supabase.from("projects").update({ schema: app, updated_at: new Date().toISOString() }).eq("id", projectId);
-    toast.success("Código aplicado e executado");
+    pendingAppApproval.current = { app, label: "Edição manual de código" };
+    toast.info("Código em verificação", { description: "A alteração será salva depois que o preview for aprovado." });
   }
 
   async function handleReplaceMedia(item: ProjectMediaItem, url: string) {
@@ -433,15 +442,10 @@ export default function ProjectPage() {
       app = { kind: "app", name: appName, description: "", code };
     }
     setAppVer((value) => value + 1);
+    setPreviewHealth("checking");
     setAppView("preview");
-    await supabase.from("projects").update({ schema: app, updated_at: new Date().toISOString() }).eq("id", projectId);
-    const { data } = await supabase
-      .from("versions")
-      .insert({ project_id: projectId, schema: app, label: `Mídia: ${item.context}`.slice(0, 120) })
-      .select("id, label, created_at, schema")
-      .single();
-    if (data) setVersions((current) => [data as VersionRow, ...current]);
-    toast.success("Mídia substituída no projeto");
+    pendingAppApproval.current = { app, label: `Mídia: ${item.context}`.slice(0, 120) };
+    toast.info("Mídia aplicada ao preview", { description: "A versão será salva depois da verificação." });
   }
 
   async function handleMediaAssetsChange(assets: ProjectMediaAsset[]) {
@@ -449,13 +453,49 @@ export default function ProjectPage() {
   }
 
   const MAX_AUTOFIX = 3;
+  function finishFailedAutoFix() {
+    void restoreLastHealthyApp().then((restored) => {
+      toast.error(restored ? "Restaurei a última versão que funcionava" : "Não consegui corrigir sozinho", {
+        description: restored
+          ? "O código quebrado não será publicado. Você pode tentar o refinamento novamente sem perder o aplicativo anterior."
+          : "Tentei algumas vezes. Me diga no chat o que o app deveria fazer que eu ajusto.",
+      });
+    });
+  }
+
+  async function restoreLastHealthyApp() {
+    const safe = lastHealthyApp.current;
+    if (!safe) return false;
+    setAppName(safe.name ?? "App");
+    if (isMultiFile(safe)) {
+      setAppFiles(safe.files);
+      setAppEntry(safe.entry);
+      setAppCode(null);
+    } else {
+      setAppCode(safe.code ?? null);
+      setAppFiles(null);
+      setAppEntry(null);
+    }
+    setPreviewHealth("checking");
+    setAutoFixError(null);
+    pendingAppApproval.current = null;
+    setAppVer((value) => value + 1);
+    await supabase.from("projects").update({ schema: safe, updated_at: new Date().toISOString() }).eq("id", projectId);
+    const { data } = await supabase
+      .from("versions")
+      .insert({ project_id: projectId, schema: safe, label: "Recuperação: última versão saudável" })
+      .select("id, label, created_at, schema")
+      .single();
+    if (data) setVersions((current) => [data as VersionRow, ...current]);
+    return true;
+  }
+
   function handleAppError(message: string) {
+    setPreviewHealth("error");
     // Loop de auto-conserto: até 3 tentativas POR BUILD (o contador zera a cada
     // pedido manual seu, via onUserSend). Evita loop infinito mas não trava a sessão.
     if (autoFixCount.current >= MAX_AUTOFIX) {
-      toast.error("Não consegui corrigir sozinho", {
-        description: "Tentei algumas vezes. Me diga no chat o que o app deveria fazer que eu ajusto.",
-      });
+      finishFailedAutoFix();
       return;
     }
     autoFixCount.current += 1;
@@ -465,8 +505,59 @@ export default function ProjectPage() {
     setAutoFixError(message);
   }
 
+  function handleAutoFixFailed(message: string) {
+    if (autoFixCount.current >= MAX_AUTOFIX) {
+      finishFailedAutoFix();
+      return;
+    }
+    autoFixCount.current += 1;
+    toast.info(`Tentando outro reparo (${autoFixCount.current}/${MAX_AUTOFIX})…`, {
+      description: "A tentativa anterior não retornou uma alteração válida; a versão saudável permanece salva.",
+    });
+    window.setTimeout(() => setAutoFixError(message), 400);
+  }
+
+  function handleAppReady() {
+    setPreviewHealth("healthy");
+    const safe = currentApp();
+    if (safe) lastHealthyApp.current = safe;
+    autoFixCount.current = 0;
+    void approvePendingApp();
+  }
+
+  async function approvePendingApp() {
+    const pending = pendingAppApproval.current;
+    if (!pending || approvingApp.current) return;
+    approvingApp.current = true;
+    try {
+      const { error } = await supabase
+        .from("projects")
+        .update({ schema: pending.app, updated_at: new Date().toISOString() })
+        .eq("id", projectId);
+      if (error) throw error;
+      const { data } = await supabase
+        .from("versions")
+        .insert({ project_id: projectId, schema: pending.app, label: pending.label })
+        .select("id, label, created_at, schema")
+        .single();
+      if (pendingAppApproval.current === pending) pendingAppApproval.current = null;
+      if (data) setVersions((current) => [data as VersionRow, ...current]);
+      toast.success("Preview aprovado e versão salva");
+    } catch {
+      toast.error("O preview funcionou, mas não consegui salvar", {
+        description: "A alteração continua aberta. Recarregue o preview para tentar salvar novamente.",
+      });
+    } finally {
+      approvingApp.current = false;
+    }
+  }
+
   function handleRestoreVersion(v: VersionRow) {
     if (isAppCode(v.schema)) {
+      const previous = currentApp();
+      if (previewHealth === "healthy" && previous) lastHealthyApp.current = previous;
+      pendingAppApproval.current = null;
+      setPreviewHealth("checking");
       setMode("app");
       setAppName(v.schema.name ?? "App");
       if (isMultiFile(v.schema)) {
@@ -546,6 +637,7 @@ export default function ProjectPage() {
             starterAttachments={starterAttachments}
             autoFixError={autoFixError}
             onAutoFixHandled={() => setAutoFixError(null)}
+            onAutoFixFailed={handleAutoFixFailed}
             onUserSend={() => { autoFixCount.current = 0; }}
             onSiteResult={handleSiteResult}
             onAppResult={handleAppResult}
@@ -632,6 +724,7 @@ export default function ProjectPage() {
                     projectId={projectId}
                     editorSession
                     onError={handleAppError}
+                    onReady={handleAppReady}
                   />
                 )}
               </div>

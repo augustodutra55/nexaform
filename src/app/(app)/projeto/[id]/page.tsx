@@ -9,7 +9,7 @@ import { AppSchema, GenerationResult, isValidSchema } from "@/lib/engine/types";
 import { AppCode, AppFile, AppGenerationResult, EngineMode, isAppCode, isMultiFile } from "@/lib/engine/app-types";
 import { useProjectStore } from "@/lib/store/project";
 import { resolvePlan, isOwner, type AccessProfile } from "@/lib/access";
-import { ProjectMeta, ProjectAcceptanceSnapshot, readMeta } from "@/lib/studio";
+import { AcceptanceRepairSnapshot, ProjectMeta, ProjectAcceptanceSnapshot, readMeta } from "@/lib/studio";
 import { cn } from "@/lib/utils";
 import { ChatPanel, ProjectMode } from "@/components/project/chat-panel";
 import { CodePanel } from "@/components/project/code-panel";
@@ -26,6 +26,7 @@ import { buildViteProject } from "@/lib/export/vite-project";
 import { replaceProjectMedia, type ProjectMediaAsset, type ProjectMediaItem } from "@/lib/media/project-media";
 import { sanitizePromptAttachments, type PromptAttachment } from "@/lib/engine/prompt-attachments";
 import { buildAcceptanceReport } from "@/lib/engine/acceptance-report";
+import { acceptanceRepairFingerprint, buildAcceptanceRepairPrompt } from "@/lib/engine/acceptance-repair";
 import type { RuntimeAuditReport } from "@/lib/preview/runtime-audit";
 
 interface ProjectRow {
@@ -93,6 +94,11 @@ export default function ProjectPage() {
   // Auto-correção de erros do app
   const [autoFixError, setAutoFixError] = useState<string | null>(null);
   const autoFixCount = useRef(0);
+  const [repairState, setRepairState] = useState<AcceptanceRepairSnapshot | undefined>();
+  const repairStateRef = useRef<AcceptanceRepairSnapshot | undefined>();
+  const latestAuditRef = useRef<RuntimeAuditReport | undefined>();
+  const lastAutoFixTriggerRef = useRef("");
+  const autoFixFinishingRef = useRef(false);
   const [previewHealth, setPreviewHealth] = useState<"checking" | "healthy" | "error">("checking");
   const lastHealthyApp = useRef<AppCode | null>(null);
   const pendingAppApproval = useRef<{ app: AppCode; label: string; acceptance?: ProjectAcceptanceSnapshot } | null>(null);
@@ -113,7 +119,24 @@ export default function ProjectPage() {
         return;
       }
       setProject(proj as ProjectRow);
-      setMeta(readMeta(proj.meta));
+      let loadedMeta = readMeta(proj.meta);
+      const persistedRepair = loadedMeta.acceptance?.repair;
+      if (persistedRepair && (persistedRepair.status === "repairing" || persistedRepair.status === "verifying")) {
+        const interrupted: AcceptanceRepairSnapshot = {
+          ...persistedRepair,
+          status: "failed",
+          updatedAt: new Date().toISOString(),
+          lastError: "O ciclo foi interrompido antes da verificação final. A versão saudável permaneceu salva.",
+        };
+        loadedMeta = {
+          ...loadedMeta,
+          acceptance: { ...loadedMeta.acceptance, repair: interrupted, updatedAt: interrupted.updatedAt } as ProjectAcceptanceSnapshot,
+        };
+        void supabase.from("projects").update({ meta: loadedMeta, updated_at: interrupted.updatedAt }).eq("id", projectId);
+      }
+      setMeta(loadedMeta);
+      setRepairState(loadedMeta.acceptance?.repair);
+      repairStateRef.current = loadedMeta.acceptance?.repair;
       store.reset();
       if (isAppCode(proj.schema)) {
         setMode("app");
@@ -248,6 +271,12 @@ export default function ProjectPage() {
       setAppVer((n) => n + 1);
       const label = result.plan[0] ?? "Geração de app";
       const existingAcceptance = metaRef.current.acceptance;
+      let currentRepair = repairStateRef.current;
+      if (currentRepair?.status === "repairing") {
+        currentRepair = { ...currentRepair, status: "verifying", updatedAt: new Date().toISOString() };
+        repairStateRef.current = currentRepair;
+        setRepairState(currentRepair);
+      }
       pendingAppApproval.current = {
         app: result.app,
         label: label.slice(0, 120),
@@ -257,6 +286,7 @@ export default function ProjectPage() {
           // recém-criado pelo motor.
           plan: previous && existingAcceptance?.plan ? existingAcceptance.plan : result.generationPlan || existingAcceptance?.plan,
           structural: result.quality,
+          repair: currentRepair,
           updatedAt: new Date().toISOString(),
         },
       };
@@ -499,8 +529,79 @@ export default function ProjectPage() {
   }
 
   const MAX_AUTOFIX = 3;
+  function updateRepairState(next: AcceptanceRepairSnapshot, persist = true) {
+    repairStateRef.current = next;
+    setRepairState(next);
+    const pending = pendingAppApproval.current;
+    if (pending?.acceptance) pending.acceptance = { ...pending.acceptance, repair: next, updatedAt: next.updatedAt };
+    if (!persist) return;
+    const acceptance = { ...metaRef.current.acceptance, repair: next, updatedAt: next.updatedAt } as ProjectAcceptanceSnapshot;
+    const nextMeta = { ...metaRef.current, acceptance };
+    metaRef.current = nextMeta;
+    setMeta(nextMeta);
+    void supabase.from("projects").update({ meta: nextMeta, updated_at: next.updatedAt }).eq("id", projectId);
+  }
+
+  function queueAutoRepair(message: string, forceRetry = false) {
+    if (!forceRetry && repairStateRef.current?.status === "repairing") return;
+    if (autoFixCount.current >= MAX_AUTOFIX) {
+      finishFailedAutoFix();
+      return;
+    }
+
+    const acceptance = pendingAppApproval.current?.acceptance || metaRef.current.acceptance;
+    const runtime = latestAuditRef.current || acceptance?.runtime;
+    const structural = acceptance?.structural;
+    const fingerprint = acceptanceRepairFingerprint({ runtime, structural, fallbackError: message });
+    autoFixCount.current += 1;
+    autoFixFinishingRef.current = false;
+    lastAutoFixTriggerRef.current = message;
+    const now = new Date().toISOString();
+    const previous = repairStateRef.current;
+    const issueCodes = (runtime?.issues || [])
+      .filter((issue) => issue.severity === "error")
+      .map((issue) => issue.code)
+      .concat((structural?.errors || []).map((issue) => issue.code))
+      .filter((code, index, values) => values.indexOf(code) === index)
+      .slice(0, 20);
+    const next: AcceptanceRepairSnapshot = {
+      status: "repairing",
+      attempt: autoFixCount.current,
+      maxAttempts: MAX_AUTOFIX,
+      fingerprint,
+      issueCodes,
+      startedAt: previous?.fingerprint === fingerprint ? previous.startedAt : now,
+      updatedAt: now,
+      lastError: message.slice(0, 800),
+    };
+    updateRepairState(next);
+    setAutoFixError(buildAcceptanceRepairPrompt({
+      runtime,
+      structural,
+      plan: acceptance?.plan,
+      fallbackError: message,
+      attempt: next.attempt,
+      maxAttempts: next.maxAttempts,
+    }));
+    toast.info(`Corrigindo automaticamente (tentativa ${next.attempt}/${next.maxAttempts})…`, {
+      description: "O Centro de Qualidade enviou somente as falhas comprovadas e preservou a última versão saudável.",
+    });
+  }
+
   function finishFailedAutoFix() {
+    if (autoFixFinishingRef.current) return;
+    autoFixFinishingRef.current = true;
+    const previous = repairStateRef.current;
+    if (previous) {
+      updateRepairState({
+        ...previous,
+        status: "failed",
+        updatedAt: new Date().toISOString(),
+        lastError: lastAutoFixTriggerRef.current.slice(0, 800) || previous.lastError,
+      });
+    }
     void restoreLastHealthyApp().then((restored) => {
+      setAppView("quality");
       toast.error(restored ? "Restaurei a última versão que funcionava" : "Não consegui corrigir sozinho", {
         description: restored
           ? "O código quebrado não será publicado. Você pode tentar o refinamento novamente sem perder o aplicativo anterior."
@@ -538,45 +639,39 @@ export default function ProjectPage() {
 
   function handleAppError(message: string) {
     setPreviewHealth("error");
-    // Loop de auto-conserto: até 3 tentativas POR BUILD (o contador zera a cada
-    // pedido manual seu, via onUserSend). Evita loop infinito mas não trava a sessão.
-    if (autoFixCount.current >= MAX_AUTOFIX) {
-      finishFailedAutoFix();
-      return;
-    }
-    autoFixCount.current += 1;
-    toast.info(`Corrigindo automaticamente (tentativa ${autoFixCount.current}/${MAX_AUTOFIX})…`, {
-      description: "O motor detectou um erro e está reescrevendo o código pra consertar.",
-    });
-    setAutoFixError(message);
+    queueAutoRepair(message);
   }
 
-  function handleAutoFixFailed(message: string) {
+  function handleAutoFixFailed() {
     if (autoFixCount.current >= MAX_AUTOFIX) {
       finishFailedAutoFix();
       return;
     }
-    autoFixCount.current += 1;
-    toast.info(`Tentando outro reparo (${autoFixCount.current}/${MAX_AUTOFIX})…`, {
-      description: "A tentativa anterior não retornou uma alteração válida; a versão saudável permanece salva.",
-    });
-    window.setTimeout(() => setAutoFixError(message), 400);
+    window.setTimeout(() => queueAutoRepair(lastAutoFixTriggerRef.current || "A tentativa anterior não retornou uma alteração válida.", true), 400);
   }
 
   function handleAppReady() {
     setPreviewHealth("healthy");
     const safe = currentApp();
     if (safe) lastHealthyApp.current = safe;
+    const repair = repairStateRef.current;
+    if (repair && (repair.status === "repairing" || repair.status === "verifying")) {
+      updateRepairState({ ...repair, status: "verified", updatedAt: new Date().toISOString(), lastError: undefined }, !pendingAppApproval.current);
+    }
     autoFixCount.current = 0;
+    autoFixFinishingRef.current = false;
+    lastAutoFixTriggerRef.current = "";
     void approvePendingApp();
   }
 
   function handlePreviewAudit(report: RuntimeAuditReport) {
+    latestAuditRef.current = report;
     const pending = pendingAppApproval.current;
     if (pending) {
       pending.acceptance = {
         ...pending.acceptance,
         runtime: report,
+        repair: repairStateRef.current,
         updatedAt: new Date().toISOString(),
       };
       return;
@@ -588,6 +683,33 @@ export default function ProjectPage() {
         updatedAt: new Date().toISOString(),
       },
     });
+  }
+
+  function handleManualQualityRepair() {
+    autoFixCount.current = 0;
+    autoFixFinishingRef.current = false;
+    const runtime = latestAuditRef.current || metaRef.current.acceptance?.runtime;
+    const blocking = runtime?.issues.filter((issue) => issue.severity === "error") || [];
+    const message = blocking.length
+      ? blocking.map((issue) => issue.message).join(" | ")
+      : "O Centro de Qualidade bloqueou a versão atual; corrija a causa comprovada sem alterar áreas saudáveis.";
+    queueAutoRepair(message, true);
+    setAppView("preview");
+  }
+
+  function handleManualGenerationStart() {
+    autoFixCount.current = 0;
+    autoFixFinishingRef.current = false;
+    lastAutoFixTriggerRef.current = "";
+    const acceptance = metaRef.current.acceptance;
+    if (!repairStateRef.current || !acceptance) return;
+    repairStateRef.current = undefined;
+    setRepairState(undefined);
+    const { repair: _repair, ...withoutRepair } = acceptance;
+    const nextMeta = { ...metaRef.current, acceptance: { ...withoutRepair, updatedAt: new Date().toISOString() } };
+    metaRef.current = nextMeta;
+    setMeta(nextMeta);
+    void supabase.from("projects").update({ meta: nextMeta, updated_at: nextMeta.acceptance.updatedAt }).eq("id", projectId);
   }
 
   async function approvePendingApp() {
@@ -710,7 +832,7 @@ export default function ProjectPage() {
             autoFixError={autoFixError}
             onAutoFixHandled={() => setAutoFixError(null)}
             onAutoFixFailed={handleAutoFixFailed}
-            onUserSend={() => { autoFixCount.current = 0; }}
+            onUserSend={handleManualGenerationStart}
             onSiteResult={handleSiteResult}
             onAppResult={handleAppResult}
             onGeneratingChange={setGenerating}
@@ -798,7 +920,9 @@ export default function ProjectPage() {
                   <AcceptancePanel
                     app={currentApp()}
                     acceptance={meta.acceptance}
+                    repair={repairState}
                     previewHealth={previewHealth}
+                    onRepair={handleManualQualityRepair}
                   />
                 ) : appView === "code" && codeFiles.length ? (
                   <CodePanel files={codeFiles} entry={appEntry} onApply={handleApplyCode} />

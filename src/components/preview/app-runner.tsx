@@ -34,6 +34,8 @@ interface AppRunnerProps {
   projectId?: string | null;
   /** chamado quando o app dá erro de execução (para auto-correção). */
   onError?: (message: string) => void;
+  /** chamado somente depois que o React montou sem erro no iframe. */
+  onReady?: () => void;
   editorSession?: boolean;
 }
 
@@ -293,18 +295,28 @@ ${adScript}
 </html>`;
 }
 
-export function AppRunner({ code, files, entry, version, engineMode, projectId, onError, editorSession = false }: AppRunnerProps) {
+export function AppRunner({ code, files, entry, version, engineMode, projectId, onError, onReady, editorSession = false }: AppRunnerProps) {
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
   const [srcDoc, setSrcDoc] = useState("");
   const [bundling, setBundling] = useState(false);
+  const [health, setHealth] = useState<"checking" | "healthy" | "error">("checking");
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const onErrorRef = useRef(onError);
+  const onReadyRef = useRef(onReady);
   onErrorRef.current = onError;
-  const reportPreviewError = useCallback((message: string) => onErrorRef.current?.(message), []);
-  usePreviewBridge(iframeRef, projectId, reportPreviewError, editorSession);
+  onReadyRef.current = onReady;
+  const reportPreviewError = useCallback((message: string) => {
+    setHealth("error");
+    onErrorRef.current?.(message);
+  }, []);
+  const reportPreviewReady = useCallback(() => {
+    setHealth("healthy");
+    onReadyRef.current?.();
+  }, []);
+  usePreviewBridge(iframeRef, projectId, reportPreviewError, editorSession, reportPreviewReady);
 
   const hasFiles = Array.isArray(files) && files.length > 0;
   const hasContent = hasFiles || !!code;
@@ -314,6 +326,7 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setHealth("checking");
     if (hasFiles) {
       setBundling(true);
       const list = files!;
@@ -363,8 +376,11 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
       )}
       <div className="flex items-center justify-between border-b px-3 py-2">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="flex h-2 w-2 rounded-full bg-emerald-500" />
-          App em execução
+          <span className={cn(
+            "flex h-2 w-2 rounded-full",
+            health === "healthy" ? "bg-emerald-500" : health === "error" ? "bg-red-500" : "animate-pulse bg-amber-400"
+          )} />
+          {health === "healthy" ? "Preview aprovado" : health === "error" ? "Erro no preview" : "Verificando preview…"}
           {engineMode && (
             <span
               className={cn(

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, type RefObject } from "react";
+import type { RuntimeAuditIssue, RuntimeAuditReport } from "@/lib/preview/runtime-audit";
 
 type BridgeKind = "data" | "upload" | "email" | "view" | "auth" | "voice";
 const METHODS: Record<BridgeKind, string[]> = {
@@ -36,13 +37,14 @@ function preferredSpeechVoice(voices: SpeechSynthesisVoice[], lang: string): Spe
 export function usePreviewBridge(
   iframeRef: RefObject<HTMLIFrameElement>, projectId?: string | null,
   onError?: (message: string) => void, allowEditorSession = false,
-  onReady?: () => void
+  onReady?: () => void, onAudit?: (report: RuntimeAuditReport) => void
 ) {
   useEffect(() => {
     let activeRecognition: any = null;
     let activeSpeechRequest = 0;
     let pendingPreviewError: number | null = null;
     let pendingPreviewReady: number | null = null;
+    let auditBlocked = false;
     const clearPendingPreviewError = () => {
       if (pendingPreviewError !== null) window.clearTimeout(pendingPreviewError);
       pendingPreviewError = null;
@@ -146,12 +148,60 @@ export function usePreviewBridge(
       if (event.data.__nx_ready === true) {
         clearPendingPreviewError();
         clearPendingPreviewReady();
+        if (auditBlocked) return;
         // A montagem inicial pode disparar efeitos assíncronos que falham logo
         // depois do primeiro render. Só aprovamos após uma pequena janela estável.
         pendingPreviewReady = window.setTimeout(() => {
           pendingPreviewReady = null;
           onReady?.();
         }, 2000);
+        return;
+      }
+      if (event.data.__nx_audit && typeof event.data.__nx_audit === "object") {
+        const raw = event.data.__nx_audit as any;
+        const issues: RuntimeAuditIssue[] = Array.isArray(raw.issues)
+          ? raw.issues.slice(0, 30).map((item: any) => ({
+              code: String(item?.code || "audit_issue").slice(0, 80),
+              severity: item?.severity === "error" ? "error" : "warning",
+              message: String(item?.message || "Falha de qualidade detectada.").slice(0, 240),
+              selector: item?.selector ? String(item.selector).slice(0, 120) : undefined,
+            }))
+          : [];
+        const report: RuntimeAuditReport = {
+          issues,
+          stats: {
+            buttons: Number(raw.stats?.buttons) || 0,
+            links: Number(raw.stats?.links) || 0,
+            forms: Number(raw.stats?.forms) || 0,
+            inputs: Number(raw.stats?.inputs) || 0,
+            images: Number(raw.stats?.images) || 0,
+          },
+          viewport: {
+            width: Number(raw.viewport?.width) || 0,
+            height: Number(raw.viewport?.height) || 0,
+            overflowX: Number(raw.viewport?.overflowX) || 0,
+          },
+          checkedAt: Number(raw.checkedAt) || Date.now(),
+        };
+        const blocking = issues.filter((issue) => issue.severity === "error");
+        const wasAuditBlocked = auditBlocked;
+        auditBlocked = blocking.length > 0;
+        onAudit?.(report);
+        if (blocking.length && !wasAuditBlocked) {
+          clearPendingPreviewReady();
+          const detail = blocking.slice(0, 4).map((issue) => `${issue.code}: ${issue.message}`).join(" | ");
+          onError?.(`Falha na verificação funcional do preview: ${detail}`);
+        } else if (!blocking.length && wasAuditBlocked) {
+          // O hook permanece montado entre versões do iframe. Se a versão
+          // anterior falhou, uma auditoria limpa da nova versão precisa reabrir
+          // a janela de estabilidade mesmo que o primeiro __nx_ready tenha sido
+          // ignorado enquanto o bloqueio antigo ainda estava ativo.
+          clearPendingPreviewReady();
+          pendingPreviewReady = window.setTimeout(() => {
+            pendingPreviewReady = null;
+            onReady?.();
+          }, 2000);
+        }
         return;
       }
       if (typeof event.data.__nx_error === "string") {
@@ -222,5 +272,5 @@ export function usePreviewBridge(
       activeRecognition = null;
       try { window.speechSynthesis?.cancel(); } catch {}
     };
-  }, [allowEditorSession, iframeRef, onError, onReady, projectId]);
+  }, [allowEditorSession, iframeRef, onAudit, onError, onReady, projectId]);
 }

@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import type { AppFile, EngineMode } from "@/lib/engine/app-types";
 import { bundleApp, buildBundledSrcDoc } from "@/lib/preview/bundler";
 import { adGlobalScript } from "@/lib/preview/ad-global";
+import { runtimeAuditSource, type RuntimeAuditReport } from "@/lib/preview/runtime-audit";
 import { usePreviewBridge } from "@/components/preview/use-preview-bridge";
 
 interface AppRunnerProps {
@@ -36,6 +37,8 @@ interface AppRunnerProps {
   onError?: (message: string) => void;
   /** chamado somente depois que o React montou sem erro no iframe. */
   onReady?: () => void;
+  /** relatório de interações, acessibilidade básica e responsividade. */
+  onAudit?: (report: RuntimeAuditReport) => void;
   editorSession?: boolean;
 }
 
@@ -45,6 +48,7 @@ function buildSrcDoc(code: string, projectId?: string | null): string {
   // que não existe no navegador sem bundler.
   const codeJson = JSON.stringify(code);
   const adScript = adGlobalScript(projectId);
+  const auditSource = runtimeAuditSource();
   return `<!doctype html>
 <html lang="pt-BR">
 <head>
@@ -79,6 +83,7 @@ ${adScript}
     if (_nxReported) return; _nxReported = true;
     try { _nxHost.postMessage({ __nx_error: String(msg).slice(0, 800) }, '*'); } catch(e){}
   }
+  ${auditSource}
   // Proteção: impede o código do preview de tocar na página pai / storage do app.
   try { Object.defineProperty(window, 'parent', { get: function(){ return window; } }); } catch(e){}
   try { Object.defineProperty(window, 'top', { get: function(){ return window; } }); } catch(e){}
@@ -103,7 +108,7 @@ ${adScript}
       var App = factory(React, ReactDOM);
       if (!App) { showError('O código não definiu um componente App.'); nxReport('O código não definiu um componente App.'); return; }
       ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-      setTimeout(nxReady, 500);
+      setTimeout(function(){ nxPostAudit(); nxReady(); }, 500);
     } catch (err) {
       var m = (err && err.message) || String(err);
       showError(m); nxReport(m);
@@ -159,6 +164,7 @@ function buildSrcDocMulti(files: AppFile[], entry: string, projectId?: string | 
   const filesJson = JSON.stringify(map);
   const entryJson = JSON.stringify(entry.replace(/^\.?\//, ""));
   const adScript = adGlobalScript(projectId);
+  const auditSource = runtimeAuditSource();
   const externals = detectExternals(files);
   const extScripts = externals
     .map((n) => `<script src="${EXTERNAL_LIBS[n].url}" crossorigin></script>`)
@@ -188,6 +194,7 @@ ${adScript}
   var _nxReported = false;
   function nxReady(){ if(_nxReported) return; try { _nxHost.postMessage({ __nx_ready: true }, '*'); } catch(e){} }
   function nxReport(msg){ if(_nxReported) return; _nxReported=true; try{ _nxHost.postMessage({ __nx_error:String(msg).slice(0,800) }, '*'); }catch(e){} }
+  ${auditSource}
   try { Object.defineProperty(window, 'parent', { get: function(){ return window; } }); } catch(e){}
   try { Object.defineProperty(window, 'top', { get: function(){ return window; } }); } catch(e){}
   window.addEventListener('error', function(e){ showError(e.message); nxReport(e.message); });
@@ -287,7 +294,7 @@ ${adScript}
       var App = mod && (mod.default || mod.App);
       if(typeof App !== 'function'){ var m2='O arquivo de entrada ('+ENTRY+') precisa ter um export default de um componente React.'; showError(m2); nxReport(m2); return; }
       ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-      setTimeout(nxReady, 500);
+      setTimeout(function(){ nxPostAudit(); nxReady(); }, 500);
     } catch(err){ var m=(err && err.message) || String(err); showError(m); nxReport(m); }
   })();
 </script>
@@ -295,7 +302,7 @@ ${adScript}
 </html>`;
 }
 
-export function AppRunner({ code, files, entry, version, engineMode, projectId, onError, onReady, editorSession = false }: AppRunnerProps) {
+export function AppRunner({ code, files, entry, version, engineMode, projectId, onError, onReady, onAudit, editorSession = false }: AppRunnerProps) {
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -303,20 +310,60 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
   const [srcDoc, setSrcDoc] = useState("");
   const [bundling, setBundling] = useState(false);
   const [health, setHealth] = useState<"checking" | "healthy" | "error">("checking");
+  const [auditPhase, setAuditPhase] = useState<"desktop" | "mobile" | "done">("desktop");
+  const [auditReport, setAuditReport] = useState<RuntimeAuditReport | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const onErrorRef = useRef(onError);
   const onReadyRef = useRef(onReady);
+  const onAuditRef = useRef(onAudit);
+  const desktopAuditRef = useRef<RuntimeAuditReport | null>(null);
+  const mobileAuditRef = useRef<RuntimeAuditReport | null>(null);
+  const pendingReadyRef = useRef(false);
   onErrorRef.current = onError;
   onReadyRef.current = onReady;
+  onAuditRef.current = onAudit;
   const reportPreviewError = useCallback((message: string) => {
     setHealth("error");
     onErrorRef.current?.(message);
   }, []);
   const reportPreviewReady = useCallback(() => {
+    if (!desktopAuditRef.current || !mobileAuditRef.current) {
+      pendingReadyRef.current = true;
+      return;
+    }
     setHealth("healthy");
     onReadyRef.current?.();
   }, []);
-  usePreviewBridge(iframeRef, projectId, reportPreviewError, editorSession, reportPreviewReady);
+  const reportPreviewAudit = useCallback((report: RuntimeAuditReport) => {
+    if (report.viewport.width > 500 && !desktopAuditRef.current) {
+      desktopAuditRef.current = report;
+      setAuditPhase("mobile");
+      return;
+    }
+    if (report.viewport.width <= 500) mobileAuditRef.current = report;
+    else if (!desktopAuditRef.current) desktopAuditRef.current = report;
+
+    if (!desktopAuditRef.current || !mobileAuditRef.current) return;
+    const issueMap = new Map<string, RuntimeAuditReport["issues"][number]>();
+    for (const issue of desktopAuditRef.current.issues.concat(mobileAuditRef.current.issues)) {
+      issueMap.set(`${issue.severity}:${issue.code}:${issue.message}`, issue);
+    }
+    const combined: RuntimeAuditReport = {
+      ...desktopAuditRef.current,
+      issues: Array.from(issueMap.values()),
+      viewport: mobileAuditRef.current.viewport,
+      checkedAt: Math.max(desktopAuditRef.current.checkedAt, mobileAuditRef.current.checkedAt),
+    };
+    setAuditReport(combined);
+    setAuditPhase("done");
+    onAuditRef.current?.(combined);
+    if (pendingReadyRef.current && !combined.issues.some((issue) => issue.severity === "error")) {
+      pendingReadyRef.current = false;
+      setHealth("healthy");
+      onReadyRef.current?.();
+    }
+  }, []);
+  usePreviewBridge(iframeRef, projectId, reportPreviewError, editorSession, reportPreviewReady, reportPreviewAudit);
 
   const hasFiles = Array.isArray(files) && files.length > 0;
   const hasContent = hasFiles || !!code;
@@ -327,6 +374,11 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
     let cancelled = false;
     setLoading(true);
     setHealth("checking");
+    setAuditPhase("desktop");
+    setAuditReport(null);
+    desktopAuditRef.current = null;
+    mobileAuditRef.current = null;
+    pendingReadyRef.current = false;
     if (hasFiles) {
       setBundling(true);
       const list = files!;
@@ -381,6 +433,14 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
             health === "healthy" ? "bg-emerald-500" : health === "error" ? "bg-red-500" : "animate-pulse bg-amber-400"
           )} />
           {health === "healthy" ? "Preview aprovado" : health === "error" ? "Erro no preview" : "Verificando preview…"}
+          {auditReport && auditReport.issues.some((issue) => issue.severity === "warning") && (
+            <span
+              className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
+              title={auditReport.issues.filter((issue) => issue.severity === "warning").map((issue) => issue.message).join("\n")}
+            >
+              {auditReport.issues.filter((issue) => issue.severity === "warning").length} avisos de qualidade
+            </span>
+          )}
           {engineMode && (
             <span
               className={cn(
@@ -455,7 +515,7 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
           <div
             className={cn(
               "mx-auto h-full overflow-hidden rounded-xl border bg-white shadow-xl transition-all",
-              device === "mobile" ? "max-w-[390px]" : "max-w-5xl"
+              auditPhase === "mobile" || (auditPhase === "done" && device === "mobile") ? "max-w-[390px]" : "max-w-5xl"
             )}
           >
             {(loading || bundling) && (

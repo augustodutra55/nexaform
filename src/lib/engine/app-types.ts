@@ -43,6 +43,27 @@ export interface AppCode {
   provider?: Provider;
 }
 
+export type VisualProfileId =
+  | "premium-brand"
+  | "editorial-luxury"
+  | "conversion-commerce"
+  | "product-system"
+  | "playful-learning"
+  | "immersive-3d";
+
+export interface VisualProfile {
+  id: VisualProfileId;
+  label: string;
+  style: string;
+  layout: string;
+  motion: "subtle" | "expressive";
+  allow3D: boolean;
+  require3DFallback: boolean;
+  allowVideo: boolean;
+  maxExternalPackages: number;
+  performanceRules: string[];
+}
+
 /** Contrato de produto criado antes de chamar a IA. */
 export interface GenerationPlan {
   kind: "site" | "app";
@@ -50,6 +71,7 @@ export interface GenerationPlan {
   audience: string;
   requiredCapabilities: string[];
   visualDirection: string[];
+  visualProfile: VisualProfile;
   acceptanceCriteria: string[];
 }
 

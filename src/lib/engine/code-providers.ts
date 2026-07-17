@@ -5,12 +5,14 @@
  * Com roteamento de modelo (econômico/premium) e captura de custo real, para
  * o Studio operar barato.
  */
-import { AppFile, AppGenerationResult, codeStats, projectStats } from "./app-types";
+import { AppFile, AppGenerationResult, ProjectQualityReport, codeStats, projectStats } from "./app-types";
 import { CODE_SYSTEM_PROMPT, CODE_REFINE_SYSTEM_PROMPT, buildCodeUserPrompt } from "./code-prompts";
 import { matchTemplate } from "./code-templates";
 import { CostMode, pickTier, modelFor, estimateCost, isFunctionalRefinement } from "./models";
 import type { PromptAttachment } from "./prompt-attachments";
 import { applyFileOperations, parseOperationBlocks } from "./operation-blocks";
+import { buildGenerationPlan, renderGenerationPlan } from "./generation-plan";
+import { issueKey, validateAppProject } from "./project-validator";
 
 interface Args {
   message: string;
@@ -174,7 +176,8 @@ function maxOutputTokens(a: Args): number {
 }
 
 function textPromptFor(a: Args): string {
-  const base = buildCodeUserPrompt(a.message, currentOf(a));
+  const generationPlan = buildGenerationPlan(a.message);
+  const base = `${renderGenerationPlan(generationPlan)}\n\n${buildCodeUserPrompt(a.message, currentOf(a))}`;
   const textAttachments = (a.attachments ?? []).filter((attachment) => attachment.kind === "text");
   if (!textAttachments.length) return base;
   let remaining = 160_000;
@@ -186,6 +189,50 @@ function textPromptFor(a: Args): string {
     blocks.push(`--- ANEXO DO USUÁRIO: ${attachment.name} ---\n${content}\n--- FIM DO ANEXO ---`);
   }
   return `${base}\n\nUse os anexos abaixo como referência fiel para esta geração. Não invente conteúdo que contradiga os arquivos.\n\n${blocks.join("\n\n")}`;
+}
+
+function assessCandidate(result: AppGenerationResult, a: Args, repaired = false): ProjectQualityReport {
+  const generationPlan = buildGenerationPlan(a.message);
+  const report = validateAppProject(result.app, generationPlan, repaired);
+
+  // Um refinamento não deve ser rejeitado por uma falha antiga que ele não
+  // introduziu. Só erros novos bloqueiam a edição; os antigos permanecem
+  // visíveis na telemetria para uma correção futura.
+  if (a.currentFiles?.length) {
+    const entry = a.currentFiles.find((file) => /(^|\/)App\.(jsx|tsx|js|ts)$/.test(file.path))?.path ?? a.currentFiles[0].path;
+    const baseline = validateAppProject({ kind: "app", name: a.name, description: "", files: a.currentFiles, entry }, generationPlan);
+    const baselineKeys = new Set(baseline.errors.map(issueKey));
+    const newErrors = report.errors.filter((value) => !baselineKeys.has(issueKey(value)));
+    report.errors = newErrors;
+    report.valid = newErrors.length === 0;
+    report.score = Math.max(0, 100 - newErrors.length * 20 - report.warnings.length * 4);
+  }
+
+  result.generationPlan = generationPlan;
+  result.quality = report;
+  console.info("[code-engine] quality", JSON.stringify({
+    provider: result.provider,
+    model: result.model,
+    valid: report.valid,
+    score: report.score,
+    repaired: report.repaired,
+    errors: report.errors.map((value) => ({ code: value.code, path: value.path })),
+    warnings: report.warnings.map((value) => ({ code: value.code, path: value.path })),
+  }));
+  return report;
+}
+
+function qualityRepairInstruction(a: Args, report: ProjectQualityReport): string {
+  const failures = report.errors.map((value) => `- ${value.path ? `${value.path}: ` : ""}${value.message}`).join("\n");
+  const format = a.currentFiles?.length || a.currentCode
+    ? "Reenvie somente AD_PATCH/AD_FILE/AD_DELETE válidos contra o projeto original, seguidos de AD_REPLY."
+    : "Reenvie o projeto completo no JSON files obrigatório, sem Markdown nem texto fora do JSON.";
+  return [
+    "QUALITY GATE: o código anterior foi recusado antes de ser salvo.",
+    failures,
+    "Corrija somente essas falhas, preserve o escopo e confira todos os imports relativos.",
+    format,
+  ].join("\n\n");
 }
 
 function claudeUserContent(a: Args): any {
@@ -301,7 +348,27 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
     const cost = estimateCost(model, data?.usage?.input_tokens ?? 0, data?.usage?.output_tokens ?? 0);
     if (!text) { diag.push(`Claude: ${model} respondeu vazio.`); return null; }
     const r = parse(text, "claude", cost, model, a.currentFiles ?? null);
-    if (r) return r;
+    if (r) {
+      const quality = assessCandidate(r, a);
+      if (quality.valid) return r;
+      diag.push(`Claude: ${model} gerou código estruturalmente inválido; quality gate iniciou uma correção.`);
+      const qualityRes = await send([
+        ...initialMessages,
+        { role: "assistant", content: text.slice(0, 100_000) },
+        { role: "user", content: qualityRepairInstruction(a, quality) },
+      ], providerTimeoutMs(a, true));
+      if (!qualityRes.ok) {
+        diag.push(`Claude: correção estrutural com ${model} → HTTP ${qualityRes.status}. ${await errDetail(qualityRes)}`);
+        return null;
+      }
+      const qualityData = await qualityRes.json();
+      const qualityText = responseText(qualityData?.content?.[0]?.text ?? qualityData?.content);
+      const qualityCost = estimateCost(model, qualityData?.usage?.input_tokens ?? 0, qualityData?.usage?.output_tokens ?? 0);
+      const corrected = qualityText ? parse(qualityText, "claude", cost + qualityCost, model, a.currentFiles ?? null) : null;
+      if (corrected && assessCandidate(corrected, a, true).valid) return corrected;
+      diag.push(`Claude: ${model} não passou no quality gate após uma correção automática.`);
+      return null;
+    }
 
     const isRefinement = !!(a.currentFiles?.length || a.currentCode);
     const shouldRepair = isRefinement;
@@ -328,6 +395,10 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
       return null;
     }
     const repaired = parse(repairText, "claude", cost + repairCost, model, a.currentFiles ?? null);
+    if (repaired && !assessCandidate(repaired, a, true).valid) {
+      diag.push(`Claude: resposta de ${model} foi interpretada, mas falhou no quality gate após a recuperação.`);
+      return null;
+    }
     if (!repaired) diag.push(`Claude: resposta de ${model} continuou inválida após a recuperação automática (${responseFormatSummary(repairText)}).`);
     return repaired;
   } catch (e) {
@@ -372,7 +443,29 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
         : estimateCost(model, data?.usage?.prompt_tokens ?? 0, data?.usage?.completion_tokens ?? 0);
     if (!text) { diag.push(`OpenRouter: ${model} respondeu vazio.`); return null; }
     const r = parse(text, "openrouter", cost, model, a.currentFiles ?? null);
-    if (r) return r;
+    if (r) {
+      const quality = assessCandidate(r, a);
+      if (quality.valid) return r;
+      diag.push(`OpenRouter: ${model} gerou código estruturalmente inválido; quality gate iniciou uma correção.`);
+      const qualityRes = await send([
+        ...initialMessages,
+        { role: "assistant", content: text.slice(0, 100_000) },
+        { role: "user", content: qualityRepairInstruction(a, quality) },
+      ], providerTimeoutMs(a, true));
+      if (!qualityRes.ok) {
+        diag.push(`OpenRouter: correção estrutural com ${model} → HTTP ${qualityRes.status}. ${await errDetail(qualityRes)}`);
+        return null;
+      }
+      const qualityData = await qualityRes.json();
+      const qualityText = responseText(qualityData?.choices?.[0]?.message?.content);
+      const qualityCost = typeof qualityData?.usage?.cost === "number"
+        ? qualityData.usage.cost
+        : estimateCost(model, qualityData?.usage?.prompt_tokens ?? 0, qualityData?.usage?.completion_tokens ?? 0);
+      const corrected = qualityText ? parse(qualityText, "openrouter", cost + qualityCost, model, a.currentFiles ?? null) : null;
+      if (corrected && assessCandidate(corrected, a, true).valid) return corrected;
+      diag.push(`OpenRouter: ${model} não passou no quality gate após uma correção automática.`);
+      return null;
+    }
 
     const isRefinement = !!(a.currentFiles?.length || a.currentCode);
     const shouldRepair = isRefinement;
@@ -403,6 +496,10 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
       return null;
     }
     const repaired = parse(repairText, "openrouter", cost + repairCost, model, a.currentFiles ?? null);
+    if (repaired && !assessCandidate(repaired, a, true).valid) {
+      diag.push(`OpenRouter: resposta de ${model} foi interpretada, mas falhou no quality gate após a recuperação.`);
+      return null;
+    }
     if (!repaired) diag.push(`OpenRouter: resposta de ${model} continuou inválida após a recuperação automática (${responseFormatSummary(repairText)}).`);
     return repaired;
   } catch (e) {

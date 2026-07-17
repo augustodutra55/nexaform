@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout, Mic, Square, Cpu, FileCode2, AlertTriangle, Paperclip, X, Image as ImageIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AppSchema, GenerationResult } from "@/lib/engine/types";
-import { AppFile, AppGenerationResult, CodeStats, EngineMode, looksLikeApp } from "@/lib/engine/app-types";
+import { AppFile, AppGenerationResult, CodeStats, EngineMode, MediaGenerationReport, looksLikeApp } from "@/lib/engine/app-types";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -75,6 +75,7 @@ interface GenEvidence {
   model?: string;
   stats?: CodeStats;
   cost?: number;
+  media?: MediaGenerationReport;
 }
 
 export type ProjectMode = "empty" | "site" | "app";
@@ -479,6 +480,7 @@ export function ChatPanel({
             model: data.model,
             stats: data.stats,
             cost: typeof data.cost === "number" ? data.cost : undefined,
+            media: data.media,
           };
           setLastGen(evidence);
           onEngineMode?.(evidence.engineMode);
@@ -548,6 +550,7 @@ export function ChatPanel({
           model: data.model,
           stats: data.stats,
           cost: typeof data.cost === "number" ? data.cost : undefined,
+          media: data.media,
         };
         setLastGen(ev);
         onEngineMode?.(ev.engineMode);
@@ -720,6 +723,12 @@ export function ChatPanel({
               {lastGen.stats.files > 1 ? `${lastGen.stats.files} arquivos · ` : ""}
               {lastGen.stats.lines} linhas · {lastGen.stats.components} comp. · {lastGen.stats.hooks} hooks ·{" "}
               {lastGen.stats.handlers} eventos
+            </span>
+          )}
+          {lastGen.media && (lastGen.media.requested > 0 || lastGen.media.reused > 0 || lastGen.media.videoAssetsAvailable > 0) && (
+            <span className="flex items-center gap-1 opacity-80" title={`${lastGen.media.fallbacks} fallback(s), ${lastGen.media.unresolved} pendência(s)`}>
+              <ImageIcon className="h-3 w-3" />
+              mídia: {lastGen.media.generated} gerada · {lastGen.media.reused} reutilizada
             </span>
           )}
           {typeof lastGen.cost === "number" && lastGen.cost > 0 && (

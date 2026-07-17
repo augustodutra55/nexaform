@@ -5,7 +5,7 @@
  * Com roteamento de modelo (econômico/premium) e captura de custo real, para
  * o Studio operar barato.
  */
-import { AppFile, AppGenerationResult, ProjectQualityReport, codeStats, projectStats } from "./app-types";
+import { AppFile, AppGenerationResult, GenerationMediaAsset, ProjectQualityReport, codeStats, projectStats } from "./app-types";
 import { CODE_SYSTEM_PROMPT, CODE_REFINE_SYSTEM_PROMPT, buildCodeUserPrompt } from "./code-prompts";
 import { matchTemplate } from "./code-templates";
 import { CostMode, pickTier, modelFor, estimateCost, isFunctionalRefinement } from "./models";
@@ -29,6 +29,8 @@ interface Args {
   allowTemplate?: boolean;
   /** Referências locais escolhidas pelo usuário no compositor do AD Studio. */
   attachments?: PromptAttachment[];
+  /** Arquivos confiáveis já enviados à Central de Mídia do projeto. */
+  mediaAssets?: GenerationMediaAsset[];
 }
 
 /** Normaliza e valida os arquivos devolvidos pelo modelo. */
@@ -175,9 +177,29 @@ function maxOutputTokens(a: Args): number {
   return 24_000;
 }
 
+function generationPlanFor(a: Args) {
+  return buildGenerationPlan(a.message, a.mediaAssets ?? []);
+}
+
+function mediaContextFor(a: Args): string {
+  const assets = a.mediaAssets ?? [];
+  const lines = assets.slice(0, 30).map((asset) =>
+    `- ${asset.type.indexOf("video/") === 0 ? "VÍDEO" : "IMAGEM"}: ${asset.name} | ${asset.url}`
+  );
+  const wantsVideo = generationPlanFor(a).visualProfile.allowVideo;
+  return [
+    "=== CENTRAL DE MÍDIA DO PROJETO ===",
+    lines.length ? lines.join("\n") : "Nenhum arquivo enviado ainda.",
+    "Use uma URL acima somente quando o nome/conteúdo corresponder ao bloco. Não invente URLs, nomes de arquivo ou vídeos de demonstração.",
+    wantsVideo && !assets.some((asset) => asset.type.indexOf("video/") === 0)
+      ? "O usuário pediu vídeo, mas ainda não enviou um. Crie um <video src=\"\" data-ad-media=\"video\" aria-label=\"descrição contextual\" poster=\"ADIMG: contextual poster in English\" controls> responsivo, com uma mensagem visível próxima orientando a enviar o vídeo pela aba Mídia. Não use URL fictícia."
+      : "Para vídeo, use exclusivamente uma URL de VÍDEO listada acima e mantenha controls, poster e aria-label.",
+  ].join("\n");
+}
+
 function textPromptFor(a: Args): string {
-  const generationPlan = buildGenerationPlan(a.message);
-  const base = `${renderGenerationPlan(generationPlan)}\n\n${buildCodeUserPrompt(a.message, currentOf(a))}`;
+  const generationPlan = generationPlanFor(a);
+  const base = `${renderGenerationPlan(generationPlan)}\n\n${mediaContextFor(a)}\n\n${buildCodeUserPrompt(a.message, currentOf(a))}`;
   const textAttachments = (a.attachments ?? []).filter((attachment) => attachment.kind === "text");
   if (!textAttachments.length) return base;
   let remaining = 160_000;
@@ -192,7 +214,7 @@ function textPromptFor(a: Args): string {
 }
 
 function assessCandidate(result: AppGenerationResult, a: Args, repaired = false): ProjectQualityReport {
-  const generationPlan = buildGenerationPlan(a.message);
+  const generationPlan = generationPlanFor(a);
   const report = validateAppProject(result.app, generationPlan, repaired);
 
   // Um refinamento não deve ser rejeitado por uma falha antiga que ele não

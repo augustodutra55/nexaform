@@ -1,4 +1,4 @@
-import type { GenerationPlan, VisualProfile, VisualProfileId } from "./app-types";
+import type { GenerationMediaAsset, GenerationPlan, VisualProfile, VisualProfileId } from "./app-types";
 
 function has(text: string, pattern: RegExp): boolean {
   return pattern.test(text);
@@ -95,13 +95,15 @@ export function visualProfileFor(message: string, kind: "site" | "app"): VisualP
  * É propositalmente determinístico: melhora consistência sem uma segunda chamada,
  * sem custo adicional e sem consumir a janela da Vercel.
  */
-export function buildGenerationPlan(message: string): GenerationPlan {
+export function buildGenerationPlan(message: string, mediaAssets: GenerationMediaAsset[] = []): GenerationPlan {
   const normalized = message.toLowerCase();
   const isSite = has(normalized, /\b(site|landing|página|pagina|institucional|portf[oó]lio|vitrine|one.?page)\b/);
   const kind: "site" | "app" = isSite ? "site" : "app";
   const requiredCapabilities: string[] = [];
   const visualDirection: string[] = [];
   const visualProfile = visualProfileFor(message, kind);
+  const imageCount = mediaAssets.filter((asset) => asset.type.indexOf("image/") === 0).length;
+  const videoCount = mediaAssets.filter((asset) => asset.type.indexOf("video/") === 0).length;
 
   if (has(normalized, /\b(login|cadastro|conta|usu[aá]rio|autentica)/)) requiredCapabilities.push("autenticação e estados de sessão");
   if (has(normalized, /\b(formul[aá]rio|lead|contato|orçamento|orcamento|agendamento)/)) requiredCapabilities.push("formulários validados com feedback visível");
@@ -125,6 +127,12 @@ export function buildGenerationPlan(message: string): GenerationPlan {
     requiredCapabilities,
     visualDirection,
     visualProfile,
+    media: {
+      imageCount,
+      videoCount,
+      videoMode: visualProfile.allowVideo ? (videoCount > 0 ? "uploaded" : "placeholder") : "none",
+      videoUrls: mediaAssets.filter((asset) => asset.type.indexOf("video/") === 0).map((asset) => asset.url),
+    },
     acceptanceCriteria: [
       "projeto multi-arquivo com App.jsx fino e imports resolvíveis",
       "fluxo principal utilizável, sem botões decorativos ou telas sem saída",
@@ -147,6 +155,7 @@ export function renderGenerationPlan(plan: GenerationPlan): string {
     `Estilo: ${plan.visualProfile.style}`,
     `Layout: ${plan.visualProfile.layout}`,
     `Motion: ${plan.visualProfile.motion}; 3D: ${plan.visualProfile.allow3D ? "permitido com fallback" : "não usar"}; vídeo: ${plan.visualProfile.allowVideo ? "solicitado" : "não inserir por conta própria"}`,
+    `Mídia disponível: ${plan.media.imageCount} imagem(ns), ${plan.media.videoCount} vídeo(s); modo de vídeo: ${plan.media.videoMode}.`,
     `Orçamento: no máximo ${plan.visualProfile.maxExternalPackages} pacotes externos; ${plan.visualProfile.performanceRules.join("; ")}`,
     `Aceite: ${plan.acceptanceCriteria.join("; ")}`,
     "Implemente e confira cada item antes de responder. Não declare concluído algo que não esteja no código.",

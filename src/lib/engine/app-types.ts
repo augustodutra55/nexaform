@@ -72,7 +72,31 @@ export interface GenerationPlan {
   requiredCapabilities: string[];
   visualDirection: string[];
   visualProfile: VisualProfile;
+  /** Mídia já disponível no projeto e regras para não inventar arquivos. */
+  media: {
+    imageCount: number;
+    videoCount: number;
+    videoMode: "uploaded" | "placeholder" | "none";
+    videoUrls: string[];
+  };
   acceptanceCriteria: string[];
+}
+
+/** Referência server-side enxuta de um arquivo da Central de Mídia. */
+export interface GenerationMediaAsset {
+  url: string;
+  name: string;
+  type: string;
+}
+
+/** Telemetria do pós-processamento de mídia da geração. */
+export interface MediaGenerationReport {
+  requested: number;
+  generated: number;
+  reused: number;
+  fallbacks: number;
+  unresolved: number;
+  videoAssetsAvailable: number;
 }
 
 export interface ProjectQualityIssue {

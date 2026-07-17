@@ -78,11 +78,11 @@ export function findProjectMedia(files: AppFile[], projectName: string): Project
   const seen = new Set<string>();
 
   for (const file of files) {
-    const tagPattern = /<(img|video|source)\b[^>]*\bsrc\s*=\s*(?:["']([^"']+)["']|\{\s*["']([^"']+)["']\s*\})[^>]*>/gi;
+    const tagPattern = /<(img|video|source)\b[^>]*\bsrc\s*=\s*(?:["']([^"']*)["']|\{\s*["']([^"']*)["']\s*\})[^>]*>/gi;
     let match: RegExpExecArray | null;
     while ((match = tagPattern.exec(file.content))) {
-      const source = match[2] || match[3];
-      if (!source) continue;
+      const source = match[2] ?? match[3];
+      if (source === undefined || (!source && !/^(video|source)$/i.test(match[1]))) continue;
       const relative = match[0].indexOf(source);
       const offset = match.index + Math.max(relative, 0);
       const key = `${file.path}:${offset}:${source}`;

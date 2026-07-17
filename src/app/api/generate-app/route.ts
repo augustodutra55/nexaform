@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateAppWithProviders } from "@/lib/engine/code-providers";
 import { isOwner, resolvePlan } from "@/lib/access";
-import type { AppCode } from "@/lib/engine/app-types";
+import type { AppCode, GenerationMediaAsset, MediaGenerationReport } from "@/lib/engine/app-types";
 import { authorizeProjectOwner, consumeRateLimit } from "@/lib/engine/data-guard";
 import { finalizeGeneration, reserveGeneration } from "@/lib/engine/generation-usage";
 import { sanitizePromptAttachments } from "@/lib/engine/prompt-attachments";
@@ -175,61 +175,126 @@ function stockPrompt(url: string, source: string, offset: number, appName: strin
     .slice(0, 260);
 }
 
+function promptKey(prompt: string): string {
+  return cleanImageContext(prompt).toLowerCase();
+}
+
+function emptyMediaReport(videoAssetsAvailable = 0): MediaGenerationReport {
+  return { requested: 0, generated: 0, reused: 0, fallbacks: 0, unresolved: 0, videoAssetsAvailable };
+}
+
 /** Troca marcadores ADIMG: por imagens custom (via OpenRouter) armazenadas no
- *  bucket. Muta o `app`. Devolve quantas imagens reais foram geradas. */
+ *  bucket. Muta o `app` e devolve telemetria sem bloquear a geração. */
 async function resolveAiImages(
   app: AppCode,
   supabase: any,
-  opts: { userKey: string | null; userProvider: string | null; projectId: string; budgetMs?: number }
-): Promise<number> {
+  opts: {
+    userKey: string | null;
+    userProvider: string | null;
+    projectId: string;
+    budgetMs?: number;
+    trustedAssets?: GenerationMediaAsset[];
+  }
+): Promise<MediaGenerationReport> {
   const texts: string[] = [];
   if (Array.isArray(app.files)) app.files.forEach((f) => texts.push(f.content));
   if (typeof app.code === "string") texts.push(app.code);
+  const videoAssetsAvailable = (opts.trustedAssets ?? []).filter((asset) => asset.type.indexOf("video/") === 0).length;
+  const report = emptyMediaReport(videoAssetsAvailable);
+  const trustedUrls = (opts.trustedAssets ?? []).map((asset) => asset.url);
+  for (const text of texts) {
+    for (const url of trustedUrls) {
+      if (url && text.indexOf(url) >= 0) report.reused += 1;
+    }
+  }
   const hasImg = texts.some((t) => new RegExp(IMG_MARKER.source).test(t) || new RegExp(STOCK_IMAGE.source).test(t));
-  if (!hasImg) return 0;
+  if (!hasImg) return report;
 
-  const prompts: string[] = [];
+  const prompts = new Map<string, string>();
   for (const t of texts) {
     let m: RegExpExecArray | null;
     const reA = new RegExp(IMG_MARKER.source, "g");
     while ((m = reA.exec(t))) {
       const prompt = m[1].trim();
-      if (prompt && !prompts.includes(prompt)) prompts.push(prompt);
+      if (prompt) {
+        report.requested += 1;
+        prompts.set(promptKey(prompt), prompt);
+      }
     }
     const reStock = new RegExp(STOCK_IMAGE.source, "g");
     while ((m = reStock.exec(t))) {
       const prompt = stockPrompt(m[0], t, m.index, app.name);
-      if (prompt && !prompts.includes(prompt)) prompts.push(prompt);
+      if (prompt) {
+        report.requested += 1;
+        prompts.set(promptKey(prompt), prompt);
+      }
     }
   }
 
   const map = new Map<string, string>();
   if (opts.userKey && opts.userProvider === "openrouter") {
     await Promise.all(
-      prompts.slice(0, MAX_IMAGES).map(async (prompt) => {
+      Array.from(prompts.entries()).slice(0, MAX_IMAGES).map(async ([key, prompt]) => {
         const dataUrl = await genImage(opts.userKey!, prompt, Math.min(18_000, Math.max(4_000, opts.budgetMs ?? 18_000)));
         const stored = dataUrl ? await storeImage(supabase, opts.projectId, dataUrl) : null;
-        if (stored) map.set(prompt, stored);
+        if (stored) map.set(key, stored);
       })
     );
   }
+  report.generated = map.size;
 
   const swap = (t: string) => {
     let out = t.replace(new RegExp(IMG_MARKER.source, "g"), (_m, value) => {
       const prompt = String(value).trim();
-      return map.get(prompt) || imgFallback(prompt);
+      const generated = map.get(promptKey(prompt));
+      if (!generated) report.fallbacks += 1;
+      return generated || imgFallback(prompt);
     });
     out = out.replace(new RegExp(STOCK_IMAGE.source, "g"), (url, offset) => {
       const prompt = stockPrompt(String(url), t, Number(offset), app.name);
-      return map.get(prompt) || imgFallback(prompt);
+      const generated = map.get(promptKey(prompt));
+      if (!generated) report.fallbacks += 1;
+      return generated || imgFallback(prompt);
     });
     return out;
   };
   if (Array.isArray(app.files)) app.files = app.files.map((f) => ({ ...f, content: swap(f.content) }));
   if (typeof app.code === "string") app.code = swap(app.code);
-  return map.size;
+  const finalTexts = Array.isArray(app.files) ? app.files.map((file) => file.content) : [app.code || ""];
+  report.unresolved = finalTexts.reduce((count, text) => count + (text.match(new RegExp(IMG_MARKER.source, "g")) || []).length, 0);
+  return report;
 }
 // ---- fim da geração de imagens custom ----
+
+function trustedProjectMedia(value: unknown, projectId: string): GenerationMediaAsset[] {
+  if (!Array.isArray(value)) return [];
+  const supabaseUrl = String(process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/$/, "");
+  let trustedOrigin = "";
+  let trustedPathPrefix = "";
+  try {
+    const base = new URL(supabaseUrl);
+    trustedOrigin = base.origin;
+    trustedPathPrefix = `${base.pathname.replace(/\/$/, "")}/storage/v1/object/public/${IMG_BUCKET}/${projectId}/`;
+  } catch {
+    return [];
+  }
+  const allowedTypes = /^(?:image\/(?:png|jpeg|webp|gif)|video\/(?:mp4|webm|quicktime))$/;
+  const assets: GenerationMediaAsset[] = [];
+  for (const raw of value.slice(0, 100)) {
+    const url = typeof raw?.url === "string" ? raw.url.trim() : "";
+    const name = typeof raw?.name === "string" ? raw.name.replace(/[\r\n|]/g, " ").trim().slice(0, 120) : "mídia";
+    const type = typeof raw?.type === "string" ? raw.type.trim().toLowerCase() : "";
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      continue;
+    }
+    if (parsed.origin !== trustedOrigin || !parsed.pathname.startsWith(trustedPathPrefix) || !allowedTypes.test(type)) continue;
+    assets.push({ url, name, type });
+  }
+  return assets;
+}
 
 export async function POST(req: NextRequest) {
   const started = Date.now();
@@ -263,6 +328,8 @@ export async function POST(req: NextRequest) {
   if (!access.allowed) {
     return NextResponse.json({ error: access.error }, { status: access.status ?? 403 });
   }
+  const { data: projectMediaRow } = await supabase.from("projects").select("meta").eq("id", projectId).maybeSingle();
+  const mediaAssets = trustedProjectMedia(projectMediaRow?.meta?.media, projectId);
   const attachments = sanitizePromptAttachments(body?.attachments);
   const isRefinementRequest =
     (Array.isArray(currentFiles) && currentFiles.length > 0) ||
@@ -289,7 +356,7 @@ export async function POST(req: NextRequest) {
         currentFiles: Array.isArray(currentFiles) ? currentFiles : null,
         name: typeof name === "string" ? name : "App", userKey: typeof userKey === "string" ? userKey : null,
         userProvider: userProvider ?? null, costMode: costMode ?? "auto",
-        forceReal: forceReal !== false, allowTemplate: allowTemplate === true, attachments }),
+        forceReal: forceReal !== false, allowTemplate: allowTemplate === true, attachments, mediaAssets }),
       new Promise<typeof DEADLINE>((resolve) => setTimeout(() => resolve(DEADLINE), GEN_MAX_MS)),
     ]);
   } catch (error) {
@@ -353,7 +420,7 @@ export async function POST(req: NextRequest) {
 
   // Imagens custom: troca marcadores ADIMG: por fotos geradas por IA (não bloqueia
   // a geração se algo falhar — degrada para fallback).
-  let imagesGenerated = 0;
+  let mediaReport = emptyMediaReport(mediaAssets.filter((asset) => asset.type.indexOf("video/") === 0).length);
   const msLeft = IMG_CEIL_MS - (Date.now() - started);
   if (result.engineMode === "real" && result.app && msLeft > 8_000) {
     // Ainda há tempo dentro da janela de ~60s: gera imagem por IA, mas com
@@ -363,11 +430,12 @@ export async function POST(req: NextRequest) {
         userProvider === "openrouter" && typeof userKey === "string" && userKey
           ? userKey
           : process.env.OPENROUTER_API_KEY || null;
-      imagesGenerated = await resolveAiImages(result.app, imageStorage, {
+      mediaReport = await resolveAiImages(result.app, imageStorage, {
         userKey: orKey,
         userProvider: orKey ? "openrouter" : null,
         projectId,
         budgetMs: msLeft - 4_000,
+        trustedAssets: mediaAssets,
       });
     } catch {
       /* imagem é opcional — nunca derruba a geração */
@@ -376,12 +444,18 @@ export async function POST(req: NextRequest) {
     // Sem tempo para IA: troca os marcadores ADIMG por fallback na hora (instantâneo),
     // pra nunca sobrar "ADIMG:" cru na tela.
     try {
-      await resolveAiImages(result.app, imageStorage, { userKey: null, userProvider: null, projectId });
+      mediaReport = await resolveAiImages(result.app, imageStorage, {
+        userKey: null,
+        userProvider: null,
+        projectId,
+        trustedAssets: mediaAssets,
+      });
     } catch {
       /* idem */
     }
   }
-  if (imagesGenerated > 0) result.cost = (result.cost ?? 0) + imagesGenerated * 0.03; // custo estimado/imagem
+  if (mediaReport.generated > 0) result.cost = (result.cost ?? 0) + mediaReport.generated * 0.03; // custo estimado/imagem
+  console.info("[generation] media", JSON.stringify({ projectId, ...mediaReport }));
 
   await finalizeGeneration(supabase, reservation.id, { status: "completed", provider: result.provider, cost: result.cost ?? 0, model: result.model ?? null });
 
@@ -389,5 +463,5 @@ export async function POST(req: NextRequest) {
   const { data: rows } = await supabase.from("generations").select("cost_usd").eq("project_id", projectId);
   const projectCost = (rows ?? []).reduce((s: number, r: any) => s + Number(r.cost_usd ?? 0), 0);
 
-  return NextResponse.json({ ...result, projectCost, imagesGenerated });
+  return NextResponse.json({ ...result, projectCost, imagesGenerated: mediaReport.generated, media: mediaReport });
 }

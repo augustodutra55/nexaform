@@ -106,6 +106,10 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
     const profile = plan.visualProfile;
     const usesThree = /["'](?:three|@react-three\/fiber|@react-three\/drei)(?:["'/])/.test(joined);
     const usesVideo = /<video\b/i.test(joined);
+    const videoSources: string[] = [];
+    const videoPattern = /<video\b[^>]*\bsrc\s*=\s*["']([^"']*)["'][^>]*>/gi;
+    let videoMatch: RegExpExecArray | null;
+    while ((videoMatch = videoPattern.exec(joined))) videoSources.push(videoMatch[1].trim());
     const hasMotion = /from\s+["']framer-motion["']|\bmotion\.|\banimate-[\w-]+|@keyframes\b/.test(joined);
     const respectsReducedMotion = /motion-reduce:|prefers-reduced-motion|useReducedMotion/.test(joined);
 
@@ -129,6 +133,21 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
     }
     if (profile.allowVideo && !usesVideo) {
       errors.push(issue("missing_video", "O pedido exige vídeo, mas o projeto não contém uma implementação de vídeo responsiva."));
+    }
+    if (profile.allowVideo && plan.media.videoMode === "placeholder") {
+      const videoTags = joined.match(/<video\b[^>]*>/gi) || [];
+      const hasSafePlaceholder = videoTags.some((tag) =>
+        /\bsrc\s*=\s*["']\s*["']/i.test(tag) && /\bdata-ad-media\s*=\s*["']video["']/i.test(tag)
+      );
+      if (!hasSafePlaceholder) {
+        errors.push(issue("missing_video_placeholder", "Sem vídeo enviado, use um slot <video src=\"\" data-ad-media=\"video\">; não invente URL."));
+      }
+    }
+    if (profile.allowVideo && plan.media.videoMode === "uploaded") {
+      const usesTrustedVideo = videoSources.some((source) => plan.media.videoUrls.includes(source));
+      if (!usesTrustedVideo) {
+        errors.push(issue("untrusted_video", "Use exclusivamente um vídeo enviado à Central de Mídia; URLs inventadas não são aceitas."));
+      }
     }
     if (!profile.allowVideo && usesVideo) {
       errors.push(issue("unrequested_video", "Vídeo foi inserido sem ser solicitado; use imagem contextual ou movimento leve."));

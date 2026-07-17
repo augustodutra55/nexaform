@@ -95,7 +95,7 @@ interface ChatPanelProps {
   /** Mensagem de erro para auto-correção (disparada pelo preview). */
   autoFixError?: string | null;
   onAutoFixHandled?: () => void;
-  onAutoFixFailed?: (runtimeError: string) => void;
+  onAutoFixFailed?: () => void;
   /** Disparado quando o usuário envia um pedido MANUAL (para zerar o orçamento de auto-correções). */
   onUserSend?: () => void;
   onSiteResult: (result: GenerationResult) => void;
@@ -324,16 +324,17 @@ export function ChatPanel({
     if (!autoFixError || generating) return;
     if (autoFixInFlightRef.current === autoFixError) return;
     autoFixInFlightRef.current = autoFixError;
-    const msg =
-      `⚙️ Correção automática: o app apresentou este erro ao executar:\n"${autoFixError}"\n` +
-      `Corrija a CAUSA desse erro nos arquivos atuais e mantenha TODA a funcionalidade. ` +
-      `Para arquivo existente, devolva apenas AD_PATCH com AD_SEARCH literal e único + AD_REPLACE. ` +
-      `Use AD_FILE somente se precisar criar um arquivo. ` +
-      `Erros comuns: importar de 'lucide-react' um ícone que não existe (use 'react-icons' para marcas), ` +
-      `variável/props indefinida, .map em algo que ainda não é array (inicialize com []), ou await sem async.`;
+    const msg = autoFixError.startsWith("⚙️ REPARO CONTROLADO")
+      ? autoFixError
+      : `⚙️ Correção automática: o app apresentou este erro ao executar:\n"${autoFixError}"\n` +
+        `Corrija a CAUSA desse erro nos arquivos atuais e mantenha TODA a funcionalidade. ` +
+        `Para arquivo existente, devolva apenas AD_PATCH com AD_SEARCH literal e único + AD_REPLACE. ` +
+        `Use AD_FILE somente se precisar criar um arquivo. ` +
+        `Erros comuns: importar de 'lucide-react' um ícone que não existe (use 'react-icons' para marcas), ` +
+        `variável/props indefinida, .map em algo que ainda não é array (inicialize com []), ou await sem async.`;
     onAutoFixHandled?.();
     void send(msg, true).then((success) => {
-      if (!success) onAutoFixFailed?.(autoFixError);
+      if (!success) onAutoFixFailed?.();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFixError, generating]);

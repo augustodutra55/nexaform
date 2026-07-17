@@ -9,6 +9,20 @@ import type { RuntimeAuditReport } from "@/lib/preview/runtime-audit";
 
 export type ProjectStatus = "rascunho" | "producao" | "revisao" | "entregue";
 
+export type AcceptanceRepairStatus = "repairing" | "verifying" | "verified" | "failed";
+
+/** Estado auditável do último ciclo automático de reparo. */
+export interface AcceptanceRepairSnapshot {
+  status: AcceptanceRepairStatus;
+  attempt: number;
+  maxAttempts: number;
+  fingerprint: string;
+  issueCodes: string[];
+  startedAt: string;
+  updatedAt: string;
+  lastError?: string;
+}
+
 /** Evidências persistidas do último código aprovado no preview. */
 export interface ProjectAcceptanceSnapshot {
   /** Pedido transformado em contrato antes da geração. */
@@ -17,6 +31,8 @@ export interface ProjectAcceptanceSnapshot {
   structural?: ProjectQualityReport;
   /** Auditoria do DOM real combinando desktop e mobile. */
   runtime?: RuntimeAuditReport;
+  /** Último ciclo de reparo disparado pelas evidências do aceite. */
+  repair?: AcceptanceRepairSnapshot;
   updatedAt: string;
 }
 

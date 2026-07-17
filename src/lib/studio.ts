@@ -4,8 +4,21 @@
  */
 
 import type { ProjectMediaAsset } from "@/lib/media/project-media";
+import type { GenerationPlan, ProjectQualityReport } from "@/lib/engine/app-types";
+import type { RuntimeAuditReport } from "@/lib/preview/runtime-audit";
 
 export type ProjectStatus = "rascunho" | "producao" | "revisao" | "entregue";
+
+/** Evidências persistidas do último código aprovado no preview. */
+export interface ProjectAcceptanceSnapshot {
+  /** Pedido transformado em contrato antes da geração. */
+  plan?: GenerationPlan;
+  /** Validação estática executada pelo motor antes de devolver o código. */
+  structural?: ProjectQualityReport;
+  /** Auditoria do DOM real combinando desktop e mobile. */
+  runtime?: RuntimeAuditReport;
+  updatedAt: string;
+}
 
 export interface ProjectMeta {
   status?: ProjectStatus;
@@ -18,6 +31,8 @@ export interface ProjectMeta {
   whitelabel?: boolean;
   /** Arquivos enviados pela Central de Mídia para reutilização no projeto. */
   media?: ProjectMediaAsset[];
+  /** Contrato e evidências de qualidade da última versão aprovada. */
+  acceptance?: ProjectAcceptanceSnapshot;
 }
 
 export const STATUS_LABEL: Record<ProjectStatus, string> = {

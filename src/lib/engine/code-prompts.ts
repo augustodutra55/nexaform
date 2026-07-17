@@ -21,6 +21,10 @@ IMAGENS DE CONTEÚDO OBRIGATORIAMENTE CONTEXTUAIS — aplique em sites/apps de e
 - PROIBIDO usar loremflickr.com, picsum.photos ou source.unsplash.com em imagens principais. i.pravatar.cc continua permitido SOMENTE para avatares de depoimentos. Para texturas decorativas, prefira CSS/Tailwind.
 - Exemplos que casam imagem e texto: card "Implantodontia Avançada" → src="ADIMG: modern dental implant procedure, dentist and patient, clean clinic, professional"; seção "Cafés Especiais" → src="ADIMG: specialty coffee beans and artisan latte, cozy premium cafe, warm light"; card "Treino de Força" → src="ADIMG: athlete performing strength training with coach, modern gym, professional lighting".
 
+VÍDEO SEM INVENÇÃO:
+- Use vídeo somente quando o CONTRATO DE GERAÇÃO disser que foi solicitado. URLs de vídeo válidas aparecem na CENTRAL DE MÍDIA injetada no pedido; use exclusivamente uma delas.
+- Se o usuário pediu vídeo e não houver VÍDEO disponível, crie um slot seguro e substituível: <video src="" data-ad-media="video" aria-label="descrição contextual" poster="ADIMG: contextual professional video poster" controls>. Mostre próximo dele uma orientação curta para enviar o arquivo pela aba Mídia. Nunca invente arquivo .mp4/.webm, CDN ou vídeo de demonstração.
+
 Responda APENAS com JSON válido (sem markdown, sem cercas de código):
 {
   "reply": "frase curta em pt-BR explicando o que foi construído",
@@ -171,6 +175,7 @@ REGRAS (críticas):
 - Técnico: React vem de 'react'; imports relativos com "./"/"../" e extensão .jsx; persistência só via window.AD (sem fetch cru/localStorage); sem react-router nem window.location (navegação por estado); ícones de UI via lucide-react e de marcas via react-icons; todo texto em pt-BR.
 - VOZ: ao criar ou corrigir microfone, ditado, pronúncia ou alto-falante, use somente "await AD.voice.listen({lang:'pt-BR'})", "await AD.voice.speak(texto,{lang:'en-US'})" e "AD.voice.cancel()", sempre com try/catch e feedback visível. Não crie chamadas diretas novas a SpeechRecognition/speechSynthesis dentro do app.
 - IMAGENS: toda imagem principal de conteúdo criada ou alterada (hero, card de serviço/produto/feature e seção) DEVE usar src="ADIMG: <descrição CURTA em inglês específica do texto daquele bloco>". PROIBIDO usar loremflickr.com, picsum.photos ou source.unsplash.com; i.pravatar.cc é permitido apenas para avatares. Faça a descrição casar com o título: "Implantodontia Avançada" → "ADIMG: modern dental implant procedure, dentist and patient, clean clinic, professional"; "Cafés Especiais" → "ADIMG: specialty coffee beans and artisan latte, cozy premium cafe, warm light"; "Treino de Força" → "ADIMG: athlete performing strength training with coach, modern gym, professional lighting". Se o pedido não mexer em imagens, preserve as URLs existentes e mantenha a edição cirúrgica.
+- VÍDEO: use somente uma URL de VÍDEO listada na CENTRAL DE MÍDIA do pedido. Se o pedido exigir vídeo e não houver um enviado, use <video src="" data-ad-media="video" aria-label="descrição contextual" poster="ADIMG: contextual professional video poster" controls> para o usuário substituir na aba Mídia. Nunca invente URL, arquivo .mp4/.webm ou clipe de demonstração. Se o pedido não mexer em vídeo, preserve o existente.
 - Só devolva o JSON "files" completo se o pedido EXIGIR explicitamente recriar tudo do zero. Caso contrário, use AD_PATCH para arquivos existentes, AD_FILE para novos e AD_DELETE para remoções.
 
 Retorne SOMENTE blocos AD_PATCH/AD_FILE/AD_DELETE e um AD_REPLY final. Todo código é texto bruto: não o transforme em string JSON.`;

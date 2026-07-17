@@ -43,6 +43,31 @@ export interface AppCode {
   provider?: Provider;
 }
 
+/** Contrato de produto criado antes de chamar a IA. */
+export interface GenerationPlan {
+  kind: "site" | "app";
+  objective: string;
+  audience: string;
+  requiredCapabilities: string[];
+  visualDirection: string[];
+  acceptanceCriteria: string[];
+}
+
+export interface ProjectQualityIssue {
+  code: string;
+  message: string;
+  path?: string;
+}
+
+/** Resultado do quality gate executado antes de salvar o código. */
+export interface ProjectQualityReport {
+  valid: boolean;
+  score: number;
+  repaired: boolean;
+  errors: ProjectQualityIssue[];
+  warnings: ProjectQualityIssue[];
+}
+
 /** true se o AppCode é um projeto multi-arquivo (com imports reais). */
 export function isMultiFile(app: AppCode | null | undefined): app is AppCode & { files: AppFile[]; entry: string } {
   return !!app && Array.isArray(app.files) && app.files.length > 0 && typeof app.entry === "string";
@@ -71,6 +96,10 @@ export interface AppGenerationResult {
   cost?: number;
   /** Modelo usado (para transparência de custo). */
   model?: string;
+  /** Plano determinístico usado como contrato da geração. */
+  generationPlan?: GenerationPlan;
+  /** Diagnóstico estrutural do projeto entregue. */
+  quality?: ProjectQualityReport;
   /** Quando a IA não gerou (demo/template em modo real): motivo técnico real
    *  da falha (ex.: "modelo X indisponível (404)", "chave rejeitada (401)",
    *  "tempo esgotado"). Usado para dar um erro honesto ao usuário. */

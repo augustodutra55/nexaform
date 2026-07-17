@@ -1,15 +1,18 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, ClipboardCheck, Clock3, ShieldAlert } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ClipboardCheck, Clock3, Loader2, RotateCcw, ShieldAlert, WandSparkles } from "lucide-react";
 import type { AppCode } from "@/lib/engine/app-types";
-import type { ProjectAcceptanceSnapshot } from "@/lib/studio";
+import type { AcceptanceRepairSnapshot, ProjectAcceptanceSnapshot } from "@/lib/studio";
 import { buildAcceptanceReport, type AcceptanceStatus } from "@/lib/engine/acceptance-report";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 interface AcceptancePanelProps {
   app: AppCode | null;
   acceptance?: ProjectAcceptanceSnapshot;
+  repair?: AcceptanceRepairSnapshot;
   previewHealth: "checking" | "healthy" | "error";
+  onRepair?: () => void;
 }
 
 const statusCopy = {
@@ -26,7 +29,14 @@ function ItemIcon({ status }: { status: AcceptanceStatus }) {
   return <AlertTriangle className="h-4 w-4 text-amber-500" />;
 }
 
-export function AcceptancePanel({ app, acceptance, previewHealth }: AcceptancePanelProps) {
+const repairCopy = {
+  repairing: { label: "Corrigindo automaticamente", detail: "O motor está alterando somente os arquivos relacionados às falhas." },
+  verifying: { label: "Validando a correção", detail: "A nova versão está sendo auditada novamente em desktop e mobile." },
+  verified: { label: "Correção aprovada", detail: "O reparo passou pela nova auditoria e foi salvo como versão saudável." },
+  failed: { label: "Reparo automático pausado", detail: "A versão saudável foi preservada. Você pode tentar novamente ou ajustar pelo chat." },
+};
+
+export function AcceptancePanel({ app, acceptance, repair, previewHealth, onRepair }: AcceptancePanelProps) {
   const report = buildAcceptanceReport({
     app,
     plan: acceptance?.plan,
@@ -35,6 +45,7 @@ export function AcceptancePanel({ app, acceptance, previewHealth }: AcceptancePa
     previewHealth,
   });
   const copy = statusCopy[report.status];
+  const activeRepair = repair?.status === "repairing" || repair?.status === "verifying";
 
   return (
     <div className="h-full overflow-y-auto bg-muted/20 p-4">
@@ -80,6 +91,31 @@ export function AcceptancePanel({ app, acceptance, previewHealth }: AcceptancePa
           </section>
         )}
 
+        {repair && (
+          <section className={cn(
+            "flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4",
+            repair.status === "failed"
+              ? "border-red-500/30 bg-red-500/10"
+              : repair.status === "verified"
+              ? "border-emerald-500/30 bg-emerald-500/10"
+              : "border-blue-500/30 bg-blue-500/10"
+          )}>
+            <div className="flex min-w-0 items-start gap-3">
+              {activeRepair ? <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-blue-500" /> : repair.status === "verified" ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" /> : <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />}
+              <div>
+                <p className="text-sm font-semibold">{repairCopy[repair.status].label}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{repairCopy[repair.status].detail}</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">Tentativa {repair.attempt}/{repair.maxAttempts}</p>
+              </div>
+            </div>
+            {repair.status === "failed" && report.blockers > 0 && onRepair && (
+              <Button type="button" size="sm" variant="outline" onClick={onRepair}>
+                <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> Tentar novamente
+              </Button>
+            )}
+          </section>
+        )}
+
         <section className="overflow-hidden rounded-xl border bg-background">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <h3 className="text-sm font-semibold">Checklist de aceite</h3>
@@ -101,6 +137,12 @@ export function AcceptancePanel({ app, acceptance, previewHealth }: AcceptancePa
         <p className="text-xs text-muted-foreground">
           O bloqueio automático é reservado a falhas comprovadas de estrutura, execução ou responsividade. Avisos não impedem a publicação.
         </p>
+
+        {!repair && report.blockers > 0 && onRepair && (
+          <Button type="button" onClick={onRepair} className="w-full sm:w-auto">
+            <WandSparkles className="mr-2 h-4 w-4" /> Corrigir falhas automaticamente
+          </Button>
+        )}
       </div>
     </div>
   );

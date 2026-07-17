@@ -1,3 +1,5 @@
+import { buildGenerationPlan } from "./generation-plan";
+
 /**
  * Prompt de geração de CÓDIGO multi-arquivo (clone do Lovable).
  * O modelo escreve um PROJETO React real (vários arquivos com imports entre si)
@@ -45,9 +47,8 @@ Regras OBRIGATÓRIAS:
      - 'react-icons' (ex.: "import { FaWhatsapp, FaInstagram } from 'react-icons/fa'") → ícones de marcas/sociais que o lucide não tem.
      - 'react-countup' → números animados (estatísticas, "+1200 clientes").
      - 'react-intersection-observer' → disparar animações/efeitos ao entrar na viewport.
-     - '@tsparticles/react' + '@tsparticles/slim' → fundos de partículas no hero (efeito ousado).
-     - 'three' + '@react-three/fiber' + '@react-three/drei' → cenas/objetos 3D no hero (impacto máximo; use só quando pedirem algo bem moderno, pois é mais pesado).
-   REGRAS de pacotes: use apenas pacotes de front-end (nada que exija Node/backend, filesystem ou binários nativos). NÃO importe arquivos CSS de pacotes (ex.: "import 'x/dist/styles.css'") — o estilo é só Tailwind (para o Swiper, estilize com classes utilitárias em vez do CSS do pacote). Prefira poucos pacotes e populares; não sobrecarregue um site simples com 3D/partículas sem necessidade.
+     - 'three' + '@react-three/fiber' + '@react-three/drei' → SOMENTE quando o contrato visual declarar 3D permitido; limite a uma cena e forneça fallback estático.
+   REGRAS de pacotes: obedeça ao limite de pacotes do CONTRATO DE GERAÇÃO. Use apenas pacotes de front-end (nada que exija Node/backend, filesystem ou binários nativos). NÃO importe arquivos CSS de pacotes (ex.: "import 'x/dist/styles.css'") — o estilo é só Tailwind. Não use tsparticles; partículas simples devem ser canvas leve e manual. Não adicione 3D, vídeo ou carrossel apenas para enfeitar.
 5. Estilize com classes Tailwind (Tailwind Play CDN carregado). Ícones de interface via lucide-react. Sem CSS externo próprio.
    ATENÇÃO — ÍCONES DE MARCA/REDES SOCIAIS: o lucide-react NÃO possui ícones de marcas (Facebook, Instagram, WhatsApp, YouTube, TikTok, LinkedIn, X/Twitter etc.) — importar isso do lucide QUEBRA o app. Para redes sociais/marcas use SEMPRE 'react-icons' (ex.: "import { FaInstagram, FaFacebookF, FaWhatsapp, FaYoutube, FaTiktok, FaLinkedinIn } from 'react-icons/fa';" ou 'react-icons/fa6'). Só importe do lucide-react nomes de ícones genéricos que você tem certeza que existem.
 6. PERSISTÊNCIA (backend embutido): para SALVAR dados de verdade (listas, recados, cadastros, tarefas que persistem ao recarregar), use a API global "window.AD" — um mini-banco por projeto, já disponível:
@@ -99,12 +100,12 @@ Regras OBRIGATÓRIAS:
    • COR COM DISCIPLINA: 1 cor de marca + 1 de apoio + neutros; use a de marca com parcimônia (CTAs/destaques). Prefira neutros levemente tingidos (stone/zinc/slate) a cinza puro. Contraste AA sempre.
    • ACABAMENTO: bordas de 1px sutis, sombras suaves EM CAMADAS (não uma sombra dura), raios de canto consistentes, ícones alinhados ao texto, hovers discretos, e UM único "momento de destaque" por seção (uma imagem grande, um número, uma frase forte) — não encha tudo de destaque.
    • MIRE em landing pages premium reais (estúdios de design, SaaS bem-feito): hero editorial com foto/arte forte + tipografia grande + muito espaço. EVITE: hero centralizado com um parágrafo e dois botões; três cards iguais com ícone+título+texto; tudo em text-gray-600.
-8d. DINAMISMO OBRIGATÓRIO (sites/landing NÃO podem ser estáticos — página parada é o que mais dá "cara de IA"). Todo site/landing/página de venda DEVE incluir, de forma elegante e coerente com o tema, NO MÍNIMO os itens (a), (b) e (c):
-   (a) MOVIMENTO CINEMATOGRÁFICO no hero — escolha UM: um <video> mudo em loop de fundo; OU efeito Ken Burns (zoom/pan lento e infinito via framer-motion numa foto); OU gradiente/partículas animadas em <canvas>. Modelo de vídeo de fundo (o dono troca a fonte depois): <video autoPlay muted loop playsInline className="absolute inset-0 w-full h-full object-cover"><source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" type="video/mp4" /></video> com um overlay escuro (div absolute inset-0 bg-black/50) por cima para legibilidade, e o conteúdo do hero em position relative acima.
-   (b) UM CARROSSEL DE VERDADE com swiper — import: import { Swiper, SwiperSlide } from 'swiper/react'; import { Autoplay } from 'swiper/modules'; uso: <Swiper modules={[Autoplay]} autoplay={{ delay: 2500 }} loop spaceBetween={24} slidesPerView={1} breakpoints={{ 768: { slidesPerView: 3 } }}> <SwiperSlide> ...card... </SwiperSlide> ...</Swiper>. Estilize slides só com Tailwind (NÃO importe CSS do swiper). Use para projetos, galeria, depoimentos ou faixa de logos.
-   (c) NÚMEROS ANIMADOS com react-countup numa faixa de estatísticas: import CountUp from 'react-countup'; <CountUp end={1200} duration={2} separator="." />+ (dispare ao montar; não dependa de scroll).
-   (d) DESEJÁVEL: marquee (faixa deslizante infinita de logos/palavras via animação), microinterações fortes em hover (scale/shadow/translate), parallax sutil, tilt nos cards.
-   Nada de efeito gratuito: cada elemento dinâmico tem um propósito. Para APPS utilitários/jogos/ferramentas, ignore esta regra (ela é só para sites/landing).
+8d. DINAMISMO COM ORÇAMENTO (sites/landing não devem parecer estáticos, mas também não podem virar uma demonstração de bibliotecas). Obedeça ao nível de motion e ao limite de pacotes do CONTRATO. Escolha apenas 1–2 recursos com propósito:
+   (a) HERO: Ken Burns leve numa imagem contextual, gradiente/canvas leve ou vídeo somente quando solicitado. Nunca use Big Buck Bunny, vídeos de demonstração ou clipes sem relação com o negócio. Todo vídeo precisa de muted, playsInline, poster/fallback e overlay para legibilidade.
+   (b) CARROSSEL: use Swiper apenas quando existir conteúdo que realmente precise deslizar; ofereça controles, não dependa de autoplay e não importe CSS do pacote.
+   (c) NÚMEROS: prefira contador simples em React/CSS; use react-countup somente se ainda couber no orçamento de dependências.
+   (d) MICROINTERAÇÕES: hover/focus, marquee leve, parallax sutil ou tilt — nunca todos juntos.
+   Nada de efeito gratuito. Apps utilitários priorizam resposta, estados e clareza; animação nunca atrasa ações ou esconde conteúdo.
 8e. NÍVEL "SITE CARO" (agência premium / $10k) — o que separa um site bom de um site que parece ter custado caro:
    • MOCKUP EM HTML (o sinal mais forte): em vez de só uma foto, construa um MOCKUP de produto/app/dashboard com HTML+Tailwind — uma "janela" (rounded-xl border border-white/10 bg-zinc-900 shadow-2xl, com 3 bolinhas de semáforo no topo) contendo uma UI fake convincente: cards de métrica, um mini-gráfico feito com <svg> (polyline) ou barras de <div>, uma tabela/lista, um donut com SVG. Dá leve perspetiva/sombra e um glow atrás. Isso vale mais que qualquer stock photo.
    • GLASSMORPHISM: cards e navbar com bg-white/5 backdrop-blur-xl border border-white/10; funciona lindo sobre gradiente/mesh/foto.
@@ -179,57 +180,23 @@ export function serializeFiles(files: { path: string; content: string }[]): stri
   return files.map((f) => `--- ARQUIVO: ${f.path} ---\n${f.content}`).join("\n\n");
 }
 
-function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
 /**
- * Briefing de design SORTEADO por geração — o que garante que dois sites nunca
- * saiam iguais. Combina um arquétipo de hero, uma paleta/mood, um motivo de
- * layout e um estilo de movimento, todos aleatórios. Injetado no prompt do
- * usuário só na PRIMEIRA geração de um site (não em refinamentos nem em apps).
+ * Briefing visual derivado do segmento e da intenção do pedido. Diferente do
+ * sorteio antigo, o resultado é repetível, justificável e respeita um orçamento
+ * de performance — especialmente para 3D, vídeo e motion.
  */
-export function buildDesignBrief(): string {
-  // BIBLIOTECA DE ESTILOS NOMEADOS (mini "UI UX Pro Max"): cada estilo tem uma
-  // receita concreta de cor + efeito + vibe. Sorteia 1 → cada site fica autoral.
-  const style = pick([
-    "DARK FINTECH / SAAS COM GLOW: fundo quase-preto (#0a0b0f/#0d0f14), UM acento neon (verde-menta #34e5a3, OU ciano #38bdf8, OU violeta #a78bfa) usado em CTAs e como BRILHO (box-shadow colorido/blur, ex.: shadow-[0_0_60px_-10px_#34e5a3]). Tipografia branca enorme e limpa, muito espaço negativo. Cara de produto de tecnologia caro.",
-    "GLASSMORPHISM PREMIUM: cards de vidro (bg-white/5, backdrop-blur-xl, border border-white/10) sobre um fundo com gradiente rico ou foto; navbar FLUTUANTE de vidro arredondada; brilhos suaves. Elegante e moderno.",
-    "EDITORIAL DE LUXO (revista): fundo creme/off-white (#faf7f2), tipografia SERIFADA display gigante (use a classe font-serif = Fraunces) misturada com Inter no corpo; muito respiro; uma imagem grande tratada; detalhes finos dourados/cobre. Ar sofisticado de marca premium.",
-    "GRADIENTE-MESH VIBRANTE: fundo com malha de gradiente (2–3 blobs coloridos bem desfocados, blur-3xl, em posições absolutas) atrás do conteúdo; cards de vidro; tipografia forte. Vibe de startup moderna.",
-    "TECH ESCURO NEON: preto com um GRID sutil de linhas (via background-image linear-gradient) + acento elétrico; auras/brilhos; estatísticas com glow; use a fonte font-grotesk (Space Grotesk) nos títulos. Cara de ferramenta de dev/IA.",
-    "MINIMAL CLARO SAAS: branco, 1 cor de marca sóbria, seções muito espaçadas, tipografia limpa; foco num MOCKUP de produto; logos de clientes; ícones lineares. Cara de SaaS bem-financiado.",
-    "BOLD BRUTALISTA-EDITORIAL: blocos de cor chapada e contrastante, tipografia MUITO grande que ocupa a largura, bordas grossas, layout em grid assimétrico ousado. Diferentão, memorável.",
-  ]);
-  const pairing = pick([
-    "TÍTULOS em font-display (Sora) + corpo Inter.",
-    "TÍTULOS em font-serif (Fraunces, serifada elegante) + corpo Inter — contraste sofisticado.",
-    "TÍTULOS em font-grotesk (Space Grotesk) + corpo Inter — vibe técnica/moderna.",
-  ]);
-  const hero = pick([
-    "HERO SPLIT: headline + CTA à esquerda, à direita um MOCKUP de app/dashboard construído em HTML+Tailwind (não é foto).",
-    "HERO FULL-BLEED: mídia/gradiente cobrindo a tela, overlay, headline gigante ancorada embaixo à esquerda.",
-    "HERO TIPOGRÁFICO: texto gigante sobre fundo com brilho/mesh/partículas, quase sem imagem, CTA em destaque.",
-    "HERO COM MOCKUP CENTRAL: headline centralizada em cima e, logo abaixo, um grande MOCKUP de produto (janela de browser/app estilizada em HTML) com leve perspectiva/sombra.",
-    "HERO EDITORIAL ASSIMÉTRICO: headline quebrada em 2–3 linhas que vaza a margem, imagem deslocada se sobrepondo.",
-    "HERO AGÊNCIA OUSADO: poucas palavras FORTES em tipografia gigante (ex.: um nome + uma promessa), muito preto/branco ou creme + 1 acento, layout confiante e minimalista, com um pequeno rótulo (ex.: 'Agency') no topo.",
-    "HERO EDITORIAL COM CAPTURA: headline serifada elegante e curta (vibe 'Built for the curious'), logo abaixo um CAMPO DE E-MAIL inline com botão circular de seta, sobre fundo escuro com um efeito sutil de luz/linhas/partículas atrás. Ótimo para newsletter/waitlist.",
-    "HERO PRODUTO EM FOCO: uma imagem grande do produto/rosto ocupando metade da tela, com headline curtíssima e marcante ao lado (ex.: 'Clean Air. Clear Mind.'), minimalista e caro.",
-  ]);
-  const motion = pick([
-    "entradas em STAGGER ao montar (framer-motion).",
-    "microinterações FORTES no hover (scale + glow + translate).",
-    "parallax sutil + Ken Burns nas imagens.",
-    "brilhos/auras que pulsam suavemente (animação CSS).",
-  ]);
+export function buildDesignBrief(message: string): string {
+  const profile = buildGenerationPlan(message).visualProfile;
   return [
-    "\n\n=== DIRETRIZ DE DESIGN SORTEADA — mire em site de agência premium ($10k). Siga se for site/landing/página; se for app utilitário/jogo, ignore. ===",
-    `• ESTILO VISUAL (defina a paleta e os efeitos a partir DELE): ${style}`,
-    `• PAR DE FONTES: ${pairing}`,
-    `• HERO: ${hero}`,
-    `• MOVIMENTO: ${motion}`,
-    "• SINAIS DE 'SITE CARO' — inclua NO MÍNIMO DOIS: (1) um MOCKUP de app/dashboard/produto construído em HTML+Tailwind (janela estilizada com UI dentro: cards, mini-gráfico feito com divs/SVG, tabela) — é o que mais dá cara de $10k; (2) glassmorphism (backdrop-blur) em cards; (3) fundo com gradiente-mesh OU glow colorido; (4) prova social com estrelas (★★★★★ 4,9) + faixa de logos; (5) números animados (react-countup).",
-    "Adapte a paleta ao TEMA do cliente (um café não precisa ser neon), mas mantenha o nível de acabamento. O resultado tem que parecer AUTORAL e caro — nunca template genérico. Fuja do hero centralizado com dois botões e três cards iguais.",
+    "\n\n=== DIRETRIZ VISUAL PROFISSIONAL — obrigatória e coerente com o segmento ===",
+    `• PERFIL: ${profile.label} (${profile.id}).`,
+    `• ESTILO: ${profile.style}.`,
+    `• COMPOSIÇÃO: ${profile.layout}.`,
+    `• MOTION: nível ${profile.motion}; anime transform/opacity, respeite prefers-reduced-motion e nunca deixe conteúdo preso invisível.`,
+    `• 3D: ${profile.allow3D ? "permitido em uma única cena protagonista, com fallback estático e devicePixelRatio máximo 1.5" : "não use bibliotecas 3D; crie profundidade com CSS, camadas, perspectiva e imagens"}.`,
+    `• VÍDEO: ${profile.allowVideo ? "foi solicitado; use somente mídia relacionada ao projeto e inclua poster/fallback" : "não invente vídeo nem use clipes genéricos de demonstração"}.`,
+    `• ORÇAMENTO: no máximo ${profile.maxExternalPackages} pacotes externos. ${profile.performanceRules.join("; ")}.`,
+    "• ACABAMENTO: use uma ideia visual forte, identidade própria, hierarquia, estados completos e prova de confiança. Evite o clichê de hero centralizado + dois botões + três cards idênticos.",
   ].join("\n");
 }
 
@@ -238,9 +205,8 @@ export function buildCodeUserPrompt(
   current: string | { path: string; content: string }[] | null
 ): string {
   if (!current || (Array.isArray(current) && current.length === 0)) {
-    // Primeira geração: injeta um briefing de design SORTEADO para garantir
-    // variedade real entre projetos e forçar dinamismo (a favor de "não parecer IA").
-    return `Pedido do usuário: ${message}${buildDesignBrief()}`;
+    // Primeira geração: injeta o perfil visual adequado ao segmento e à intenção.
+    return `Pedido do usuário: ${message}${buildDesignBrief(message)}`;
   }
   const listing = Array.isArray(current) ? serializeFiles(current) : `--- ARQUIVO: App.jsx ---\n${current}`;
   return `Projeto atual (arquivos):\n"""\n${listing}\n"""\n\nPedido de refinamento: ${message}\nPara arquivos existentes, devolva SOMENTE AD_PATCH com AD_SEARCH literal e único + AD_REPLACE. Use AD_FILE apenas para arquivo novo e AD_DELETE para remoção. Não use JSON nem reenvie arquivos inteiros sem necessidade.`;

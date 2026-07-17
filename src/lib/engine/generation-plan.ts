@@ -1,4 +1,4 @@
-import type { GenerationPlan } from "./app-types";
+import type { GenerationPlan, VisualProfile, VisualProfileId } from "./app-types";
 
 function has(text: string, pattern: RegExp): boolean {
   return pattern.test(text);
@@ -6,6 +6,88 @@ function has(text: string, pattern: RegExp): boolean {
 
 function compactObjective(message: string): string {
   return message.replace(/\s+/g, " ").trim().slice(0, 240);
+}
+
+const PROFILE_COPY: Record<VisualProfileId, Omit<VisualProfile, "allowVideo">> = {
+  "premium-brand": {
+    id: "premium-brand",
+    label: "Marca premium contemporânea",
+    style: "paleta autoral do segmento, tipografia de alto contraste, fotografia contextual e acabamento sóbrio",
+    layout: "hero assimétrico, seções com respiro, prova social e CTAs claros",
+    motion: "subtle",
+    allow3D: false,
+    require3DFallback: false,
+    maxExternalPackages: 3,
+    performanceRules: ["anime apenas transform e opacity", "preserve conteúdo visível sem JavaScript"],
+  },
+  "editorial-luxury": {
+    id: "editorial-luxury",
+    label: "Editorial de luxo",
+    style: "off-white ou tons profundos, serifada elegante, detalhes metálicos discretos e imagens amplas",
+    layout: "composição editorial assimétrica, muito espaço negativo e blocos de autoridade",
+    motion: "subtle",
+    allow3D: false,
+    require3DFallback: false,
+    maxExternalPackages: 3,
+    performanceRules: ["evite glows neon genéricos", "use movimento lento e discreto"],
+  },
+  "conversion-commerce": {
+    id: "conversion-commerce",
+    label: "Conversão e comércio",
+    style: "contraste forte, produto/benefício em primeiro plano, confiança e preço fáceis de escanear",
+    layout: "hero orientado à oferta, prova social, benefícios, comparação, FAQ e CTA recorrente",
+    motion: "expressive",
+    allow3D: false,
+    require3DFallback: false,
+    maxExternalPackages: 4,
+    performanceRules: ["efeitos não podem atrasar o CTA", "carrossel deve funcionar sem autoplay obrigatório"],
+  },
+  "product-system": {
+    id: "product-system",
+    label: "Produto digital profissional",
+    style: "interface limpa, tokens consistentes, densidade controlada e estados operacionais legíveis",
+    layout: "shell de produto, navegação responsiva, dashboards e fluxos orientados à tarefa",
+    motion: "subtle",
+    allow3D: false,
+    require3DFallback: false,
+    maxExternalPackages: 3,
+    performanceRules: ["priorize resposta imediata aos controles", "não anime tabelas ou formulários inteiros"],
+  },
+  "playful-learning": {
+    id: "playful-learning",
+    label: "Aprendizado lúdico",
+    style: "cores amigáveis, formas reconhecíveis, ilustrações contextuais e reforço positivo",
+    layout: "tarefas curtas, progresso visível, áreas de toque amplas e navegação simples",
+    motion: "expressive",
+    allow3D: false,
+    require3DFallback: false,
+    maxExternalPackages: 4,
+    performanceRules: ["movimento nunca bloqueia a tarefa", "respeite prefers-reduced-motion"],
+  },
+  "immersive-3d": {
+    id: "immersive-3d",
+    label: "Experiência imersiva 3D",
+    style: "profundidade cinematográfica, iluminação controlada e uma única cena 3D protagonista",
+    layout: "hero imersivo com conteúdo HTML legível sobre ou ao lado da cena",
+    motion: "expressive",
+    allow3D: true,
+    require3DFallback: true,
+    maxExternalPackages: 5,
+    performanceRules: ["uma única cena 3D", "pause render fora da viewport", "fallback CSS/imagem obrigatório", "limite devicePixelRatio a 1.5"],
+  },
+};
+
+export function visualProfileFor(message: string, kind: "site" | "app"): VisualProfile {
+  const normalized = message.toLowerCase();
+  const wantsVideo = has(normalized, /\b(v[ií]deo|video|vsl|film|reel)\b/);
+  let id: VisualProfileId;
+  if (has(normalized, /\b(3d|tr[eê]s dimens|webgl|imersiv)/)) id = "immersive-3d";
+  else if (has(normalized, /\b(infantil|crian[çc]|educa|curso|quiz|jogo|gamifica|aprender)/)) id = "playful-learning";
+  else if (kind === "app" || has(normalized, /\b(dashboard|painel|saas|sistema|portal|crm|gest[aã]o)/)) id = "product-system";
+  else if (has(normalized, /\b(venda|landing|checkout|oferta|produto|loja|e.?commerce|convers[aã]o|lan[çc]amento)/)) id = "conversion-commerce";
+  else if (has(normalized, /\b(luxo|advoc|arquitet|joalher|est[eé]tica|moda|premium|boutique)/)) id = "editorial-luxury";
+  else id = "premium-brand";
+  return { ...PROFILE_COPY[id], allowVideo: wantsVideo };
 }
 
 /**
@@ -19,6 +101,7 @@ export function buildGenerationPlan(message: string): GenerationPlan {
   const kind: "site" | "app" = isSite ? "site" : "app";
   const requiredCapabilities: string[] = [];
   const visualDirection: string[] = [];
+  const visualProfile = visualProfileFor(message, kind);
 
   if (has(normalized, /\b(login|cadastro|conta|usu[aá]rio|autentica)/)) requiredCapabilities.push("autenticação e estados de sessão");
   if (has(normalized, /\b(formul[aá]rio|lead|contato|orçamento|orcamento|agendamento)/)) requiredCapabilities.push("formulários validados com feedback visível");
@@ -41,11 +124,13 @@ export function buildGenerationPlan(message: string): GenerationPlan {
       : "usuário final descrito no pedido",
     requiredCapabilities,
     visualDirection,
+    visualProfile,
     acceptanceCriteria: [
       "projeto multi-arquivo com App.jsx fino e imports resolvíveis",
       "fluxo principal utilizável, sem botões decorativos ou telas sem saída",
       "desktop e mobile responsivos, com acessibilidade e feedback de erro",
       "nenhuma dependência de Node ou backend inexistente no runtime gerado",
+      `perfil visual ${visualProfile.label} aplicado sem comprometer o orçamento de performance`,
     ],
   };
 }
@@ -58,6 +143,11 @@ export function renderGenerationPlan(plan: GenerationPlan): string {
     `Público: ${plan.audience}`,
     `Capacidades: ${plan.requiredCapabilities.join("; ")}`,
     `Direção visual: ${plan.visualDirection.join("; ")}`,
+    `Perfil visual: ${plan.visualProfile.label} (${plan.visualProfile.id})`,
+    `Estilo: ${plan.visualProfile.style}`,
+    `Layout: ${plan.visualProfile.layout}`,
+    `Motion: ${plan.visualProfile.motion}; 3D: ${plan.visualProfile.allow3D ? "permitido com fallback" : "não usar"}; vídeo: ${plan.visualProfile.allowVideo ? "solicitado" : "não inserir por conta própria"}`,
+    `Orçamento: no máximo ${plan.visualProfile.maxExternalPackages} pacotes externos; ${plan.visualProfile.performanceRules.join("; ")}`,
     `Aceite: ${plan.acceptanceCriteria.join("; ")}`,
     "Implemente e confira cada item antes de responder. Não declare concluído algo que não esteja no código.",
   ].join("\n");

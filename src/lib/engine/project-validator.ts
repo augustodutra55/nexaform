@@ -47,6 +47,7 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
   const errors: ProjectQualityIssue[] = [];
   const warnings: ProjectQualityIssue[] = [];
   const files: AppFile[] = app.files ?? [];
+  const externalPackages = new Set<string>();
   if (!files.length) {
     errors.push(issue("single_file", "O projeto precisa ser multi-arquivo; a IA devolveu apenas um arquivo."));
     return { errors, warnings };
@@ -80,6 +81,7 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
 
     for (const source of importSources(file.content)) {
       const packageName = source.startsWith("@") ? source.split("/").slice(0, 2).join("/") : source.split("/")[0];
+      if (!source.startsWith(".") && packageName !== "react" && packageName !== "react-dom") externalPackages.add(packageName);
       if (/\.css(?:\?|$)/.test(source)) {
         errors.push(issue("css_import", `Import de CSS não suportado: ${source}. Use Tailwind.`, path));
       } else if (FORBIDDEN_IMPORTS.has(source) || FORBIDDEN_IMPORTS.has(packageName)) {
@@ -97,6 +99,55 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
   if (plan?.requiredCapabilities.some((capability) => capability.indexOf("window.AD") >= 0)) {
     const joined = files.map((file) => file.content).join("\n");
     if (!/\b(?:window\.)?AD\./.test(joined)) warnings.push(issue("missing_ad_data", "O pedido exige dados reais, mas nenhuma integração window.AD foi encontrada."));
+  }
+
+  if (plan) {
+    const joined = files.map((file) => file.content).join("\n");
+    const profile = plan.visualProfile;
+    const usesThree = /["'](?:three|@react-three\/fiber|@react-three\/drei)(?:["'/])/.test(joined);
+    const usesVideo = /<video\b/i.test(joined);
+    const hasMotion = /from\s+["']framer-motion["']|\bmotion\.|\banimate-[\w-]+|@keyframes\b/.test(joined);
+    const respectsReducedMotion = /motion-reduce:|prefers-reduced-motion|useReducedMotion/.test(joined);
+
+    if (externalPackages.size > profile.maxExternalPackages) {
+      errors.push(issue(
+        "dependency_budget",
+        `O perfil permite ${profile.maxExternalPackages} pacotes externos, mas o projeto usa ${externalPackages.size}: ${Array.from(externalPackages).join(", ")}.`
+      ));
+    }
+    if (usesThree && !profile.allow3D) {
+      errors.push(issue("unrequested_3d", "Bibliotecas 3D foram adicionadas sem o pedido autorizar 3D."));
+    }
+    if (profile.allow3D && !usesThree) {
+      errors.push(issue("missing_3d", "O pedido exige experiência 3D, mas nenhuma implementação Three/React Three Fiber foi encontrada."));
+    }
+    if (profile.allow3D && usesThree && !/(?:fallback\s*=|<img\b|backgroundImage\s*:)/i.test(joined)) {
+      errors.push(issue("missing_3d_fallback", "A cena 3D precisa de fallback estático para celulares e falhas de WebGL."));
+    }
+    if (profile.allow3D && usesThree && !/(?:dpr\s*=\s*\{?\[?\s*1\s*,\s*1\.5|Math\.min\([^)]*1\.5)/.test(joined)) {
+      warnings.push(issue("unbounded_3d_dpr", "Limite o devicePixelRatio da cena 3D a 1.5."));
+    }
+    if (profile.allowVideo && !usesVideo) {
+      errors.push(issue("missing_video", "O pedido exige vídeo, mas o projeto não contém uma implementação de vídeo responsiva."));
+    }
+    if (!profile.allowVideo && usesVideo) {
+      errors.push(issue("unrequested_video", "Vídeo foi inserido sem ser solicitado; use imagem contextual ou movimento leve."));
+    }
+    if (/BigBuckBunny|commondatastorage\.googleapis\.com\/gtv-videos-bucket\/sample/i.test(joined)) {
+      errors.push(issue("demo_video", "Vídeo genérico de demonstração não pode ser usado em projeto comercial."));
+    }
+    if (usesVideo && !/<video[^>]*\b(?:poster|aria-label)=/i.test(joined)) {
+      warnings.push(issue("video_fallback", "Adicione poster ou aria-label ao vídeo para carregamento e acessibilidade."));
+    }
+    if (profile.motion === "expressive" && !hasMotion) {
+      warnings.push(issue("missing_motion", "O perfil pede movimento expressivo, mas nenhuma animação intencional foi encontrada."));
+    }
+    if (hasMotion && !respectsReducedMotion) {
+      warnings.push(issue("reduced_motion", "Adicione suporte a prefers-reduced-motion ou motion-reduce."));
+    }
+    if (/requestAnimationFrame[\s\S]{0,300}\bset[A-Z]\w*\s*\(/.test(joined)) {
+      errors.push(issue("state_per_frame", "Não atualize estado React a cada frame; use refs dentro de requestAnimationFrame."));
+    }
   }
   return { errors, warnings };
 }

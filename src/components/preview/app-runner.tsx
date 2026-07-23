@@ -12,13 +12,18 @@
  * o código do usuário fica isolado da app e dos cookies/sessão.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Loader2, Monitor, Smartphone, RefreshCw, Cpu, Layout, Maximize2, Minimize2 } from "lucide-react";
+import { AlertTriangle, Loader2, Monitor, Smartphone, RefreshCw, Cpu, Layout, Maximize2, Minimize2, ScanSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AppFile, EngineMode } from "@/lib/engine/app-types";
 import { bundleApp, buildBundledSrcDoc } from "@/lib/preview/bundler";
 import { adGlobalScript } from "@/lib/preview/ad-global";
 import { runtimeAuditSource, type RuntimeAuditReport } from "@/lib/preview/runtime-audit";
 import { usePreviewBridge } from "@/components/preview/use-preview-bridge";
+import {
+  normalizePreviewSelection,
+  visualSelectionSource,
+  type PreviewElementSelection,
+} from "@/lib/preview/visual-selection";
 
 interface AppRunnerProps {
   /** Single-file (legado): código de um componente App. */
@@ -40,15 +45,18 @@ interface AppRunnerProps {
   /** relatório de interações, acessibilidade básica e responsividade. */
   onAudit?: (report: RuntimeAuditReport) => void;
   editorSession?: boolean;
+  /** Elemento escolhido diretamente dentro do preview. */
+  onElementSelect?: (selection: PreviewElementSelection) => void;
 }
 
-function buildSrcDoc(code: string, projectId?: string | null): string {
+function buildSrcDoc(code: string, projectId?: string | null, editorSession = false): string {
   // O código do usuário vai como string JSON e é transpilado em runtime com
   // Babel no modo CLÁSSICO (React.createElement) — sem import de jsx-runtime,
   // que não existe no navegador sem bundler.
   const codeJson = JSON.stringify(code);
   const adScript = adGlobalScript(projectId);
   const auditSource = runtimeAuditSource();
+  const selectionSource = editorSession ? visualSelectionSource() : "";
   return `<!doctype html>
 <html lang="pt-BR">
 <head>
@@ -84,6 +92,7 @@ ${adScript}
     try { _nxHost.postMessage({ __nx_error: String(msg).slice(0, 800) }, '*'); } catch(e){}
   }
   ${auditSource}
+  ${selectionSource}
   // Proteção: impede o código do preview de tocar na página pai / storage do app.
   try { Object.defineProperty(window, 'parent', { get: function(){ return window; } }); } catch(e){}
   try { Object.defineProperty(window, 'top', { get: function(){ return window; } }); } catch(e){}
@@ -158,13 +167,14 @@ function detectExternals(files: AppFile[]): string[] {
  * registro de módulos. React/ReactDOM (e libs externas via CDN) são "externals".
  * É como um bundler mínimo rodando no próprio navegador — sem servidor, sem npm.
  */
-function buildSrcDocMulti(files: AppFile[], entry: string, projectId?: string | null): string {
+function buildSrcDocMulti(files: AppFile[], entry: string, projectId?: string | null, editorSession = false): string {
   const map: Record<string, string> = {};
   for (const f of files) map[f.path.replace(/^\.?\//, "")] = f.content;
   const filesJson = JSON.stringify(map);
   const entryJson = JSON.stringify(entry.replace(/^\.?\//, ""));
   const adScript = adGlobalScript(projectId);
   const auditSource = runtimeAuditSource();
+  const selectionSource = editorSession ? visualSelectionSource() : "";
   const externals = detectExternals(files);
   const extScripts = externals
     .map((n) => `<script src="${EXTERNAL_LIBS[n].url}" crossorigin></script>`)
@@ -195,6 +205,7 @@ ${adScript}
   function nxReady(){ if(_nxReported) return; try { _nxHost.postMessage({ __nx_ready: true }, '*'); } catch(e){} }
   function nxReport(msg){ if(_nxReported) return; _nxReported=true; try{ _nxHost.postMessage({ __nx_error:String(msg).slice(0,800) }, '*'); }catch(e){} }
   ${auditSource}
+  ${selectionSource}
   try { Object.defineProperty(window, 'parent', { get: function(){ return window; } }); } catch(e){}
   try { Object.defineProperty(window, 'top', { get: function(){ return window; } }); } catch(e){}
   window.addEventListener('error', function(e){ showError(e.message); nxReport(e.message); });
@@ -302,7 +313,19 @@ ${adScript}
 </html>`;
 }
 
-export function AppRunner({ code, files, entry, version, engineMode, projectId, onError, onReady, onAudit, editorSession = false }: AppRunnerProps) {
+export function AppRunner({
+  code,
+  files,
+  entry,
+  version,
+  engineMode,
+  projectId,
+  onError,
+  onReady,
+  onAudit,
+  editorSession = false,
+  onElementSelect,
+}: AppRunnerProps) {
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -312,6 +335,7 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
   const [health, setHealth] = useState<"checking" | "healthy" | "error">("checking");
   const [auditPhase, setAuditPhase] = useState<"desktop" | "mobile" | "done">("desktop");
   const [auditReport, setAuditReport] = useState<RuntimeAuditReport | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const onErrorRef = useRef(onError);
   const onReadyRef = useRef(onReady);
@@ -365,6 +389,28 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
   }, []);
   usePreviewBridge(iframeRef, projectId, reportPreviewError, editorSession, reportPreviewReady, reportPreviewAudit);
 
+  useEffect(() => {
+    if (!editorSession || !onElementSelect) return;
+    const receiveSelection = (event: MessageEvent) => {
+      if (event.source !== iframeRef.current?.contentWindow) return;
+      const data = event.data;
+      if (!data || data.__nx_visual_selected !== true) return;
+      const selection = normalizePreviewSelection(data.selection);
+      if (!selection) return;
+      setSelectionMode(false);
+      onElementSelect(selection);
+    };
+    window.addEventListener("message", receiveSelection);
+    return () => window.removeEventListener("message", receiveSelection);
+  }, [editorSession, onElementSelect]);
+
+  useEffect(() => {
+    iframeRef.current?.contentWindow?.postMessage({
+      __nx_visual_mode: true,
+      enabled: selectionMode,
+    }, "*");
+  }, [selectionMode, srcDoc, reloadKey]);
+
   const hasFiles = Array.isArray(files) && files.length > 0;
   const hasContent = hasFiles || !!code;
 
@@ -386,19 +432,19 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
       bundleApp(list, ent)
         .then(({ code: bundled }) => {
           if (cancelled) return;
-          setSrcDoc(buildBundledSrcDoc(bundled, projectId));
+          setSrcDoc(buildBundledSrcDoc(bundled, projectId, { editorSession }));
         })
         .catch(() => {
           // Fallback resiliente: runtime Babel (React + libs via CDN).
           if (cancelled) return;
-          setSrcDoc(buildSrcDocMulti(list, ent, projectId));
+          setSrcDoc(buildSrcDocMulti(list, ent, projectId, editorSession));
         })
         .finally(() => {
           if (!cancelled) setBundling(false);
         });
     } else if (code) {
       setBundling(false);
-      setSrcDoc(buildSrcDoc(code, projectId));
+      setSrcDoc(buildSrcDoc(code, projectId, editorSession));
     } else {
       setBundling(false);
       setSrcDoc("");
@@ -407,7 +453,7 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code, files, entry, version, reloadKey, projectId]);
+  }, [code, files, entry, version, reloadKey, projectId, editorSession]);
 
   useEffect(() => {
     if (!expanded) return;
@@ -470,6 +516,22 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
           )}
         </div>
         <div className="flex items-center gap-1">
+          {editorSession && onElementSelect && (
+            <button
+              onClick={() => setSelectionMode((active) => !active)}
+              aria-label={selectionMode ? "Cancelar seleção visual" : "Selecionar elemento no preview"}
+              title={selectionMode ? "Clique novamente para cancelar" : "Clique e escolha um texto, botão, imagem ou seção"}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                selectionMode
+                  ? "bg-violet-600 text-white shadow-sm"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              )}
+            >
+              <ScanSearch className="h-4 w-4" />
+              <span className="hidden sm:inline">{selectionMode ? "Clique no elemento" : "Selecionar"}</span>
+            </button>
+          )}
           <button
             onClick={() => setReloadKey((k) => k + 1)}
             aria-label="Recarregar app"
@@ -531,7 +593,13 @@ export function AppRunner({ code, files, entry, version, engineMode, projectId, 
               sandbox="allow-scripts allow-pointer-lock allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads"
               allow="microphone; autoplay; clipboard-write"
               srcDoc={srcDoc}
-              onLoad={() => setLoading(false)}
+              onLoad={() => {
+                setLoading(false);
+                iframeRef.current?.contentWindow?.postMessage({
+                  __nx_visual_mode: true,
+                  enabled: selectionMode,
+                }, "*");
+              }}
               allowFullScreen
               className="h-full w-full border-0 bg-white"
             />

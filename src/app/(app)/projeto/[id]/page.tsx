@@ -29,6 +29,7 @@ import { sanitizePromptAttachments, type PromptAttachment } from "@/lib/engine/p
 import { buildAcceptanceReport } from "@/lib/engine/acceptance-report";
 import { acceptanceRepairFingerprint, buildAcceptanceRepairPrompt } from "@/lib/engine/acceptance-repair";
 import type { RuntimeAuditReport } from "@/lib/preview/runtime-audit";
+import type { PreviewElementSelection } from "@/lib/preview/visual-selection";
 
 interface ProjectRow {
   id: string;
@@ -66,6 +67,7 @@ export default function ProjectPage() {
   const [appVer, setAppVer] = useState(0);
   const [engineMode, setEngineMode] = useState<EngineMode | null>(null);
   const [appView, setAppView] = useState<"preview" | "code" | "data" | "media" | "quality">("preview");
+  const [visualSelection, setVisualSelection] = useState<PreviewElementSelection | null>(null);
   const [views, setViews] = useState<number | null>(null);
 
   // Visitas do site publicado (analytics agregado). Só busca quando publicado.
@@ -933,6 +935,8 @@ export default function ProjectPage() {
             onAppResult={handleAppResult}
             onGeneratingChange={setGenerating}
             onEngineMode={setEngineMode}
+            visualSelection={visualSelection}
+            onClearVisualSelection={() => setVisualSelection(null)}
           />
         </aside>
 
@@ -1034,6 +1038,7 @@ export default function ProjectPage() {
                     onError={handleAppError}
                     onReady={handleAppReady}
                     onAudit={handlePreviewAudit}
+                    onElementSelect={setVisualSelection}
                   />
                 )}
               </div>

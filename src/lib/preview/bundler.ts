@@ -15,6 +15,7 @@
 import type { AppFile } from "@/lib/engine/app-types";
 import { adGlobalScript } from "@/lib/preview/ad-global";
 import { runtimeAuditSource } from "@/lib/preview/runtime-audit";
+import { visualSelectionSource } from "@/lib/preview/visual-selection";
 
 const ESBUILD_VERSION = "0.20.2";
 const REACT_VERSION = "18.2.0";
@@ -224,10 +225,11 @@ export async function bundleApp(files: AppFile[], entry: string): Promise<Bundle
 export function buildBundledSrcDoc(
   bundledCode: string,
   projectId?: string | null,
-  opts?: { published?: boolean }
+  opts?: { published?: boolean; editorSession?: boolean }
 ): string {
   const adScript = adGlobalScript(projectId);
   const auditSource = runtimeAuditSource();
+  const selectionSource = opts?.editorSession ? visualSelectionSource() : "";
   // Marcador só no site publicado: liga o analytics de visita do runtime (window.AD).
   const publishedMark = opts?.published ? `<script>window.__AD_PUBLISHED=1</script>` : "";
   const importMap = {
@@ -280,6 +282,7 @@ ${adScript}
   function nxReady(){ if(_nxReported) return; try{ _nxHost.postMessage({ __nx_ready:true }, '*'); }catch(e){} }
   function nxReport(msg){ if(_nxReported) return; _nxReported=true; try{ _nxHost.postMessage({ __nx_error:String(msg).slice(0,800) }, '*'); }catch(e){} }
   ${auditSource}
+  ${selectionSource}
   function showError(msg){ var r=document.getElementById('root'); if(r) r.innerHTML='<div class="nx-error">⚠ Erro ao executar o app:\\n\\n'+String(msg).replace(/</g,'&lt;')+'</div>'; }
   window.addEventListener('error', function(e){ var m=(e.error && e.error.message) || e.message; showError(m); nxReport(m); });
   window.addEventListener('unhandledrejection', function(e){ var m=(e.reason && e.reason.message) || String(e.reason); showError(m); nxReport(m); });

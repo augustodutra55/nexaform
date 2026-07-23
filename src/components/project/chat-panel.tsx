@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout, Mic, Square, Cpu, FileCode2, AlertTriangle, Paperclip, X, Image as ImageIcon } from "lucide-react";
+import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout, Mic, Square, Cpu, FileCode2, AlertTriangle, Paperclip, X, Image as ImageIcon, MousePointer2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AppSchema, GenerationResult } from "@/lib/engine/types";
 import { AppFile, AppGenerationResult, CodeStats, EngineMode, MediaGenerationReport, looksLikeApp } from "@/lib/engine/app-types";
@@ -31,6 +31,10 @@ import {
   STAGED_BUILD_VERSION,
   type StagedBuildJob,
 } from "@/lib/engine/staged-generation";
+import {
+  buildVisualSelectionContext,
+  type PreviewElementSelection,
+} from "@/lib/preview/visual-selection";
 
 interface Message {
   id: string;
@@ -105,6 +109,8 @@ interface ChatPanelProps {
   onGeneratingChange?: (generating: boolean) => void;
   /** Informa o modo do motor da última geração (real/template/demo) ao pai. */
   onEngineMode?: (mode: EngineMode | null) => void;
+  visualSelection?: PreviewElementSelection | null;
+  onClearVisualSelection?: () => void;
 }
 
 const SITE_SUGGESTIONS = [
@@ -147,6 +153,8 @@ export function ChatPanel({
   onAppResult,
   onGeneratingChange,
   onEngineMode,
+  visualSelection,
+  onClearVisualSelection,
 }: ChatPanelProps) {
   const supabase = useMemo(() => createClient(), []);
   const [messages, setMessages] = useState<Message[]>(() => {
@@ -397,6 +405,9 @@ export function ChatPanel({
   ): Promise<boolean> {
     const content = (resumedJob?.originalPrompt ?? text).trim();
     if (!content || generating) return false;
+    const contextualContent = !resumedJob && !isAutoFix && visualSelection
+      ? `${content}\n\n${buildVisualSelectionContext(visualSelection)}`
+      : content;
     const requestAttachments = resumedJob
       ? resumedJob.imageAttachments ?? []
       : providedAttachments ?? (isAutoFix ? [] : attachments);
@@ -411,16 +422,17 @@ export function ChatPanel({
     // "Template/Schema" usa a heurística: app enlatado ou motor de seções.
     const useApp = !!resumedJob ||
       modeRef.current === "app" ||
-      (modeRef.current !== "site" && (genModeRef.current === "real" || looksLikeApp(content)));
+      (modeRef.current !== "site" && (genModeRef.current === "real" || looksLikeApp(contextualContent)));
     const hasCurrentProject = !!(codeRef.current || filesRef.current?.length);
     const useStagedBuild = !isAutoFix && useApp && genModeRef.current === "real" && !!(
       resumedJob ||
-      shouldStageInitialBuild(content, requestAttachments, hasCurrentProject) ||
-      shouldStageRefinement(content, requestAttachments, hasCurrentProject)
+      shouldStageInitialBuild(contextualContent, requestAttachments, hasCurrentProject) ||
+      shouldStageRefinement(contextualContent, requestAttachments, hasCurrentProject)
     );
 
     setInput("");
     if (!isAutoFix && !resumedJob) setAttachments([]);
+    if (!isAutoFix && !resumedJob && visualSelection) onClearVisualSelection?.();
     const visibleContent = requestAttachments.length
       ? `${content}\n\n📎 ${requestAttachments.map(attachmentLabel).join(" · ")}`
       : content;
@@ -485,7 +497,7 @@ export function ChatPanel({
           projectId,
           threadId,
           originalPrompt: content,
-          masterPrompt: buildMasterPrompt(content, requestAttachments),
+          masterPrompt: buildMasterPrompt(contextualContent, requestAttachments),
           kind: jobKind,
           imageAttachments: requestAttachments.filter((attachment) => attachment.kind === "image"),
           nextStage: 0,
@@ -571,11 +583,11 @@ export function ChatPanel({
       }
 
       const payload = useApp
-        ? appPayload(content, codeRef.current, filesRef.current ?? null, requestAttachments, crypto.randomUUID())
+        ? appPayload(contextualContent, codeRef.current, filesRef.current ?? null, requestAttachments, crypto.randomUUID())
         : {
             projectId,
             requestId: crypto.randomUUID(),
-            message: content,
+            message: contextualContent,
             schema: schemaRef.current,
             userKey: localStorage.getItem("nexaform:ai-key") || null,
             userProvider: localStorage.getItem("nexaform:ai-provider") || null,
@@ -921,6 +933,25 @@ export function ChatPanel({
         }}
         className="border-t p-3"
       >
+        {visualSelection && (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-2 text-[11px]">
+            <MousePointer2 className="h-3.5 w-3.5 shrink-0 text-violet-600 dark:text-violet-300" />
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-foreground">Editando o elemento selecionado</p>
+              <p className="truncate text-muted-foreground">
+                {visualSelection.label} · &lt;{visualSelection.tag}&gt;
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClearVisualSelection}
+              className="rounded p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+              aria-label="Remover seleção visual"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
         {attachments.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {attachments.map((attachment) => (

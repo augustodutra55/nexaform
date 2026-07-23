@@ -2,7 +2,20 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Database, Plus, Trash2, Pencil, RefreshCw, Loader2, X, Check, ShieldCheck } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  CheckCircle2,
+  Database,
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
+  ServerCog,
+  ShieldCheck,
+  Trash2,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -38,6 +51,25 @@ interface AccessSettings {
     allowUnknown: boolean;
     fields: Record<string, unknown>;
   };
+}
+
+interface BackendBlueprint {
+  status: "ready" | "review";
+  usesAuth: boolean;
+  warnings: string[];
+  collections: Array<{
+    collection: string;
+    profile: AccessProfile;
+    confidence: "high" | "review";
+    reason: string;
+  }>;
+}
+
+interface BackendProvisioning {
+  status: "ready" | "review";
+  collections: string[];
+  warnings: string[];
+  updatedAt: string;
 }
 
 const PRIVATE_SETTINGS: AccessSettings = {
@@ -128,8 +160,49 @@ export function DataPanel({ projectId }: { projectId: string }) {
   const [contractDraft, setContractDraft] = useState(JSON.stringify(PRIVATE_SETTINGS.data_contract, null, 2));
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [backendBlueprint, setBackendBlueprint] = useState<BackendBlueprint | null>(null);
+  const [backendProvisioning, setBackendProvisioning] = useState<BackendProvisioning | null>(null);
+  const [provisioningBackend, setProvisioningBackend] = useState(false);
 
   const base = `/api/data/${projectId}`;
+
+  const loadBackendBlueprint = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/backend/${projectId}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Falha ao analisar o backend");
+      setBackendBlueprint(json.blueprint || null);
+      setBackendProvisioning(json.provisioning || null);
+    } catch (error: any) {
+      toast.error("Não foi possível analisar o backend", { description: error?.message });
+    }
+  }, [projectId]);
+
+  async function provisionBackend() {
+    setProvisioningBackend(true);
+    try {
+      const res = await fetch(`/api/backend/${projectId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ apply: true }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Falha ao configurar o backend");
+      setBackendBlueprint(json.blueprint || null);
+      setBackendProvisioning(json.provisioning || null);
+      if (json.blueprint?.status === "review") {
+        toast.warning("Backend protegido e configurado", {
+          description: "Uma ou mais coleções ficaram privadas e precisam de revisão antes do uso público.",
+        });
+      } else {
+        toast.success("Backend configurado automaticamente");
+      }
+    } catch (error: any) {
+      toast.error("Não foi possível configurar o backend", { description: error?.message });
+    } finally {
+      setProvisioningBackend(false);
+    }
+  }
 
   const load = useCallback(
     async (col: string) => {
@@ -230,6 +303,7 @@ export function DataPanel({ projectId }: { projectId: string }) {
 
   useEffect(() => {
     load(collection);
+    loadBackendBlueprint();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -300,6 +374,58 @@ export function DataPanel({ projectId }: { projectId: string }) {
 
   return (
     <div className="flex h-full flex-col">
+      <div className="border-b bg-primary/5 px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <ServerCog className="h-4 w-4 text-primary" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium">Backend automático do aplicativo</p>
+            <p className="text-[11px] text-muted-foreground">
+              {backendBlueprint
+                ? `${backendBlueprint.collections.length} coleção(ões) detectada(s)${backendBlueprint.usesAuth ? " · login e isolamento por usuário" : ""}.`
+                : "Analisando coleções, validações e acesso do código atual…"}
+            </p>
+          </div>
+          {backendProvisioning && (
+            <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-1 text-[10px]">
+              {backendProvisioning.status === "ready" ? (
+                <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+              ) : (
+                <AlertTriangle className="h-3 w-3 text-amber-500" />
+              )}
+              Configurado
+            </span>
+          )}
+          <Button
+            variant="brand"
+            size="sm"
+            className="h-8 gap-1 text-xs"
+            onClick={provisionBackend}
+            disabled={provisioningBackend || !backendBlueprint}
+          >
+            {provisioningBackend ? <Loader2 className="h-3 w-3 animate-spin" /> : <ServerCog className="h-3 w-3" />}
+            Configurar novamente
+          </Button>
+        </div>
+        {backendBlueprint && backendBlueprint.collections.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {backendBlueprint.collections.map((item) => (
+              <span
+                key={item.collection}
+                title={item.reason}
+                className="rounded-full border bg-background px-2 py-0.5 text-[10px]"
+              >
+                {item.collection} · {PROFILE_COPY[item.profile].label}
+              </span>
+            ))}
+          </div>
+        )}
+        {backendBlueprint?.warnings.map((warning) => (
+          <p key={warning} className="mt-1 flex items-start gap-1 text-[10px] text-amber-600 dark:text-amber-400">
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+            {warning}
+          </p>
+        ))}
+      </div>
       <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
         <div className="flex items-center gap-2">
           <Database className="h-4 w-4 text-muted-foreground" />

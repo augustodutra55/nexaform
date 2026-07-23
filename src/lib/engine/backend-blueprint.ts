@@ -164,7 +164,10 @@ function inferInsertFields(content: string, collection: string): Record<string, 
     while ((keyMatch = keyExpression.exec(body))) {
       const key = keyMatch[1];
       if (["id", "_createdAt", "__proto__", "constructor", "prototype"].includes(key)) continue;
-      fields[key] = { type: inferType(keyMatch[2] || "") };
+      // Em propriedades abreviadas ({ quantidade, total }) o valor só existe em
+      // runtime. Não invente "string": allowUnknown mantém o app compatível até
+      // que um manifesto explícito declare o contrato.
+      if (keyMatch[2]) fields[key] = { type: inferType(keyMatch[2]) };
     }
   }
   return fields;
@@ -179,6 +182,16 @@ function inferredProfile(
   const hasInsert = operations.includes("insert");
   const hasMutation = operations.some((operation) => operation !== "read");
   const normalized = name.toLowerCase();
+  // Nomes reconhecidos como captação pública prevalecem mesmo em apps híbridos
+  // que também possuem login. O manifesto continua sendo a forma recomendada
+  // de remover qualquer ambiguidade.
+  if (PUBLIC_FORMS.has(normalized) && hasInsert && !hasRead) {
+    return {
+      profile: "form",
+      confidence: "high",
+      reason: "Coleção reconhecida como formulário público sem leitura dos envios.",
+    };
+  }
   if (usesAuth && hasMutation) {
     return {
       profile: "authenticated",
@@ -186,11 +199,18 @@ function inferredProfile(
       reason: "O aplicativo usa autenticação e grava dados por usuário.",
     };
   }
-  if (PUBLIC_FORMS.has(normalized) || (hasInsert && !hasRead && !operations.includes("update") && !operations.includes("delete"))) {
+  if (hasInsert && !hasRead && !operations.includes("update") && !operations.includes("delete")) {
     return {
       profile: "form",
       confidence: "high",
       reason: "Coleção usada como formulário público sem leitura dos envios.",
+    };
+  }
+  if (usesAuth && hasRead && !hasMutation) {
+    return {
+      profile: "authenticated",
+      confidence: "high",
+      reason: "O aplicativo usa autenticação; a leitura foi protegida por usuário.",
     };
   }
   if (PUBLIC_CATALOGS.has(normalized) && hasRead && !hasMutation) {
@@ -220,16 +240,29 @@ function inferredBlueprint(files: AppFile[], usesAuth: boolean): BackendCollecti
   const callExpression = /(?:window\.)?AD\.(list|get|count|insert)\(\s*['"]([a-zA-Z][a-zA-Z0-9_-]{0,79})['"]/g;
 
   for (const file of files) {
+    const fileCollections: string[] = [];
     let match: RegExpExecArray | null;
     while ((match = callExpression.exec(file.content))) {
       const method = match[1];
       const collection = match[2];
+      fileCollections.push(collection);
       const current = operations.get(collection) || [];
       current.push(operationFor(method));
       operations.set(collection, unique(current));
       if (method === "insert") {
         fields.set(collection, { ...(fields.get(collection) || {}), ...inferInsertFields(file.content, collection) });
       }
+    }
+    // update/remove recebem apenas o id do registro no runtime. Sem manifesto
+    // não há como recuperar a coleção com certeza; marque todas as coleções
+    // usadas no mesmo módulo para impedir uma classificação pública insegura.
+    const mutates = /(?:window\.)?AD\.update\s*\(/.test(file.content);
+    const removes = /(?:window\.)?AD\.remove\s*\(/.test(file.content);
+    for (const collection of unique(fileCollections)) {
+      const current = operations.get(collection) || [];
+      if (mutates) current.push("update");
+      if (removes) current.push("delete");
+      operations.set(collection, unique(current));
     }
     if (/(?:window\.)?AD\.email\s*\(/.test(file.content)) {
       operations.set("contatos", unique([...(operations.get("contatos") || []), "insert"]));

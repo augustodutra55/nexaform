@@ -362,6 +362,11 @@ export default function ProjectPage() {
     const slug = project.share_slug ?? nanoid(10);
     const payload = mode === "app" ? appPayload : store.schema;
 
+    if (mode === "app") {
+      const backendReady = await provisionCurrentBackend(false);
+      if (!backendReady) return null;
+    }
+
     // Build de produção: pré-compila o app AGORA (esbuild-wasm já carregado) e
     // salva o bundle para o site publicado carregar sem Babel/esbuild no visitante.
     // Se falhar, salva null → a página pública cai no runtime completo (fallback).
@@ -796,6 +801,7 @@ export default function ProjectPage() {
         .single();
       if (pendingAppApproval.current === pending) pendingAppApproval.current = null;
       if (data) setVersions((current) => [data as VersionRow, ...current]);
+      await provisionCurrentBackend(true);
       toast.success("Preview aprovado e versão salva");
     } catch {
       toast.error("O preview funcionou, mas não consegui salvar", {
@@ -803,6 +809,34 @@ export default function ProjectPage() {
       });
     } finally {
       approvingApp.current = false;
+    }
+  }
+
+  async function provisionCurrentBackend(silent: boolean): Promise<boolean> {
+    try {
+      const response = await fetch(`/api/backend/${projectId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ apply: true }),
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json?.error || "Falha ao configurar o backend.");
+      if (json.provisioning) {
+        const nextMeta = { ...metaRef.current, backendProvisioning: json.provisioning };
+        metaRef.current = nextMeta;
+        setMeta(nextMeta);
+      }
+      if (json.blueprint?.status === "review" && !silent) {
+        toast.warning("Backend seguro, com revisão pendente", {
+          description: "Coleções ambíguas permaneceram privadas. Confira a aba Dados antes de divulgar o aplicativo.",
+        });
+      }
+      return true;
+    } catch (error: any) {
+      toast.error("O backend automático não foi concluído", {
+        description: error?.message || "Abra a aba Dados e tente configurar novamente.",
+      });
+      return false;
     }
   }
 

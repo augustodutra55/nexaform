@@ -180,6 +180,28 @@ export function adGlobalScript(projectId?: string | null): string {
   try {
     if (window.__AD_PUBLISHED && PID) {
       bridge('view',{method:'POST'}).catch(function(){});
+      var telemetryBusy=false;
+      function reportRuntime(kind,message,context){
+        if(telemetryBusy)return;
+        telemetryBusy=true;
+        bridge('telemetry',{method:'POST',body:{
+          kind:kind,
+          message:String(message||'Erro desconhecido').slice(0,800),
+          context:context||{}
+        }}).catch(function(){}).then(function(){telemetryBusy=false;});
+        setTimeout(function(){telemetryBusy=false;},5000);
+      }
+      window.addEventListener('error',function(event){
+        reportRuntime('runtime_error',event&&event.message,{
+          file:String(event&&event.filename||'').slice(0,240),
+          line:Number(event&&event.lineno)||0,
+          column:Number(event&&event.colno)||0
+        });
+      });
+      window.addEventListener('unhandledrejection',function(event){
+        var reason=event&&event.reason;
+        reportRuntime('unhandled_rejection',reason&&reason.message?reason.message:String(reason||'Promise rejeitada'),{});
+      });
     }
   } catch(e){}
 

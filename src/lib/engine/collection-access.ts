@@ -2,6 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 import { isOwner } from "@/lib/access";
 import { isUuid } from "@/lib/engine/data-guard";
+import {
+  EMPTY_DATA_CONTRACT,
+  type DataContract,
+} from "@/lib/engine/data-contract";
 
 export type CollectionOperation = "read" | "insert" | "update" | "delete";
 export type CollectionProfile = "catalog" | "form" | "authenticated" | "private" | "custom";
@@ -17,6 +21,9 @@ export interface CollectionPermissions {
   authenticated_update: boolean;
   authenticated_delete: boolean;
   owner_only: boolean;
+  allowed_roles: string[];
+  authenticated_scope: "own" | "all";
+  data_contract: DataContract;
 }
 
 export interface CollectionAccess {
@@ -25,6 +32,7 @@ export interface CollectionAccess {
   error?: string;
   actor: "owner" | "app_user" | "public";
   appUserId?: string | null;
+  appUserRole?: string | null;
   /** true quando o acesso autenticado deve enxergar somente os próprios registros. */
   scopeToAppUser?: boolean;
   permissions?: CollectionPermissions;
@@ -47,6 +55,9 @@ export const PRIVATE_PERMISSIONS: CollectionPermissions = {
   authenticated_update: false,
   authenticated_delete: false,
   owner_only: true,
+  allowed_roles: [],
+  authenticated_scope: "own",
+  data_contract: EMPTY_DATA_CONTRACT,
 };
 
 function permissionError(op: CollectionOperation, actor: "app_user" | "public"): string {
@@ -61,11 +72,16 @@ function permissionError(op: CollectionOperation, actor: "app_user" | "public"):
     : "Sua conta não pode realizar esta operação.";
 }
 
+export interface AppUserActor {
+  id: string;
+  role: string;
+}
+
 async function appUserFromRequest(
   req: Request,
   admin: SupabaseClient,
   projectId: string
-): Promise<string | null> {
+): Promise<AppUserActor | null> {
   const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
   if (!token) return null;
   const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
@@ -77,7 +93,113 @@ async function appUserFromRequest(
     .eq("project_id", projectId)
     .maybeSingle();
   if (!session || new Date(session.expires_at) <= new Date()) return null;
-  return session.user_id;
+  let { data: appUser, error: appUserError } = await admin
+    .from("app_users")
+    .select("id, role")
+    .eq("id", session.user_id)
+    .eq("project_id", projectId)
+    .maybeSingle();
+  if (appUserError) {
+    const legacy = await admin
+      .from("app_users")
+      .select("id")
+      .eq("id", session.user_id)
+      .eq("project_id", projectId)
+      .maybeSingle();
+    appUser = legacy.data ? { ...legacy.data, role: "user" } : null;
+  }
+  if (!appUser) return null;
+  return { id: appUser.id, role: appUser.role || "user" };
+}
+
+function normalizedPermissions(configured: Partial<CollectionPermissions> | null): CollectionPermissions {
+  const raw = configured ?? {};
+  return {
+    ...PRIVATE_PERMISSIONS,
+    ...raw,
+    allowed_roles: Array.isArray(raw.allowed_roles) ? raw.allowed_roles : [],
+    authenticated_scope: raw.authenticated_scope === "all" ? "all" : "own",
+    data_contract:
+      raw.data_contract && typeof raw.data_contract === "object"
+        ? (raw.data_contract as DataContract)
+        : EMPTY_DATA_CONTRACT,
+  };
+}
+
+async function collectionPermissions(
+  admin: SupabaseClient,
+  projectId: string,
+  collection: string
+): Promise<CollectionPermissions> {
+  const current = await admin
+    .from("app_collection_settings")
+    .select(
+      "profile, public_read, public_insert, public_update, public_delete, authenticated_read, authenticated_insert, authenticated_update, authenticated_delete, owner_only, allowed_roles, authenticated_scope, data_contract"
+    )
+    .eq("project_id", projectId)
+    .eq("collection", collection)
+    .maybeSingle();
+  if (!current.error) return normalizedPermissions(current.data as CollectionPermissions | null);
+
+  // Implantação sem interrupção: enquanto a migration 0012 ainda não foi
+  // aplicada, mantém as permissões anteriores e usa contrato aberto/role user.
+  const legacy = await admin
+    .from("app_collection_settings")
+    .select(
+      "profile, public_read, public_insert, public_update, public_delete, authenticated_read, authenticated_insert, authenticated_update, authenticated_delete, owner_only"
+    )
+    .eq("project_id", projectId)
+    .eq("collection", collection)
+    .maybeSingle();
+  return normalizedPermissions(legacy.data as CollectionPermissions | null);
+}
+
+export function decideCollectionAccess(
+  permissions: CollectionPermissions,
+  operation: CollectionOperation,
+  appUser: AppUserActor | null
+): Pick<CollectionAccess, "allowed" | "actor" | "appUserId" | "appUserRole" | "scopeToAppUser" | "error" | "status"> {
+  const actor = appUser ? "app_user" : "public";
+  if (permissions.owner_only) {
+    return {
+      allowed: false,
+      status: 403,
+      error: "Esta coleção é privada.",
+      actor,
+      appUserId: appUser?.id ?? null,
+      appUserRole: appUser?.role ?? null,
+    };
+  }
+
+  const publicAllowed = permissions[`public_${operation}` as keyof CollectionPermissions] === true;
+  const roleAllowed =
+    !!appUser &&
+    (permissions.allowed_roles.length === 0 || permissions.allowed_roles.includes(appUser.role));
+  const authenticatedAllowed =
+    roleAllowed && permissions[`authenticated_${operation}` as keyof CollectionPermissions] === true;
+
+  if (!publicAllowed && !authenticatedAllowed) {
+    const roleDenied =
+      !!appUser &&
+      permissions.allowed_roles.length > 0 &&
+      !permissions.allowed_roles.includes(appUser.role);
+    return {
+      allowed: false,
+      status: 403,
+      error: roleDenied ? "Seu perfil não tem acesso a esta coleção." : permissionError(operation, actor),
+      actor,
+      appUserId: appUser?.id ?? null,
+      appUserRole: appUser?.role ?? null,
+    };
+  }
+
+  return {
+    allowed: true,
+    actor,
+    appUserId: appUser?.id ?? null,
+    appUserRole: appUser?.role ?? null,
+    scopeToAppUser: authenticatedAllowed && permissions.authenticated_scope === "own",
+  };
 }
 
 /**
@@ -118,45 +240,22 @@ export async function authorizeCollectionOperation(
     globalOwner = isOwner({ role: profile?.role, email: user.email });
   }
   if ((user && user.id === project.user_id) || globalOwner) {
-    return { allowed: true, actor: "owner", appUserId: null, scopeToAppUser: false };
-  }
-
-  if (!project.published) return denied(403, "Este projeto ainda não está publicado.");
-
-  const appUserId = await appUserFromRequest(req, admin, projectId);
-  const actor = appUserId ? "app_user" : "public";
-  const { data: configured } = await admin
-    .from("app_collection_settings")
-    .select(
-      "profile, public_read, public_insert, public_update, public_delete, authenticated_read, authenticated_insert, authenticated_update, authenticated_delete, owner_only"
-    )
-    .eq("project_id", projectId)
-    .eq("collection", collection)
-    .maybeSingle();
-  const permissions = (configured as CollectionPermissions | null) ?? PRIVATE_PERMISSIONS;
-  if (permissions.owner_only) {
-    return { allowed: false, status: 403, error: "Esta coleção é privada.", actor, appUserId, permissions };
-  }
-
-  const publicAllowed = permissions[`public_${operation}` as keyof CollectionPermissions] === true;
-  const authenticatedAllowed =
-    !!appUserId && permissions[`authenticated_${operation}` as keyof CollectionPermissions] === true;
-  if (!publicAllowed && !authenticatedAllowed) {
+    const permissions = await collectionPermissions(admin, projectId, collection);
     return {
-      allowed: false,
-      status: 403,
-      error: permissionError(operation, actor),
-      actor,
-      appUserId,
+      allowed: true,
+      actor: "owner",
+      appUserId: null,
+      appUserRole: null,
+      scopeToAppUser: false,
       permissions,
     };
   }
 
-  return {
-    allowed: true,
-    actor,
-    appUserId,
-    permissions,
-    scopeToAppUser: authenticatedAllowed && !publicAllowed,
-  };
+  if (!project.published) return denied(403, "Este projeto ainda não está publicado.");
+
+  const appUser = await appUserFromRequest(req, admin, projectId);
+  const actor = appUser ? "app_user" : "public";
+  const permissions = await collectionPermissions(admin, projectId, collection);
+  const decision = decideCollectionAccess(permissions, operation, appUser);
+  return { ...decision, actor, permissions };
 }

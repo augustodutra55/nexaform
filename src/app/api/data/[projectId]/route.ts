@@ -7,6 +7,7 @@ import {
   isCollectionName,
   type CollectionAccess,
 } from "@/lib/engine/collection-access";
+import { validateDataRecord } from "@/lib/engine/data-contract";
 
 /**
  * Backend de dados embutido dos apps gerados. A service role toca app_data
@@ -25,6 +26,15 @@ function shape(row: any) {
 }
 function denied(access: CollectionAccess) {
   return NextResponse.json({ error: access.error }, { status: access.status ?? 403 });
+}
+function validateRecord(data: unknown, access: CollectionAccess) {
+  const result = validateDataRecord(data, access.permissions!.data_contract);
+  return result.valid
+    ? null
+    : NextResponse.json(
+        { error: "Dados inválidos para esta coleção.", fieldErrors: result.fieldErrors },
+        { status: 422 }
+      );
 }
 function scoped(q: any, access: CollectionAccess) {
   return access.scopeToAppUser ? q.eq("app_user_id", access.appUserId) : q;
@@ -148,6 +158,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   if (!admin) return bad("Backend de dados não configurado.", 501);
   const access = await authorizeCollectionOperation(req, await createClient(), admin, projectId, collection, "insert");
   if (!access.allowed) return denied(access);
+  const invalid = validateRecord(data, access);
+  if (invalid) return invalid;
 
   const { count } = await admin
     .from("app_data")
@@ -206,6 +218,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ pr
 
   const finalData = body?.replace === true ? data : { ...(existing.data ?? {}), ...data };
   if (JSON.stringify(finalData).length > MAX_BYTES) return bad("Registro grande demais", 413);
+  const invalid = validateRecord(finalData, access);
+  if (invalid) return invalid;
 
   const { data: row, error } = await admin
     .from("app_data")

@@ -105,7 +105,10 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
     const joined = files.map((file) => file.content).join("\n");
     const profile = plan.visualProfile;
     const usesThree = /["'](?:three|@react-three\/fiber|@react-three\/drei)(?:["'/])/.test(joined);
+    const threeCanvasCount = (joined.match(/<Canvas\b/g) || []).length;
     const usesVideo = /<video\b/i.test(joined);
+    const videoTags = joined.match(/<video\b[^>]*>/gi) || [];
+    const imageTags = joined.match(/<img\b[^>]*>/gi) || [];
     const videoSources: string[] = [];
     const videoPattern = /<video\b[^>]*\bsrc\s*=\s*["']([^"']*)["'][^>]*>/gi;
     let videoMatch: RegExpExecArray | null;
@@ -128,14 +131,19 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
     if (profile.allow3D && usesThree && !/(?:fallback\s*=|<img\b|backgroundImage\s*:)/i.test(joined)) {
       errors.push(issue("missing_3d_fallback", "A cena 3D precisa de fallback estático para celulares e falhas de WebGL."));
     }
+    if (profile.allow3D && threeCanvasCount > 1) {
+      errors.push(issue("multiple_3d_scenes", `Use uma única cena 3D protagonista; foram encontrados ${threeCanvasCount} componentes Canvas.`));
+    }
     if (profile.allow3D && usesThree && !/(?:dpr\s*=\s*\{?\[?\s*1\s*,\s*1\.5|Math\.min\([^)]*1\.5)/.test(joined)) {
       warnings.push(issue("unbounded_3d_dpr", "Limite o devicePixelRatio da cena 3D a 1.5."));
+    }
+    if (profile.allow3D && usesThree && !/(?:IntersectionObserver|useInView|document\.visibilityState)/.test(joined)) {
+      warnings.push(issue("always_running_3d", "Pause ou reduza a cena 3D quando ela sair da viewport."));
     }
     if (profile.allowVideo && !usesVideo) {
       errors.push(issue("missing_video", "O pedido exige vídeo, mas o projeto não contém uma implementação de vídeo responsiva."));
     }
     if (profile.allowVideo && plan.media.videoMode === "placeholder") {
-      const videoTags = joined.match(/<video\b[^>]*>/gi) || [];
       const hasSafePlaceholder = videoTags.some((tag) =>
         /\bsrc\s*=\s*["']\s*["']/i.test(tag) && /\bdata-ad-media\s*=\s*["']video["']/i.test(tag)
       );
@@ -157,6 +165,25 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
     }
     if (usesVideo && !/<video[^>]*\b(?:poster|aria-label)=/i.test(joined)) {
       warnings.push(issue("video_fallback", "Adicione poster ou aria-label ao vídeo para carregamento e acessibilidade."));
+    }
+    if (usesVideo && videoTags.some((tag) => !/\bplaysInline\b/i.test(tag))) {
+      warnings.push(issue("video_inline", "Adicione playsInline para o vídeo funcionar corretamente em celulares e Safari."));
+    }
+    if (usesVideo && videoTags.some((tag) => !/\bpreload\s*=\s*["']metadata["']/i.test(tag))) {
+      warnings.push(issue("video_preload", "Use preload=\"metadata\" para evitar download antecipado pesado."));
+    }
+    if (imageTags.some((tag) => !/\balt\s*=/.test(tag))) {
+      warnings.push(issue("image_alt", "Toda imagem precisa de alt contextual ou alt vazio quando for apenas decorativa."));
+    }
+    const nonAvatarImages = imageTags.filter((tag) => !/(?:avatar|pravatar|perfil|depoimento)/i.test(tag));
+    if (nonAvatarImages.some((tag) => !/\bobject-cover\b/.test(tag))) {
+      warnings.push(issue("image_crop", "Imagens de conteúdo devem usar object-cover dentro de proporção fixa para não distorcer."));
+    }
+    if (nonAvatarImages.length > 1 && nonAvatarImages.slice(1).some((tag) => !/\bloading\s*=\s*["']lazy["']/.test(tag))) {
+      warnings.push(issue("image_lazy_loading", "Imagens abaixo da primeira devem usar loading=\"lazy\"."));
+    }
+    if (nonAvatarImages.some((tag) => !/\bdecoding\s*=\s*["']async["']/.test(tag))) {
+      warnings.push(issue("image_async_decode", "Use decoding=\"async\" nas imagens de conteúdo."));
     }
     if (profile.motion === "expressive" && !hasMotion) {
       warnings.push(issue("missing_motion", "O perfil pede movimento expressivo, mas nenhuma animação intencional foi encontrada."));

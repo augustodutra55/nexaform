@@ -1,4 +1,5 @@
 import type { GenerationMediaAsset, GenerationPlan, VisualProfile, VisualProfileId } from "./app-types";
+import { buildVisualBlueprint } from "./visual-system";
 
 function has(text: string, pattern: RegExp): boolean {
   return pattern.test(text);
@@ -102,6 +103,7 @@ export function buildGenerationPlan(message: string, mediaAssets: GenerationMedi
   const requiredCapabilities: string[] = [];
   const visualDirection: string[] = [];
   const visualProfile = visualProfileFor(message, kind);
+  const visualBlueprint = buildVisualBlueprint(message, kind, visualProfile);
   const imageCount = mediaAssets.filter((asset) => asset.type.indexOf("image/") === 0).length;
   const videoCount = mediaAssets.filter((asset) => asset.type.indexOf("video/") === 0).length;
 
@@ -127,6 +129,7 @@ export function buildGenerationPlan(message: string, mediaAssets: GenerationMedi
     requiredCapabilities,
     visualDirection,
     visualProfile,
+    visualBlueprint,
     media: {
       imageCount,
       videoCount,
@@ -139,6 +142,7 @@ export function buildGenerationPlan(message: string, mediaAssets: GenerationMedi
       "desktop e mobile responsivos, com acessibilidade e feedback de erro",
       "nenhuma dependência de Node ou backend inexistente no runtime gerado",
       `perfil visual ${visualProfile.label} aplicado sem comprometer o orçamento de performance`,
+      `sistema visual ${visualBlueprint.id} aplicado de forma coerente e não genérica`,
     ],
   };
 }
@@ -152,8 +156,15 @@ export function renderGenerationPlan(plan: GenerationPlan): string {
     `Capacidades: ${plan.requiredCapabilities.join("; ")}`,
     `Direção visual: ${plan.visualDirection.join("; ")}`,
     `Perfil visual: ${plan.visualProfile.label} (${plan.visualProfile.id})`,
+    `Blueprint: ${plan.visualBlueprint.id}; segmento: ${plan.visualBlueprint.segment}`,
+    `Assinatura: ${plan.visualBlueprint.signature}`,
     `Estilo: ${plan.visualProfile.style}`,
-    `Layout: ${plan.visualProfile.layout}`,
+    `Layout: ${plan.visualProfile.layout}; ${plan.visualBlueprint.compositions.join("; ")}`,
+    `Paleta: ${plan.visualBlueprint.palette}; tipografia: ${plan.visualBlueprint.typography}`,
+    `Superfícies: ${plan.visualBlueprint.surface}`,
+    `Mídia: ${plan.visualBlueprint.mediaTreatment.join("; ")}`,
+    `Receita de movimento: ${plan.visualBlueprint.motionRecipe.join("; ")}`,
+    `Receita 3D: ${plan.visualBlueprint.threeDRecipe.join("; ")}`,
     `Motion: ${plan.visualProfile.motion}; 3D: ${plan.visualProfile.allow3D ? "permitido com fallback" : "não usar"}; vídeo: ${plan.visualProfile.allowVideo ? "solicitado" : "não inserir por conta própria"}`,
     `Mídia disponível: ${plan.media.imageCount} imagem(ns), ${plan.media.videoCount} vídeo(s); modo de vídeo: ${plan.media.videoMode}.`,
     `Orçamento: no máximo ${plan.visualProfile.maxExternalPackages} pacotes externos; ${plan.visualProfile.performanceRules.join("; ")}`,

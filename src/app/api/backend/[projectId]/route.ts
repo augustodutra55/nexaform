@@ -56,12 +56,13 @@ function settingsFor(item: BackendCollectionBlueprint) {
     return { ...base, public_insert: true, owner_only: false };
   }
   if (item.profile === "authenticated") {
+    const fullManifestAccess = item.source === "manifest" && item.operations.length === 0;
     return {
       ...base,
-      authenticated_read: true,
-      authenticated_insert: true,
-      authenticated_update: true,
-      authenticated_delete: true,
+      authenticated_read: fullManifestAccess || item.operations.includes("read"),
+      authenticated_insert: fullManifestAccess || item.operations.includes("insert"),
+      authenticated_update: fullManifestAccess || item.operations.includes("update"),
+      authenticated_delete: fullManifestAccess || item.operations.includes("delete"),
       owner_only: false,
     };
   }
@@ -83,7 +84,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ pro
 export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   if (!isUuid(projectId)) return bad("projectId inválido.");
-  let body: { apply?: boolean } = {};
+  let body: { apply?: boolean; force?: boolean } = {};
   try {
     body = await req.json();
   } catch {
@@ -94,16 +95,56 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   const blueprint = buildBackendBlueprint(resolved.project!.schema);
   if (body.apply !== true) return NextResponse.json({ blueprint, applied: false });
 
+  const previousManaged = Array.isArray(resolved.project!.meta?.backendProvisioning?.collections)
+    ? resolved.project!.meta.backendProvisioning.collections.filter(
+        (collection: unknown): collection is string => typeof collection === "string"
+      )
+    : [];
+  const desired = new Set(blueprint.collections.map((item) => item.collection));
+  const stale = previousManaged.filter((collection: string) => !desired.has(collection));
+  const { data: existingRows, error: existingError } = blueprint.collections.length
+    ? await resolved.admin!
+        .from("app_collection_settings")
+        .select("collection")
+        .eq("project_id", projectId)
+        .in("collection", Array.from(desired))
+    : { data: [], error: null };
+  if (existingError) return bad(existingError.message, 500);
+  const existing = new Set(
+    (existingRows || []).map((row: { collection: string }) => row.collection)
+  );
+
   const configured: string[] = [];
   for (const item of blueprint.collections) {
-    const payload = { ...settingsFor(item), project_id: projectId };
-    const { error } = await resolved.admin!
-      .from("app_collection_settings")
-      .upsert(payload, { onConflict: "project_id,collection" });
-    if (error) {
-      return bad(`Não foi possível configurar “${item.collection}”: ${error.message}`, 500);
+    // Provisionamento automático cria apenas o que falta. Configurações que o
+    // dono ajustou no painel só são substituídas por uma ação explícita.
+    if (body.force === true || !existing.has(item.collection)) {
+      const payload = { ...settingsFor(item), project_id: projectId };
+      const { error } = await resolved.admin!
+        .from("app_collection_settings")
+        .upsert(payload, { onConflict: "project_id,collection" });
+      if (error) {
+        return bad(`Não foi possível configurar “${item.collection}”: ${error.message}`, 500);
+      }
     }
     configured.push(item.collection);
+  }
+
+  // Revoga somente coleções anteriormente gerenciadas pelo blueprint. Linhas
+  // manuais que nunca fizeram parte dele permanecem intactas.
+  for (const collection of stale) {
+    const { error } = await resolved.admin!
+      .from("app_collection_settings")
+      .update({
+        ...PRIVATE_PERMISSIONS,
+        profile: "private",
+        allowed_roles: [],
+        authenticated_scope: "own",
+        data_contract: { version: 1, allowUnknown: true, fields: {} },
+      })
+      .eq("project_id", projectId)
+      .eq("collection", collection);
+    if (error) return bad(`Não foi possível revogar “${collection}”: ${error.message}`, 500);
   }
 
   const updatedAt = new Date().toISOString();
@@ -132,6 +173,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     blueprint,
     provisioning,
     applied: true,
+    preservedManual: body.force !== true,
+    revoked: stale,
   });
 }
-

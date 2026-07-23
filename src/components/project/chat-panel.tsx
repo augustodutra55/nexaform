@@ -33,6 +33,7 @@ import {
 } from "@/lib/engine/staged-generation";
 import {
   buildVisualSelectionContext,
+  findPreviewSourceCandidates,
   type PreviewElementSelection,
 } from "@/lib/preview/visual-selection";
 
@@ -405,8 +406,16 @@ export function ChatPanel({
   ): Promise<boolean> {
     const content = (resumedJob?.originalPrompt ?? text).trim();
     if (!content || generating) return false;
+    const selectionFiles = filesRef.current?.length
+      ? filesRef.current
+      : codeRef.current
+        ? [{ path: "App.jsx", content: codeRef.current }]
+        : [];
     const contextualContent = !resumedJob && !isAutoFix && visualSelection
-      ? `${content}\n\n${buildVisualSelectionContext(visualSelection)}`
+      ? `${content}\n\n${buildVisualSelectionContext(
+          visualSelection,
+          findPreviewSourceCandidates(visualSelection, selectionFiles)
+        )}`
       : content;
     const requestAttachments = resumedJob
       ? resumedJob.imageAttachments ?? []

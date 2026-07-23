@@ -70,3 +70,12 @@ test("mantém o fluxo utilizável e sem overflow no modo mobile", async ({ page 
   expect(overflow).toBeLessThanOrEqual(8);
   await expect(page.getByTestId("runtime-error")).toHaveCount(0);
 });
+
+test("seleciona um elemento real do preview e o devolve ao editor", async ({ page }) => {
+  await page.getByRole("button", { name: "Selecionar elemento no preview" }).click();
+  await generatedApp(page).getByRole("button", { name: "Entrar" }).click();
+
+  await expect(page.getByTestId("visual-selection-result")).toHaveText("Entrar");
+  await expect(page.getByRole("button", { name: "Selecionar elemento no preview" })).toBeVisible();
+  await expect(page.getByTestId("runtime-error")).toHaveCount(0);
+});

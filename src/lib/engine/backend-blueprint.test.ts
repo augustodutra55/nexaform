@@ -23,10 +23,10 @@ describe("buildBackendBlueprint", () => {
     );
     expect(blueprint.collections[0].profile).toBe("form");
     expect(blueprint.collections[0].dataContract.fields).toMatchObject({
-      nome: { type: "string" },
-      email: { type: "string" },
       ativo: { type: "boolean" },
     });
+    expect(blueprint.collections[0].dataContract.fields).not.toHaveProperty("nome");
+    expect(blueprint.collections[0].dataContract.fields).not.toHaveProperty("email");
   });
 
   it("isola dados quando o aplicativo usa autenticação", () => {
@@ -66,5 +66,49 @@ describe("buildBackendBlueprint", () => {
       operations: ["read"],
     });
     expect(blueprint.collections[0].dataContract.allowUnknown).toBe(false);
+  });
+
+  it("não libera leitura pública inferida quando o app usa login", () => {
+    const blueprint = buildBackendBlueprint(
+      app("await AD.auth.me(); await AD.list('perfil')")
+    );
+    expect(blueprint.collections[0]).toMatchObject({
+      collection: "perfil",
+      profile: "authenticated",
+      operations: ["read"],
+    });
+  });
+
+  it("mantém formulário público conhecido em aplicativo híbrido com login", () => {
+    const blueprint = buildBackendBlueprint(
+      app("await AD.auth.me(); await AD.insert('leads', { nome, email })")
+    );
+    expect(blueprint.collections[0]).toMatchObject({
+      collection: "leads",
+      profile: "form",
+      operations: ["insert"],
+    });
+  });
+
+  it("detecta update e remove associados às coleções do mesmo módulo", () => {
+    const blueprint = buildBackendBlueprint(
+      app("const itens = await AD.list('clientes'); await AD.update(id, { nome }); await AD.remove(id)")
+    );
+    expect(blueprint.status).toBe("review");
+    expect(blueprint.collections[0]).toMatchObject({
+      collection: "clientes",
+      profile: "private",
+      operations: ["read", "update", "delete"],
+    });
+  });
+
+  it("não restringe propriedades abreviadas a string", () => {
+    const blueprint = buildBackendBlueprint(
+      app("await AD.insert('pedidos', { quantidade, total, pago: false })")
+    );
+    expect(blueprint.collections[0].dataContract.fields).toEqual({
+      pago: { type: "boolean" },
+    });
+    expect(blueprint.collections[0].dataContract.allowUnknown).toBe(true);
   });
 });

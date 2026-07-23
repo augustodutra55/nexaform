@@ -184,7 +184,7 @@ export function DataPanel({ projectId }: { projectId: string }) {
       const res = await fetch(`/api/backend/${projectId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ apply: true }),
+        body: JSON.stringify({ apply: true, force: true }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "Falha ao configurar o backend");

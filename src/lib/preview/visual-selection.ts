@@ -1,3 +1,5 @@
+import type { AppFile } from "@/lib/engine/app-types";
+
 export interface PreviewElementSelection {
   tag: string;
   label: string;
@@ -7,8 +9,74 @@ export interface PreviewElementSelection {
   nearbyText: string;
 }
 
+export interface PreviewSourceCandidate {
+  path: string;
+  score: number;
+  evidence: string;
+}
+
 function clean(value: unknown, max = 240): string {
   return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+function comparable(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function evidenceFor(content: string, needles: string[]): string {
+  const lines = content.split(/\r?\n/);
+  for (const line of lines) {
+    const normalizedLine = comparable(line);
+    if (needles.some((needle) => needle.length >= 3 && normalizedLine.includes(needle))) {
+      return clean(line, 180);
+    }
+  }
+  return "";
+}
+
+/**
+ * Relaciona o elemento clicado aos arquivos que provavelmente o renderizam.
+ * É uma heurística conservadora: orienta a IA, mas não força um arquivo quando
+ * o texto é dinâmico ou não existe literalmente no código-fonte.
+ */
+export function findPreviewSourceCandidates(
+  selection: PreviewElementSelection,
+  files: AppFile[] | null | undefined,
+  maxCandidates = 3
+): PreviewSourceCandidate[] {
+  if (!files?.length) return [];
+  const text = comparable(selection.text);
+  const label = comparable(selection.label);
+  const nearby = comparable(selection.nearbyText);
+  const nearbyTerms = nearby
+    .split(" ")
+    .filter((term) => term.length >= 5)
+    .filter((term, index, all) => all.indexOf(term) === index)
+    .slice(0, 16);
+  const needles = Array.from(new Set([text, label].filter((value) => value.length >= 3)));
+
+  return files
+    .map((file) => {
+      const source = comparable(file.content);
+      let score = 0;
+      if (text && source.includes(text)) score += 12;
+      if (label && label !== text && source.includes(label)) score += 8;
+      const nearbyMatches = nearbyTerms.filter((term) => source.includes(term)).length;
+      score += Math.min(nearbyMatches, 6);
+      return {
+        path: file.path,
+        score,
+        evidence: evidenceFor(file.content, needles.concat(nearbyTerms)),
+      };
+    })
+    .filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
+    .slice(0, Math.max(1, maxCandidates));
 }
 
 export function normalizePreviewSelection(value: unknown): PreviewElementSelection | null {
@@ -27,13 +95,21 @@ export function normalizePreviewSelection(value: unknown): PreviewElementSelecti
   };
 }
 
-export function buildVisualSelectionContext(selection: PreviewElementSelection): string {
+export function buildVisualSelectionContext(
+  selection: PreviewElementSelection,
+  sourceCandidates: PreviewSourceCandidate[] = []
+): string {
   const details = [
     `Elemento selecionado no preview: <${selection.tag}>`,
     `Identificação aproximada: ${selection.selector}`,
     selection.role ? `Função: ${selection.role}` : "",
     selection.text ? `Texto do elemento: "${selection.text}"` : "",
     selection.nearbyText ? `Contexto visual próximo: "${selection.nearbyText}"` : "",
+    sourceCandidates.length
+      ? `Arquivos-fonte prováveis (confirme pelo conteúdo antes de editar):\n${sourceCandidates
+          .map((candidate) => `- ${candidate.path}${candidate.evidence ? ` — ${candidate.evidence}` : ""}`)
+          .join("\n")}`
+      : "",
     "Altere somente este elemento ou o componente que o contém. Preserve o restante do projeto e use edição cirúrgica em ops.",
   ].filter(Boolean);
   return `[CONTEXTO DA SELEÇÃO VISUAL]\n${details.join("\n")}\n[FIM DO CONTEXTO]`;

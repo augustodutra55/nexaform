@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AppRunner } from "@/components/preview/app-runner";
 import type { RuntimeAuditReport } from "@/lib/preview/runtime-audit";
+import type { PreviewElementSelection } from "@/lib/preview/visual-selection";
 
 const GENERATED_APP_FIXTURE = String.raw`
 function App() {
@@ -200,6 +201,7 @@ export function RuntimeE2EHarness() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
   const [audit, setAudit] = useState<RuntimeAuditReport | null>(null);
+  const [selection, setSelection] = useState<PreviewElementSelection | null>(null);
 
   return (
     <main className="h-screen min-h-[640px] bg-background">
@@ -207,6 +209,7 @@ export function RuntimeE2EHarness() {
         {ready ? <span data-testid="runtime-ready">preview aprovado</span> : null}
         {error ? <span data-testid="runtime-error">{error}</span> : null}
         {audit ? <span data-testid="runtime-audit">{audit.issues.length} ocorrências</span> : null}
+        {selection ? <span data-testid="visual-selection-result">{selection.label}</span> : null}
       </div>
       <AppRunner
         code={GENERATED_APP_FIXTURE}
@@ -215,6 +218,8 @@ export function RuntimeE2EHarness() {
         onReady={() => setReady(true)}
         onError={setError}
         onAudit={setAudit}
+        editorSession
+        onElementSelect={setSelection}
       />
     </main>
   );

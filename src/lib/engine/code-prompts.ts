@@ -194,15 +194,22 @@ export function serializeFiles(files: { path: string; content: string }[]): stri
  * de performance — especialmente para 3D, vídeo e motion.
  */
 export function buildDesignBrief(message: string): string {
-  const profile = buildGenerationPlan(message).visualProfile;
+  const plan = buildGenerationPlan(message);
+  const profile = plan.visualProfile;
+  const blueprint = plan.visualBlueprint;
   return [
     "\n\n=== DIRETRIZ VISUAL PROFISSIONAL — obrigatória e coerente com o segmento ===",
     `• PERFIL: ${profile.label} (${profile.id}).`,
+    `• BLUEPRINT: ${blueprint.id}; segmento ${blueprint.segment}. Este sistema é a fonte de verdade visual: não o substitua por um template genérico.`,
+    `• ASSINATURA: ${blueprint.signature}.`,
     `• ESTILO: ${profile.style}.`,
-    `• COMPOSIÇÃO: ${profile.layout}.`,
-    `• MOTION: nível ${profile.motion}; anime transform/opacity, respeite prefers-reduced-motion e nunca deixe conteúdo preso invisível.`,
-    `• 3D: ${profile.allow3D ? "permitido em uma única cena protagonista, com fallback estático e devicePixelRatio máximo 1.5" : "não use bibliotecas 3D; crie profundidade com CSS, camadas, perspectiva e imagens"}.`,
-    `• VÍDEO: ${profile.allowVideo ? "foi solicitado; use somente mídia relacionada ao projeto e inclua poster/fallback" : "não invente vídeo nem use clipes genéricos de demonstração"}.`,
+    `• PALETA E TIPO: ${blueprint.palette}; ${blueprint.typography}.`,
+    `• COMPOSIÇÃO: ${profile.layout}. ${blueprint.compositions.join("; ")}.`,
+    `• SUPERFÍCIES: ${blueprint.surface}.`,
+    `• MÍDIA: ${blueprint.mediaTreatment.join("; ")}.`,
+    `• MOTION: nível ${profile.motion}; ${blueprint.motionRecipe.join("; ")}.`,
+    `• 3D: ${blueprint.threeDRecipe.join("; ")}.`,
+    `• VÍDEO: ${profile.allowVideo ? "foi solicitado; use somente mídia relacionada ao projeto e siga a receita de mídia" : "não invente vídeo nem use clipes genéricos de demonstração"}.`,
     `• ORÇAMENTO: no máximo ${profile.maxExternalPackages} pacotes externos. ${profile.performanceRules.join("; ")}.`,
     "• ACABAMENTO: use uma ideia visual forte, identidade própria, hierarquia, estados completos e prova de confiança. Evite o clichê de hero centralizado + dois botões + três cards idênticos.",
   ].join("\n");

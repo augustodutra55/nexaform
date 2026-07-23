@@ -123,10 +123,15 @@ export function findProjectMedia(files: AppFile[], projectName: string): Project
 
 export function buildMediaPrompt(item: ProjectMediaItem | null, projectName: string, kind: MediaKind): string {
   const context = item?.context || projectName || "conteúdo principal";
+  const aspect = /\b(hero|banner|capa|abertura|destaque)\b/i.test(context)
+    ? "16:9 landscape"
+    : /\b(avatar|perfil|depoimento|testimonial)\b/i.test(context)
+      ? "1:1 square"
+      : "4:3 landscape";
   if (kind === "video") {
-    return `Create a professional cinematic video for ${projectName}. The scene must accurately represent "${context}". 6 to 8 seconds, natural motion, realistic lighting, premium commercial quality, stable camera, no text, no subtitles, no watermark, no logos.`;
+    return `Create a professional cinematic video for ${projectName}. The scene must accurately represent "${context}". ${aspect}, 6 to 8 seconds, natural motion, realistic lighting, premium commercial quality, stable camera, no text, no subtitles, no watermark, no logos.`;
   }
-  return `Create a professional photorealistic image for ${projectName}. The image must accurately represent "${context}" and match that specific content block. Premium commercial photography, natural realistic lighting, clean composition, no text, no watermark, no logos.`;
+  return `Create a professional photorealistic image for ${projectName}. The image must accurately represent "${context}" and match that specific content block. ${aspect}, high-detail premium commercial photography, natural realistic lighting, clean composition, no text, no watermark, no logos.`;
 }
 
 export function replaceProjectMedia(files: AppFile[], item: ProjectMediaItem, nextUrl: string): AppFile[] | null {

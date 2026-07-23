@@ -64,6 +64,19 @@ export interface VisualProfile {
   performanceRules: string[];
 }
 
+export interface VisualBlueprint {
+  id: string;
+  segment: string;
+  signature: string;
+  palette: string;
+  typography: string;
+  surface: string;
+  compositions: string[];
+  mediaTreatment: string[];
+  motionRecipe: string[];
+  threeDRecipe: string[];
+}
+
 /** Contrato de produto criado antes de chamar a IA. */
 export interface GenerationPlan {
   kind: "site" | "app";
@@ -72,6 +85,8 @@ export interface GenerationPlan {
   requiredCapabilities: string[];
   visualDirection: string[];
   visualProfile: VisualProfile;
+  /** Sistema visual reutilizável e determinístico para evitar layouts genéricos. */
+  visualBlueprint: VisualBlueprint;
   /** Mídia já disponível no projeto e regras para não inventar arquivos. */
   media: {
     imageCount: number;

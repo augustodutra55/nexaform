@@ -36,6 +36,15 @@ export interface ProjectAcceptanceSnapshot {
   updatedAt: string;
 }
 
+export interface CommercialDeliveryMeta {
+  logoUrl?: string;
+  primaryColor?: string;
+  contactEmail?: string;
+  customDomain?: string;
+  handoffNotes?: string;
+  deliveredAt?: string;
+}
+
 export interface ProjectMeta {
   status?: ProjectStatus;
   notes?: string;
@@ -45,6 +54,8 @@ export interface ProjectMeta {
   client?: string;
   /** Entrega white-label: publicação sem a marca AD Studio. */
   whitelabel?: boolean;
+  /** Identidade e registro do pacote entregue ao cliente. */
+  delivery?: CommercialDeliveryMeta;
   /** Arquivos enviados pela Central de Mídia para reutilização no projeto. */
   media?: ProjectMediaAsset[];
   /** Contrato e evidências de qualidade da última versão aprovada. */

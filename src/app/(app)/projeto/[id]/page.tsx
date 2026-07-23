@@ -23,6 +23,7 @@ import { AppRunner } from "@/components/preview/app-runner";
 import { bundleApp } from "@/lib/preview/bundler";
 import { Skeleton } from "@/components/ui/skeleton";
 import { buildViteProject } from "@/lib/export/vite-project";
+import { buildDeliveryChecklist, buildHandoffDocuments } from "@/lib/delivery/commercial-handoff";
 import { replaceProjectMedia, type ProjectMediaAsset, type ProjectMediaItem } from "@/lib/media/project-media";
 import { sanitizePromptAttachments, type PromptAttachment } from "@/lib/engine/prompt-attachments";
 import { buildAcceptanceReport } from "@/lib/engine/acceptance-report";
@@ -458,6 +459,65 @@ export default function ProjectPage() {
     toast.success("Exportado");
   }
 
+  async function handleCommercialExport() {
+    if (!project) return;
+    const plan = resolvePlan(access);
+    if (!plan.canExport) {
+      toast.error("Pacote comercial disponível no plano Pro");
+      return;
+    }
+    try {
+      const { default: JSZip } = await import("jszip");
+      const zip = new JSZip();
+      const safeName = (project.name || "projeto").replace(/[^\w.-]+/g, "-").slice(0, 60) || "projeto";
+      const root = zip.folder(`${safeName}-entrega`)!;
+      const publicUrl = project.published && project.share_slug
+        ? `${window.location.origin}/p/${project.share_slug}`
+        : null;
+      const checklist = buildDeliveryChecklist({
+        meta: metaRef.current,
+        published: project.published,
+        shareSlug: project.share_slug,
+        canExport: plan.canExport,
+        qualityRequired: mode === "app",
+      });
+      const documents = buildHandoffDocuments({
+        projectName: project.name,
+        projectId,
+        publicUrl,
+        meta: metaRef.current,
+        checklist,
+      });
+      for (const file of documents) root.file(file.path, file.content);
+
+      if (mode === "app") {
+        const sourceFiles: AppFile[] = appFiles && appFiles.length
+          ? appFiles
+          : [{ path: "App.jsx", content: appCode ?? "" }];
+        if (!sourceFiles[0]?.content) throw new Error("O projeto ainda não possui código para entregar.");
+        const appFolder = root.folder("app")!;
+        const exportFiles = buildViteProject({
+          files: sourceFiles,
+          entry: appEntry ?? sourceFiles[0].path,
+          projectName: project.name,
+          projectId,
+          apiOrigin: process.env.NEXT_PUBLIC_APP_URL || window.location.origin,
+        });
+        for (const file of exportFiles) appFolder.file(file.path, file.content);
+      } else if (store.schema) {
+        root.file("projeto.adstudio.json", JSON.stringify(store.schema, null, 2));
+      }
+
+      const blob = await zip.generateAsync({ type: "blob" });
+      downloadBlob(blob, `${safeName}-entrega.zip`);
+      toast.success("Pacote comercial gerado", {
+        description: "Inclui código, identidade, checklist, qualidade e instruções de handoff.",
+      });
+    } catch (error: any) {
+      toast.error("Não foi possível gerar o pacote comercial", { description: error?.message });
+    }
+  }
+
   /** Arquivos para a aba de Código (single-file vira um App.jsx). */
   const codeFiles: AppFile[] =
     appFiles && appFiles.length
@@ -805,6 +865,7 @@ export default function ProjectPage() {
         published={project.published}
         shareSlug={project.share_slug}
         canExport={resolvePlan(access).canExport}
+        qualityRequired={mode === "app"}
         versions={versions}
         meta={meta}
         studio={isOwner(access)}
@@ -812,6 +873,7 @@ export default function ProjectPage() {
         onRestoreVersion={handleRestoreVersion}
         onPublish={handlePublish}
         onExport={handleExport}
+        onCommercialExport={handleCommercialExport}
         onToggleEditor={() => setEditorOpen((o) => !o)}
         onMetaChange={handleMetaChange}
         onSaveVersion={handleSaveVersion}

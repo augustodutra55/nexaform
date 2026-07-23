@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/dialog";
 import { ProjectMeta, ProjectStatus, STATUS_LABEL, STATUS_ORDER, STATUS_STYLE } from "@/lib/studio";
 import { cn } from "@/lib/utils";
+import { DeliveryPanel } from "@/components/project/delivery-panel";
 
 export interface VersionRow {
   id: string;
@@ -55,6 +56,7 @@ interface TopbarProps {
   published: boolean;
   shareSlug: string | null;
   canExport: boolean;
+  qualityRequired: boolean;
   versions: VersionRow[];
   meta: ProjectMeta;
   studio: boolean;
@@ -62,6 +64,7 @@ interface TopbarProps {
   onRestoreVersion: (v: VersionRow) => void;
   onPublish: () => Promise<string | null>;
   onExport: () => void;
+  onCommercialExport: () => Promise<void>;
   onToggleEditor: () => void;
   onMetaChange: (patch: Partial<ProjectMeta>) => void;
   onSaveVersion: (label: string) => Promise<void>;
@@ -72,6 +75,7 @@ export function ProjectTopbar({
   published,
   shareSlug,
   canExport,
+  qualityRequired,
   versions,
   meta,
   studio,
@@ -79,6 +83,7 @@ export function ProjectTopbar({
   onRestoreVersion,
   onPublish,
   onExport,
+  onCommercialExport,
   onToggleEditor,
   onMetaChange,
   onSaveVersion,
@@ -188,6 +193,19 @@ export function ProjectTopbar({
         <Button variant="ghost" size="icon" onClick={onExport} aria-label="Exportar projeto" title="Exportar projeto">
           <Download />
         </Button>
+        {studio && (
+          <DeliveryPanel
+            projectName={name}
+            published={published}
+            shareSlug={shareSlug}
+            canExport={canExport}
+            qualityRequired={qualityRequired}
+            meta={meta}
+            onMetaChange={onMetaChange}
+            onPublish={onPublish}
+            onExport={onCommercialExport}
+          />
+        )}
         <Button variant="ghost" size="icon" onClick={onToggleEditor} aria-label="Alternar editor" title="Editor visual" className="hidden lg:inline-flex">
           <PanelRight />
         </Button>

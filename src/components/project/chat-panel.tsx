@@ -23,8 +23,10 @@ import {
   buildMasterPrompt,
   buildStagePrompt,
   buildStageRetryPrompt,
+  isValidStagedBuildJob,
   shouldStageInitialBuild,
   shouldStageRefinement,
+  stagedJobForCloud,
   stagedStages,
   STAGED_BUILD_VERSION,
   type StagedBuildJob,
@@ -206,30 +208,69 @@ export function ChatPanel({
   }, []);
 
   useEffect(() => {
+    let localJob: StagedBuildJob | null = null;
     try {
       const raw = localStorage.getItem(stagedStorageKey);
-      if (!raw) return;
-      const job = JSON.parse(raw) as StagedBuildJob;
-      const total = stagedStages(job.kind ?? "initial").length;
-      if (
-        job.version === STAGED_BUILD_VERSION &&
-        job.projectId === projectId &&
-        job.threadId === threadId &&
-        typeof job.masterPrompt === "string" &&
-        job.nextStage >= 0 && job.nextStage < total
-      ) setResumeJob(job);
-      else localStorage.removeItem(stagedStorageKey);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (isValidStagedBuildJob(parsed, projectId, threadId)) {
+        localJob = parsed;
+        setResumeJob(parsed);
+      } else if (raw) localStorage.removeItem(stagedStorageKey);
     } catch {
       localStorage.removeItem(stagedStorageKey);
     }
+
+    let cancelled = false;
+    void supabase
+      .from("staged_generation_jobs")
+      .select("payload")
+      .eq("project_id", projectId)
+      .eq("thread_id", threadId)
+      .eq("status", "active")
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled || error || !data) return;
+        const cloudJob = data.payload;
+        if (!isValidStagedBuildJob(cloudJob, projectId, threadId)) return;
+        if (!localJob || cloudJob.nextStage > localJob.nextStage) {
+          try { localStorage.setItem(stagedStorageKey, JSON.stringify(cloudJob)); } catch {}
+          setResumeJob(cloudJob);
+        } else if (localJob.nextStage > cloudJob.nextStage) {
+          void supabase.from("staged_generation_jobs").upsert({
+            project_id: projectId,
+            thread_id: threadId,
+            status: "active",
+            payload: stagedJobForCloud(localJob),
+          }, { onConflict: "project_id" });
+        }
+      });
+    return () => { cancelled = true; };
   }, [projectId, stagedStorageKey, threadId]);
 
-  function storeStagedJob(job: StagedBuildJob | null) {
+  async function storeStagedJob(job: StagedBuildJob | null): Promise<void> {
     try {
       if (job) localStorage.setItem(stagedStorageKey, JSON.stringify(job));
       else localStorage.removeItem(stagedStorageKey);
     } catch {}
     setResumeJob(job);
+    try {
+      if (job) {
+        await supabase.from("staged_generation_jobs").upsert({
+          project_id: projectId,
+          thread_id: threadId,
+          status: "active",
+          payload: stagedJobForCloud(job),
+        }, { onConflict: "project_id" });
+      } else {
+        await supabase.from("staged_generation_jobs")
+          .delete()
+          .eq("project_id", projectId)
+          .eq("thread_id", threadId);
+      }
+    } catch {
+      // Migração ainda não aplicada ou rede indisponível: o cache local mantém
+      // exatamente o comportamento anterior e será sincronizado depois.
+    }
   }
   function chooseMode(m: GenMode) {
     setGenMode(m);
@@ -451,7 +492,7 @@ export function ChatPanel({
           startedAt: new Date().toISOString(),
         };
         activeStagedJob = job;
-        storeStagedJob(job);
+        await storeStagedJob(job);
         setPlan(stages.map((stage, index) => `${index + 1}/${stages.length} · ${stage.label}`));
         setPlanDone(job.nextStage);
 
@@ -517,7 +558,7 @@ export function ChatPanel({
           };
           activeStagedJob = job;
           setPlanDone(index + 1);
-          storeStagedJob(job.nextStage < stages.length ? job : null);
+          await storeStagedJob(job.nextStage < stages.length ? job : null);
         }
 
         const completion = jobKind === "refinement"
@@ -525,7 +566,7 @@ export function ChatPanel({
           : `✅ Projeto construído em ${stages.length} etapas, com salvamento após cada uma. ${lastData?.reply ?? "A base funcional está pronta para novos refinamentos."}`;
         setMessages((messages) => [...messages, { id: crypto.randomUUID(), role: "assistant", content: completion }]);
         persist("assistant", completion);
-        storeStagedJob(null);
+        await storeStagedJob(null);
         return true;
       }
 
@@ -576,7 +617,7 @@ export function ChatPanel({
       return true;
     } catch (err: any) {
       if (activeStagedJob) {
-        storeStagedJob(activeStagedJob);
+        await storeStagedJob(activeStagedJob);
         const current = Math.min(activeStagedJob.nextStage + 1, stagedStages(activeStagedJob.kind ?? "initial").length);
         const paused = err?.name === "AbortError"
           ? `⏸️ Construção pausada antes da etapa ${current}. Todo o progresso anterior foi salvo.`

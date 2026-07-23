@@ -22,6 +22,35 @@ export interface StagedBuildJob {
   startedAt: string;
 }
 
+export function isValidStagedBuildJob(
+  value: unknown,
+  projectId: string,
+  threadId: string
+): value is StagedBuildJob {
+  if (!value || typeof value !== "object") return false;
+  const job = value as Partial<StagedBuildJob>;
+  const kind = job.kind ?? "initial";
+  const total = stagedStages(kind).length;
+  return job.version === STAGED_BUILD_VERSION
+    && job.projectId === projectId
+    && job.threadId === threadId
+    && typeof job.originalPrompt === "string"
+    && typeof job.masterPrompt === "string"
+    && (kind === "initial" || kind === "refinement")
+    && Number.isInteger(job.nextStage)
+    && Number(job.nextStage) >= 0
+    && Number(job.nextStage) < total
+    && typeof job.startedAt === "string";
+}
+
+/** A retomada em nuvem não guarda imagens em base64; elas podem exceder o
+ * limite de uma linha e só são necessárias antes da primeira etapa. */
+export function stagedJobForCloud(job: StagedBuildJob): StagedBuildJob {
+  const copy = { ...job };
+  delete copy.imageAttachments;
+  return copy;
+}
+
 const COMPLEX_SCOPE = [
   /\b(?:tipos?|n[ií]veis?) de (?:usu[aá]rio|acesso)\b/i,
   /\b(?:painel|dashboard) (?:administrativo|do administrador|do consultor|gerencial)\b/i,

@@ -2,10 +2,10 @@
 import { useEffect, type RefObject } from "react";
 import type { RuntimeAuditIssue, RuntimeAuditReport } from "@/lib/preview/runtime-audit";
 
-type BridgeKind = "data" | "upload" | "email" | "view" | "auth" | "voice";
+type BridgeKind = "data" | "upload" | "email" | "view" | "auth" | "voice" | "telemetry";
 const METHODS: Record<BridgeKind, string[]> = {
   data: ["GET", "POST", "PATCH", "DELETE"], upload: ["POST"],
-  email: ["POST"], view: ["POST"], auth: ["GET", "POST"], voice: ["POST"],
+  email: ["POST"], view: ["POST"], auth: ["GET", "POST"], voice: ["POST"], telemetry: ["POST"],
 };
 const sessionKey = (projectId: string) => `adstudio:app-token:${projectId}`;
 
@@ -231,12 +231,13 @@ export function usePreviewBridge(
       const qs = rawQs.startsWith("?") && rawQs.length <= 5000 && !rawQs.includes("#") ? rawQs : "";
       const paths: Record<Exclude<BridgeKind, "voice">, string> = {
         data: `/api/data/${projectId}`, upload: `/api/upload/${projectId}`,
-        email: `/api/email/${projectId}`, view: `/api/view/${projectId}`, auth: `/api/app-auth/${projectId}`,
+        email: `/api/email/${projectId}`, view: `/api/view/${projectId}`,
+        auth: `/api/app-auth/${projectId}`, telemetry: `/api/telemetry/${projectId}`,
       };
       try {
         const headers = new Headers();
         const token = localStorage.getItem(sessionKey(projectId));
-        if (token && kind !== "view") headers.set("authorization", `Bearer ${token}`);
+        if (token && kind !== "view" && kind !== "telemetry") headers.set("authorization", `Bearer ${token}`);
         let body: BodyInit | undefined;
         if (kind === "upload") {
           if (!(event.data.file instanceof Blob)) throw new Error("Arquivo inválido.");
@@ -246,7 +247,8 @@ export function usePreviewBridge(
           headers.set("content-type", "application/json"); body = JSON.stringify(event.data.body);
         }
         const response = await fetch(paths[kind] + qs, { method, headers, body,
-          credentials: allowEditorSession ? "same-origin" : "omit", keepalive: kind === "view" });
+          credentials: allowEditorSession ? "same-origin" : "omit",
+          keepalive: kind === "view" || kind === "telemetry" });
         const text = await response.text();
         let payload: any = {};
         try { payload = text ? JSON.parse(text) : {}; } catch { payload = { error: "Resposta inválida do servidor." }; }

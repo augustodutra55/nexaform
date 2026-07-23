@@ -419,9 +419,11 @@ export function ChatPanel({
         message: string,
         currentCode: string | null,
         currentFiles: AppFile[] | null,
-        stageAttachments: PromptAttachment[]
+        stageAttachments: PromptAttachment[],
+        requestId: string
       ) => ({
         projectId,
+        requestId,
         message,
         currentCode,
         currentFiles,
@@ -466,14 +468,18 @@ export function ChatPanel({
           const stageAttachments = index === 0
             ? requestAttachments.filter((attachment) => attachment.kind === "image")
             : [];
+          // A mesma etapa reutiliza o identificador na segunda tentativa. Se a
+          // conexão cair depois do servidor iniciar, o backend não cobra nem
+          // executa duas vezes o mesmo pedido simultaneamente.
+          const stageRequestId = crypto.randomUUID();
           let data: any;
           try {
-            data = await request(appPayload(stagePrompt, workingCode, workingFiles, stageAttachments));
+            data = await request(appPayload(stagePrompt, workingCode, workingFiles, stageAttachments, stageRequestId));
           } catch (firstError) {
             if (!canRetryStagedFailure(firstError)) throw firstError;
             setStageStatus({ current: index + 1, total: stages.length, label: `${stage.label} · nova tentativa` });
             const retryPrompt = buildStageRetryPrompt(job.masterPrompt, stage, index, stages.length, jobKind);
-            data = await request(appPayload(retryPrompt, workingCode, workingFiles, stageAttachments));
+            data = await request(appPayload(retryPrompt, workingCode, workingFiles, stageAttachments, stageRequestId));
           }
           lastData = data;
 
@@ -524,9 +530,10 @@ export function ChatPanel({
       }
 
       const payload = useApp
-        ? appPayload(content, codeRef.current, filesRef.current ?? null, requestAttachments)
+        ? appPayload(content, codeRef.current, filesRef.current ?? null, requestAttachments, crypto.randomUUID())
         : {
             projectId,
+            requestId: crypto.randomUUID(),
             message: content,
             schema: schemaRef.current,
             userKey: localStorage.getItem("nexaform:ai-key") || null,

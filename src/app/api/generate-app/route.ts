@@ -4,9 +4,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { generateAppWithProviders } from "@/lib/engine/code-providers";
 import { isOwner, resolvePlan } from "@/lib/access";
 import type { AppCode, GenerationMediaAsset, MediaGenerationReport } from "@/lib/engine/app-types";
-import { authorizeProjectOwner, consumeRateLimit } from "@/lib/engine/data-guard";
+import { authorizeProjectOwner, consumeRateLimit, isUuid } from "@/lib/engine/data-guard";
 import { finalizeGeneration, reserveGeneration } from "@/lib/engine/generation-usage";
 import { sanitizePromptAttachments } from "@/lib/engine/prompt-attachments";
+import { classifyGenerationFailure, safeOperationalMessage } from "@/lib/engine/observability";
 
 // Apps grandes + auto-cura (retry/fallback) podem passar de 2 min; damos folga
 // para o servidor não cortar a resposta no meio (o que virava "não é JSON válido").
@@ -335,15 +336,48 @@ export async function POST(req: NextRequest) {
     (Array.isArray(currentFiles) && currentFiles.length > 0) ||
     (typeof currentCode === "string" && currentCode.trim().length > 0);
   const isStagedRequest = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(message);
+  const requestId = typeof body?.requestId === "string" && isUuid(body.requestId)
+    ? body.requestId
+    : crypto.randomUUID();
 
   const { data: sub } = owner ? { data: null } : await supabase.from("subscriptions").select("plan").eq("user_id", user.id).maybeSingle();
   const plan = resolvePlan({ plan: sub?.plan, role: profile?.role, email: user.email });
-  const reservation = await reserveGeneration({ supabase, userId: user.id, projectId, prompt: message, limit: plan.maxGenerationsPerMonth, unlimited: owner });
+  const reservation = await reserveGeneration({
+    supabase, userId: user.id, projectId, prompt: message,
+    limit: plan.maxGenerationsPerMonth, unlimited: owner,
+    requestId, kind: "app",
+  });
   if (reservation.error) return NextResponse.json({ error: "Não foi possível reservar sua geração. Tente novamente." }, { status: 503 });
   if (reservation.limitReached) return NextResponse.json(
     { error: `Limite de ${plan.maxGenerationsPerMonth} gerações do plano ${plan.name} atingido este mês.`, limitReached: true },
     { status: 402 }
   );
+  if (reservation.inProgress) {
+    return NextResponse.json({
+      error: "Este mesmo pedido já está sendo processado. Aguarde a conclusão antes de tentar novamente.",
+      requestId,
+      inProgress: true,
+    }, { status: 409 });
+  }
+  if (reservation.duplicateCompleted) {
+    return NextResponse.json({
+      error: "Este pedido já foi concluído e não será cobrado novamente. Atualize o projeto para ver o resultado salvo.",
+      requestId,
+      duplicateCompleted: true,
+    }, { status: 409 });
+  }
+
+  const failGeneration = async (reason: unknown, provider?: string | null, metadata?: Record<string, unknown>) => {
+    const message = safeOperationalMessage(reason);
+    await finalizeGeneration(supabase, reservation.id, {
+      status: "failed",
+      provider,
+      durationMs: Date.now() - started,
+      errorCode: classifyGenerationFailure(message),
+      errorMessage: message,
+      metadata: { requestId, attempt: reservation.attempt ?? 1, ...metadata },
+    });
+  };
 
   // Encerramos de forma controlada antes do limite da função, preservando uma
   // resposta JSON legível. Superprompts são divididos pelo cliente em etapas
@@ -360,12 +394,12 @@ export async function POST(req: NextRequest) {
       new Promise<typeof DEADLINE>((resolve) => setTimeout(() => resolve(DEADLINE), GEN_MAX_MS)),
     ]);
   } catch (error) {
-    await finalizeGeneration(supabase, reservation.id, { status: "failed" });
+    await failGeneration(error);
     console.error("[generation] falha inesperada", error);
     return NextResponse.json({ error: "A geração falhou antes de concluir. Tente novamente." }, { status: 502 });
   }
   if ((raced as any).__timeout) {
-    await finalizeGeneration(supabase, reservation.id, { status: "failed" });
+    await failGeneration(`A geração passou do tempo limite de ${GEN_MAX_MS}ms.`, null, { staged: isStagedRequest });
     const extendedRuntime = GEN_MAX_MS >= 240_000 || configuredMaxMs >= 240_000;
     const advice = extendedRuntime && isStagedRequest
       ? "Esta etapa não concluiu, mas o progresso anterior foi preservado. Use “Continuar construção” para retomar exatamente deste ponto."
@@ -404,7 +438,11 @@ export async function POST(req: NextRequest) {
       : reason
       ? `A geração real falhou: ${reason} — não vou te entregar um demo disfarçado. Verifique sua chave/modelo em Configurações, ou troque para o modo Template/Demo.`
       : "Modo de geração real ativo, mas nenhuma IA está conectada — não vou te entregar um demo disfarçado. Conecte uma chave de IA em Configurações (ou troque para o modo Template/Demo explicitamente).";
-    await finalizeGeneration(supabase, reservation.id, { status: "failed", provider: result.provider });
+    await failGeneration(reason || error, result.provider, {
+      refinement: isRefinementRequest,
+      staged: isStagedRequest,
+      engineMode: result.engineMode,
+    });
     return NextResponse.json(
       {
         error,
@@ -457,7 +495,20 @@ export async function POST(req: NextRequest) {
   if (mediaReport.generated > 0) result.cost = (result.cost ?? 0) + mediaReport.generated * 0.03; // custo estimado/imagem
   console.info("[generation] media", JSON.stringify({ projectId, ...mediaReport }));
 
-  await finalizeGeneration(supabase, reservation.id, { status: "completed", provider: result.provider, cost: result.cost ?? 0, model: result.model ?? null });
+  await finalizeGeneration(supabase, reservation.id, {
+    status: "completed",
+    provider: result.provider,
+    cost: result.cost ?? 0,
+    model: result.model ?? null,
+    durationMs: Date.now() - started,
+    metadata: {
+      requestId,
+      attempt: reservation.attempt ?? 1,
+      refinement: isRefinementRequest,
+      staged: isStagedRequest,
+      imagesGenerated: mediaReport.generated,
+    },
+  });
 
   // custo acumulado do projeto
   const { data: rows } = await supabase.from("generations").select("cost_usd").eq("project_id", projectId);

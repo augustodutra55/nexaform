@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { LayoutGrid, Settings, LogOut, Moon, Sun, ChevronDown } from "lucide-react";
+import { Activity, LayoutGrid, Settings, LogOut, Moon, Sun, ChevronDown } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/brand/logo";
@@ -17,7 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-export function AppHeader({ email, name }: { email: string; name: string }) {
+export function AppHeader({ email, name, owner = false }: { email: string; name: string; owner?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const { resolvedTheme, setTheme } = useTheme();
@@ -31,6 +31,7 @@ export function AppHeader({ email, name }: { email: string; name: string }) {
 
   const links = [
     { href: "/dashboard", label: "Projetos", icon: LayoutGrid },
+    ...(owner ? [{ href: "/operations", label: "Operação", icon: Activity }] : []),
     { href: "/settings", label: "Configurações", icon: Settings },
   ];
 
@@ -82,6 +83,9 @@ export function AppHeader({ email, name }: { email: string; name: string }) {
               <DropdownMenuItem onClick={() => router.push("/settings")}>
                 <Settings /> Configurações
               </DropdownMenuItem>
+              {owner && <DropdownMenuItem onClick={() => router.push("/operations")}>
+                <Activity /> Operação
+              </DropdownMenuItem>}
               <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive">
                 <LogOut /> Sair
               </DropdownMenuItem>

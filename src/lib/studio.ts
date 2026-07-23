@@ -45,6 +45,15 @@ export interface CommercialDeliveryMeta {
   deliveredAt?: string;
 }
 
+export interface BackendProvisioningMeta {
+  version: 1;
+  status: "ready" | "review";
+  usesAuth: boolean;
+  collections: string[];
+  warnings: string[];
+  updatedAt: string;
+}
+
 export interface ProjectMeta {
   status?: ProjectStatus;
   notes?: string;
@@ -60,6 +69,8 @@ export interface ProjectMeta {
   media?: ProjectMediaAsset[];
   /** Contrato e evidências de qualidade da última versão aprovada. */
   acceptance?: ProjectAcceptanceSnapshot;
+  /** Última configuração automática de coleções, contratos e acesso. */
+  backendProvisioning?: BackendProvisioningMeta;
 }
 
 export const STATUS_LABEL: Record<ProjectStatus, string> = {

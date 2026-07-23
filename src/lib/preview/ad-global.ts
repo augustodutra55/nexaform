@@ -13,7 +13,12 @@ export function adGlobalScript(projectId?: string | null): string {
   window.addEventListener('message', function(e){
     var d=e.data; if(e.source!==HOST || !d || d.__ad_bridge_result!==true || !pending[d.id]) return;
     var p=pending[d.id]; delete pending[d.id];
-    if(d.ok) p.resolve(d.payload||{}); else p.reject(new Error(d.error||('AD '+(d.status||500))));
+    if(d.ok) p.resolve(d.payload||{}); else {
+      var error=new Error(d.error||('AD '+(d.status||500)));
+      if(d.payload&&d.payload.fieldErrors)error.fieldErrors=d.payload.fieldErrors;
+      error.status=d.status||500;
+      p.reject(error);
+    }
   });
   function bridge(kind, opts){ opts=opts||{}; var id='ad-'+Date.now()+'-'+(++bridgeSeq);
     return new Promise(function(resolve,reject){ pending[id]={resolve:resolve,reject:reject};

@@ -11,6 +11,14 @@ interface Row {
   [k: string]: any;
 }
 
+interface AppUser {
+  id: string;
+  email: string;
+  name: string | null;
+  role: string;
+  created_at: string;
+}
+
 type AccessProfile = "catalog" | "form" | "authenticated" | "private" | "custom";
 interface AccessSettings {
   profile: AccessProfile;
@@ -23,6 +31,13 @@ interface AccessSettings {
   authenticated_update: boolean;
   authenticated_delete: boolean;
   owner_only: boolean;
+  allowed_roles: string[];
+  authenticated_scope: "own" | "all";
+  data_contract: {
+    version: 1;
+    allowUnknown: boolean;
+    fields: Record<string, unknown>;
+  };
 }
 
 const PRIVATE_SETTINGS: AccessSettings = {
@@ -36,6 +51,9 @@ const PRIVATE_SETTINGS: AccessSettings = {
   authenticated_update: false,
   authenticated_delete: false,
   owner_only: true,
+  allowed_roles: [],
+  authenticated_scope: "own",
+  data_contract: { version: 1, allowUnknown: true, fields: {} },
 };
 
 const PROFILE_COPY: Record<AccessProfile, { label: string; description: string }> = {
@@ -46,7 +64,16 @@ const PROFILE_COPY: Record<AccessProfile, { label: string; description: string }
   custom: { label: "Personalizado", description: "Escolha cada permissão manualmente. Use com cuidado." },
 };
 
-type PermissionKey = Exclude<keyof AccessSettings, "profile">;
+type PermissionKey =
+  | "public_read"
+  | "public_insert"
+  | "public_update"
+  | "public_delete"
+  | "authenticated_read"
+  | "authenticated_insert"
+  | "authenticated_update"
+  | "authenticated_delete"
+  | "owner_only";
 const CUSTOM_OPTIONS: Array<{ key: PermissionKey; label: string }> = [
   { key: "public_read", label: "Público lê" },
   { key: "public_insert", label: "Público envia" },
@@ -59,12 +86,18 @@ const CUSTOM_OPTIONS: Array<{ key: PermissionKey; label: string }> = [
   { key: "owner_only", label: "Somente administrador" },
 ];
 
-function settingsFor(profile: AccessProfile): AccessSettings {
-  if (profile === "catalog") return { ...PRIVATE_SETTINGS, profile, public_read: true, owner_only: false };
-  if (profile === "form") return { ...PRIVATE_SETTINGS, profile, public_insert: true, owner_only: false };
+function settingsFor(profile: AccessProfile, current: AccessSettings): AccessSettings {
+  const advanced = {
+    allowed_roles: current.allowed_roles,
+    authenticated_scope: current.authenticated_scope,
+    data_contract: current.data_contract,
+  };
+  if (profile === "catalog") return { ...PRIVATE_SETTINGS, ...advanced, profile, public_read: true, owner_only: false };
+  if (profile === "form") return { ...PRIVATE_SETTINGS, ...advanced, profile, public_insert: true, owner_only: false };
   if (profile === "authenticated") {
     return {
       ...PRIVATE_SETTINGS,
+      ...advanced,
       profile,
       authenticated_read: true,
       authenticated_insert: true,
@@ -73,8 +106,8 @@ function settingsFor(profile: AccessProfile): AccessSettings {
       owner_only: false,
     };
   }
-  if (profile === "private") return { ...PRIVATE_SETTINGS };
-  return { ...PRIVATE_SETTINGS, profile: "custom", owner_only: false };
+  if (profile === "private") return { ...PRIVATE_SETTINGS, ...advanced };
+  return { ...PRIVATE_SETTINGS, ...advanced, profile: "custom", owner_only: false };
 }
 
 /**
@@ -92,6 +125,9 @@ export function DataPanel({ projectId }: { projectId: string }) {
   const [adding, setAdding] = useState(false);
   const [access, setAccess] = useState<AccessSettings>(PRIVATE_SETTINGS);
   const [savingAccess, setSavingAccess] = useState(false);
+  const [contractDraft, setContractDraft] = useState(JSON.stringify(PRIVATE_SETTINGS.data_contract, null, 2));
+  const [appUsers, setAppUsers] = useState<AppUser[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
 
   const base = `/api/data/${projectId}`;
 
@@ -107,7 +143,9 @@ export function DataPanel({ projectId }: { projectId: string }) {
         if (!dataRes.ok) throw new Error(dataJson?.error || "Falha ao carregar");
         if (!accessRes.ok) throw new Error(accessJson?.error || "Falha ao carregar as permissões");
         setRows(dataJson.items || []);
-        setAccess(accessJson.settings || PRIVATE_SETTINGS);
+        const nextAccess = { ...PRIVATE_SETTINGS, ...(accessJson.settings || {}) };
+        setAccess(nextAccess);
+        setContractDraft(JSON.stringify(nextAccess.data_contract, null, 2));
       } catch (e: any) {
         toast.error("Não foi possível carregar os dados", { description: e?.message });
         setRows([]);
@@ -119,6 +157,13 @@ export function DataPanel({ projectId }: { projectId: string }) {
   );
 
   async function saveAccess() {
+    let dataContract: AccessSettings["data_contract"];
+    try {
+      dataContract = JSON.parse(contractDraft);
+    } catch {
+      toast.error("Contrato de dados inválido", { description: "Revise o JSON antes de salvar." });
+      return;
+    }
     setSavingAccess(true);
     try {
       const res = await fetch(`${base}/settings`, {
@@ -127,18 +172,60 @@ export function DataPanel({ projectId }: { projectId: string }) {
         body: JSON.stringify({
           collection,
           profile: access.profile,
-          permissions: access.profile === "custom" ? access : undefined,
+          permissions: access.profile === "custom" ? { ...access, data_contract: dataContract } : undefined,
+          allowed_roles: access.allowed_roles,
+          authenticated_scope: access.authenticated_scope,
+          data_contract: dataContract,
         }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "Falha ao salvar as permissões");
+      if (!res.ok) {
+        const detail = json?.fieldErrors ? Object.values(json.fieldErrors).join(" ") : "";
+        throw new Error([json?.error || "Falha ao salvar as permissões", detail].filter(Boolean).join(" "));
+      }
       setAccess(json.settings);
-      toast.success("Acesso da coleção atualizado");
+      setContractDraft(JSON.stringify(json.settings.data_contract, null, 2));
+      if (json.advancedReady === false) {
+        toast.warning("Acesso básico salvo", {
+          description: "Aplique a migration 0012 no Supabase para ativar papéis e contratos.",
+        });
+      } else {
+        toast.success("Acesso da coleção atualizado");
+      }
     } catch (e: any) {
       toast.error("Não foi possível salvar o acesso", { description: e?.message });
     } finally {
       setSavingAccess(false);
     }
+  }
+
+  async function loadAppUsers() {
+    setLoadingUsers(true);
+    try {
+      const res = await fetch(`/api/app-auth/${projectId}/users`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Falha ao carregar usuários");
+      setAppUsers(json.users || []);
+    } catch (e: any) {
+      toast.error("Não foi possível carregar os usuários", { description: e?.message });
+    } finally {
+      setLoadingUsers(false);
+    }
+  }
+
+  async function updateAppUserRole(id: string, role: string) {
+    const res = await fetch(`/api/app-auth/${projectId}/users`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, role: role.trim().toLowerCase() }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      toast.error("Não foi possível alterar o papel", { description: json?.error });
+      return;
+    }
+    setAppUsers((users) => users.map((user) => (user.id === id ? json.user : user)));
+    toast.success("Papel do usuário atualizado");
   }
 
   useEffect(() => {
@@ -251,7 +338,7 @@ export function DataPanel({ projectId }: { projectId: string }) {
           <span className="text-xs font-medium">Acesso</span>
           <select
             value={access.profile}
-            onChange={(e) => setAccess(settingsFor(e.target.value as AccessProfile))}
+            onChange={(e) => setAccess((current) => settingsFor(e.target.value as AccessProfile, current))}
             className="h-8 rounded-md border bg-background px-2 text-xs outline-none focus:ring-1 focus:ring-ring"
             aria-label="Perfil de acesso da coleção"
           >
@@ -287,6 +374,111 @@ export function DataPanel({ projectId }: { projectId: string }) {
             )}
           </div>
         )}
+        <details className="mt-2 rounded-lg border bg-background/60 p-2">
+          <summary className="cursor-pointer text-[11px] font-medium">
+            Regras avançadas: papéis, isolamento e contrato de dados
+          </summary>
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            <label className="grid gap-1 text-[11px]">
+              Papéis permitidos (separados por vírgula)
+              <Input
+                value={access.allowed_roles.join(", ")}
+                onChange={(e) =>
+                  setAccess((current) => ({
+                    ...current,
+                    allowed_roles: e.target.value
+                      .split(",")
+                      .map((role) => role.trim().toLowerCase())
+                      .filter(Boolean),
+                  }))
+                }
+                className="h-8 text-xs"
+                placeholder="ex.: gerente, consultor"
+              />
+              <span className="text-muted-foreground">Vazio permite qualquer usuário autenticado.</span>
+            </label>
+            <label className="grid gap-1 text-[11px]">
+              Dados de usuários autenticados
+              <select
+                value={access.authenticated_scope}
+                onChange={(e) =>
+                  setAccess((current) => ({
+                    ...current,
+                    authenticated_scope: e.target.value as "own" | "all",
+                  }))
+                }
+                className="h-8 rounded-md border bg-background px-2 text-xs"
+              >
+                <option value="own">Cada usuário vê somente os próprios</option>
+                <option value="all">Papéis permitidos veem todos</option>
+              </select>
+              <span className="text-muted-foreground">
+                Use “todos” apenas para equipes internas, como gerentes e consultores.
+              </span>
+            </label>
+            <label className="grid gap-1 text-[11px] lg:col-span-2">
+              Contrato JSON da coleção
+              <textarea
+                value={contractDraft}
+                onChange={(e) => setContractDraft(e.target.value)}
+                rows={7}
+                spellCheck={false}
+                className="w-full resize-y rounded-md border bg-background p-2 font-mono text-[11px] outline-none focus:ring-1 focus:ring-ring"
+              />
+              <span className="text-muted-foreground">
+                Tipos aceitos: string, number, integer, boolean, email, date, uuid, array e object.
+                Defina required, minLength, maxLength, min, max, pattern ou enum.
+              </span>
+            </label>
+            <div className="lg:col-span-2 rounded-md border p-2">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-[11px] font-medium">Usuários finais e papéis</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    O cadastro público sempre começa como “user”. Somente você pode promover uma conta.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-[11px]"
+                  onClick={loadAppUsers}
+                  disabled={loadingUsers}
+                >
+                  {loadingUsers ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                  Carregar usuários
+                </Button>
+              </div>
+              {appUsers.length > 0 && (
+                <div className="mt-2 space-y-1.5">
+                  {appUsers.map((user) => (
+                    <div key={user.id} className="flex items-center gap-2 rounded border bg-background px-2 py-1.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[11px] font-medium">{user.name || user.email}</p>
+                        <p className="truncate text-[10px] text-muted-foreground">{user.email}</p>
+                      </div>
+                      <Input
+                        defaultValue={user.role}
+                        aria-label={`Papel de ${user.email}`}
+                        className="h-7 w-28 text-[11px]"
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            updateAppUserRole(user.id, event.currentTarget.value);
+                          }
+                        }}
+                        onBlur={(event) => {
+                          if (event.currentTarget.value !== user.role) {
+                            updateAppUserRole(user.id, event.currentTarget.value);
+                          }
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </details>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3 scrollbar-thin">

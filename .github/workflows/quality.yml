@@ -30,6 +30,9 @@ jobs:
       - name: Verificar TypeScript
         run: npm run typecheck
 
+      - name: Testar contratos, papéis e isolamento
+        run: npm run test:unit
+
       - name: Compilar para produção
         run: npm run build
 

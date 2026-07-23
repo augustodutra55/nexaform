@@ -18,6 +18,9 @@ const SESSION_DAYS = 30;
 function bad(msg: string, status = 400) {
   return NextResponse.json({ error: msg }, { status });
 }
+function roleMigrationPending(error: any): boolean {
+  return error?.code === "42703" || /\brole\b/i.test(error?.message || "");
+}
 function hashPassword(password: string, salt: string): Promise<string> {
   return new Promise((resolve, reject) => {
     crypto.scrypt(password, salt, 64, (error, key) => error ? reject(error) : resolve(key.toString("hex")));
@@ -30,7 +33,7 @@ async function verifyPassword(password: string, salt: string, expected: string) 
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 function publicUser(u: any) {
-  return { id: u.id, email: u.email, name: u.name ?? null };
+  return { id: u.id, email: u.email, name: u.name ?? null, role: u.role || "user" };
 }
 
 async function newSession(admin: any, projectId: string, userId: string) {
@@ -65,7 +68,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ proj
     .maybeSingle();
   if (!session || new Date(session.expires_at) < new Date()) return NextResponse.json({ user: null });
 
-  const { data: user } = await admin.from("app_users").select("id, email, name").eq("id", session.user_id).maybeSingle();
+  let { data: user, error: userError } = await admin
+    .from("app_users")
+    .select("id, email, name, role")
+    .eq("id", session.user_id)
+    .eq("project_id", projectId)
+    .maybeSingle();
+  if (userError && roleMigrationPending(userError)) {
+    const legacy = await admin
+      .from("app_users")
+      .select("id, email, name")
+      .eq("id", session.user_id)
+      .eq("project_id", projectId)
+      .maybeSingle();
+    user = legacy.data ? { ...legacy.data, role: "user" } : null;
+    userError = legacy.error;
+  }
+  if (userError) return bad("Não foi possível restaurar a sessão.", 500);
   return NextResponse.json({ user: user ? publicUser(user) : null });
 }
 
@@ -105,28 +124,48 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     const name = body?.name ? String(body.name).slice(0, 120) : null;
     const salt = crypto.randomBytes(16).toString("hex");
     const pass_hash = await hashPassword(password, salt);
-    const { data: user, error } = await admin
+    let { data: user, error } = await admin
       .from("app_users")
-      .insert({ project_id: projectId, email, name, pass_hash, pass_salt: salt })
-      .select("id, email, name")
+      .insert({ project_id: projectId, email, name, role: "user", pass_hash, pass_salt: salt })
+      .select("id, email, name, role")
       .single();
+    if (error && roleMigrationPending(error)) {
+      const legacy = await admin
+        .from("app_users")
+        .insert({ project_id: projectId, email, name, pass_hash, pass_salt: salt })
+        .select("id, email, name")
+        .single();
+      user = legacy.data ? { ...legacy.data, role: "user" } : null;
+      error = legacy.error;
+    }
     if (error) {
       if (/duplicate|unique/i.test(error.message)) return bad("Não foi possível criar a conta. Se você já possui cadastro, entre normalmente.", 409);
       return bad(error.message, 500);
     }
     let token: string;
-    try { token = await newSession(admin, projectId, user.id); }
+    try { token = await newSession(admin, projectId, user!.id); }
     catch { return bad("Conta criada, mas não foi possível iniciar a sessão. Tente entrar novamente.", 500); }
     return NextResponse.json({ token, user: publicUser(user) });
   }
 
   if (action === "login") {
-    const { data: user } = await admin
+    let { data: user, error: userError } = await admin
       .from("app_users")
-      .select("id, email, name, pass_hash, pass_salt")
+      .select("id, email, name, role, pass_hash, pass_salt")
       .eq("project_id", projectId)
       .eq("email", email)
       .maybeSingle();
+    if (userError && roleMigrationPending(userError)) {
+      const legacy = await admin
+        .from("app_users")
+        .select("id, email, name, pass_hash, pass_salt")
+        .eq("project_id", projectId)
+        .eq("email", email)
+        .maybeSingle();
+      user = legacy.data ? { ...legacy.data, role: "user" } : null;
+      userError = legacy.error;
+    }
+    if (userError) return bad("Não foi possível validar a conta.", 500);
     if (!user || !(await verifyPassword(password, user.pass_salt, user.pass_hash))) return bad("Email ou senha incorretos", 401);
     let token: string;
     try { token = await newSession(admin, projectId, user.id); }

@@ -32,6 +32,12 @@ import {
   type StagedBuildJob,
 } from "@/lib/engine/staged-generation";
 import {
+  backgroundJobLabel,
+  isBackgroundJobSnapshot,
+  isTerminalJobStatus,
+  type BackgroundJobSnapshot,
+} from "@/lib/engine/background-jobs";
+import {
   buildVisualSelectionContext,
   findPreviewSourceCandidates,
   type PreviewElementSelection,
@@ -205,11 +211,21 @@ export function ChatPanel({
   const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
   const [resumeJob, setResumeJob] = useState<StagedBuildJob | null>(null);
   const [stageStatus, setStageStatus] = useState<{ current: number; total: number; label: string } | null>(null);
+  const [backgroundJob, setBackgroundJob] = useState<BackgroundJobSnapshot | null>(null);
+  const [backgroundSubmitting, setBackgroundSubmitting] = useState(false);
+  const processingBackgroundRef = useRef<string | null>(null);
   const stagedStorageKey = `adstudio:staged-build:${projectId}`;
   const failedRequests = useMemo(
     () => failedRefinementRequests(messages, recoveredFailureIds),
     [messages, recoveredFailureIds]
   );
+  const backgroundBusy = backgroundSubmitting || !!(
+    backgroundJob && !isTerminalJobStatus(backgroundJob.status)
+  );
+  const busy = generating || backgroundBusy;
+  useEffect(() => {
+    onGeneratingChange?.(busy);
+  }, [busy, onGeneratingChange]);
 
   // ── Modo de geração de código: REAL (IA escreve) vs TEMPLATE (enlatado/demo) ──
   const [genMode, setGenMode] = useState<GenMode>("real");
@@ -286,6 +302,144 @@ export function ChatPanel({
       // exatamente o comportamento anterior e será sincronizado depois.
     }
   }
+
+  function storeLocalStagedJob(job: StagedBuildJob | null): void {
+    try {
+      if (job) localStorage.setItem(stagedStorageKey, JSON.stringify(job));
+      else localStorage.removeItem(stagedStorageKey);
+    } catch {}
+    setResumeJob(job);
+  }
+
+  async function enqueueBackgroundStage(job: StagedBuildJob): Promise<void> {
+    setBackgroundSubmitting(true);
+    storeLocalStagedJob(job);
+    try {
+      const response = await fetch("/api/generation-jobs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          threadId,
+          job,
+          name: projectName,
+          costMode: localStorage.getItem("nexaform:cost-mode") || "auto",
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || "Não foi possível iniciar a etapa em segundo plano.");
+      toast.success("Etapa enviada para a fila", {
+        description: "Você pode recarregar a página; o progresso continuará salvo.",
+      });
+    } finally {
+      setBackgroundSubmitting(false);
+    }
+  }
+
+  async function purgeBackgroundJob(): Promise<void> {
+    await fetch(`/api/generation-jobs?projectId=${encodeURIComponent(projectId)}&purge=1`, {
+      method: "DELETE",
+    }).catch(() => null);
+  }
+
+  useEffect(() => {
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      let nextDelay = 8000;
+      try {
+        const response = await fetch(`/api/generation-jobs?projectId=${encodeURIComponent(projectId)}`, {
+          cache: "no-store",
+        });
+        if (!response.ok) throw new Error("queue_unavailable");
+        const data = await response.json();
+        const row = data?.job;
+        if (!row || !isBackgroundJobSnapshot(row)) {
+          if (!disposed) setBackgroundJob(null);
+          return;
+        }
+        if (row.payload.threadId !== threadId) return;
+        if (!disposed) setBackgroundJob(row);
+        if (!isTerminalJobStatus(row.status) || row.status === "completed") nextDelay = 2500;
+
+        if (row.status === "completed" && row.payload.result) {
+          const processingKey = `${row.id}:${row.payload.stageIndex}:${row.updated_at}`;
+          if (processingBackgroundRef.current !== processingKey) {
+            processingBackgroundRef.current = processingKey;
+            setGenerating(true);
+            onGeneratingChange?.(true);
+            try {
+              const result = row.payload.result as AppGenerationResult & {
+                projectCost?: number;
+                media?: MediaGenerationReport;
+              };
+              if (!result?.app) throw new Error("O worker concluiu sem devolver um aplicativo válido.");
+              await Promise.resolve(onAppResult(result));
+
+              const evidence: GenEvidence = {
+                engineMode: result.engineMode ?? "real",
+                provider: String(result.provider ?? "?"),
+                model: result.model,
+                stats: result.stats,
+                cost: typeof result.cost === "number" ? result.cost : undefined,
+                media: result.media,
+              };
+              setLastGen(evidence);
+              onEngineMode?.(evidence.engineMode);
+              if (typeof result.cost === "number") setLastCost(result.cost);
+              if (typeof result.projectCost === "number") setProjectCost(result.projectCost);
+
+              const completedJob = row.payload.stagedJob as StagedBuildJob;
+              const stages = stagedStages(completedJob.kind ?? "initial");
+              const nextJob = { ...completedJob, nextStage: row.payload.stageIndex + 1 };
+              if (nextJob.nextStage < stages.length) {
+                storeLocalStagedJob(nextJob);
+                setStageStatus({
+                  current: nextJob.nextStage + 1,
+                  total: stages.length,
+                  label: stages[nextJob.nextStage].label,
+                });
+                await enqueueBackgroundStage(nextJob);
+              } else {
+                const completion = completedJob.kind === "refinement"
+                  ? `✅ Refinamento concluído em ${stages.length} etapas, com salvamento após cada uma.`
+                  : `✅ Projeto construído em ${stages.length} etapas, com salvamento após cada uma.`;
+                setMessages((current) => [...current, {
+                  id: crypto.randomUUID(),
+                  role: "assistant",
+                  content: completion,
+                }]);
+                void persist("assistant", completion);
+                storeLocalStagedJob(null);
+                await purgeBackgroundJob();
+                if (!disposed) setBackgroundJob(null);
+              }
+            } catch (error) {
+              const message = error instanceof Error ? error.message : "Não foi possível aplicar o resultado.";
+              toast.error("Resultado preservado na fila", { description: message });
+            } finally {
+              processingBackgroundRef.current = null;
+              setGenerating(false);
+              onGeneratingChange?.(false);
+            }
+          }
+        }
+      } catch {
+        // Uma oscilação de rede não cancela o trabalho. A próxima consulta retoma.
+      } finally {
+        if (!disposed) timer = setTimeout(poll, nextDelay);
+      }
+    };
+
+    void poll();
+    return () => {
+      disposed = true;
+      if (timer) clearTimeout(timer);
+    };
+    // As refs de código e os callbacks do projeto são atualizados pelo componente pai.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, threadId]);
   function chooseMode(m: GenMode) {
     setGenMode(m);
     localStorage.setItem("adstudio:gen-mode", m);
@@ -359,6 +513,17 @@ export function ChatPanel({
   // e mandar outro comando). Guardamos o AbortController da requisição atual.
   const abortRef = useRef<AbortController | null>(null);
   function stopGeneration() {
+    if (backgroundJob && !isTerminalJobStatus(backgroundJob.status)) {
+      void fetch(`/api/generation-jobs?projectId=${encodeURIComponent(projectId)}`, {
+        method: "DELETE",
+      }).then(() => {
+        setBackgroundJob(null);
+        setGenerating(false);
+        onGeneratingChange?.(false);
+        toast("Geração em segundo plano cancelada.");
+      });
+      return;
+    }
     abortRef.current?.abort();
   }
 
@@ -410,7 +575,7 @@ export function ChatPanel({
     isRecovery = false
   ): Promise<boolean> {
     const content = (resumedJob?.originalPrompt ?? text).trim();
-    if (!content || generating) return false;
+    if (!content || busy) return false;
     const selectionFiles = filesRef.current?.length
       ? filesRef.current
       : codeRef.current
@@ -454,6 +619,9 @@ export function ChatPanel({
       shouldStageInitialBuild(contextualContent, requestAttachments, hasCurrentProject) ||
       shouldStageRefinement(contextualContent, requestAttachments, hasCurrentProject)
     );
+    const useBackgroundBuild = useStagedBuild
+      && requestAttachments.length === 0
+      && !activeVisualSelection;
 
     setInput("");
     if (!isAutoFix && !resumedJob) setAttachments([]);
@@ -571,6 +739,19 @@ export function ChatPanel({
           startedAt: new Date().toISOString(),
         };
         activeStagedJob = job;
+        if (useBackgroundBuild) {
+          const stage = stages[job.nextStage];
+          setStageStatus({
+            current: job.nextStage + 1,
+            total: stages.length,
+            label: stage.label,
+          });
+          setPlan(stages.map((item, index) => `${index + 1}/${stages.length} · ${item.label}`));
+          setPlanDone(job.nextStage);
+          await enqueueBackgroundStage(job);
+          activeStagedJob = null;
+          return true;
+        }
         await storeStagedJob(job);
         setPlan(stages.map((stage, index) => `${index + 1}/${stages.length} · ${stage.label}`));
         setPlanDone(job.nextStage);
@@ -799,9 +980,11 @@ export function ChatPanel({
               ${projectCost.toFixed(3)}
             </span>
           )}
-          <span className={cn("h-1.5 w-1.5 rounded-full", generating ? "animate-pulse-soft bg-brand-500" : "bg-emerald-500")} />
+          <span className={cn("h-1.5 w-1.5 rounded-full", busy ? "animate-pulse-soft bg-brand-500" : "bg-emerald-500")} />
           {stageStatus
             ? `Etapa ${stageStatus.current}/${stageStatus.total} · ${stageStatus.label}`
+            : backgroundJob ? backgroundJobLabel(backgroundJob.status, backgroundJob.attempts)
+            : backgroundSubmitting ? "Enviando para a fila…"
             : generating ? "Construindo…" : "Pronto"}
         </span>
       </div>
@@ -887,7 +1070,7 @@ export function ChatPanel({
       )}
 
       <div className="flex-1 space-y-4 overflow-y-auto p-4 scrollbar-thin">
-        {messages.length === 0 && !generating && (
+        {messages.length === 0 && !busy && (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-brand-gradient text-white">
               <Sparkles className="h-4 w-4" />
@@ -912,12 +1095,14 @@ export function ChatPanel({
           </div>
         ))}
 
-        {generating && (
+        {busy && (
           <div className="max-w-[85%] space-y-2 rounded-xl bg-secondary p-3.5">
             {plan.length === 0 ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                Escrevendo o código…
+                {backgroundJob
+                  ? `${backgroundJobLabel(backgroundJob.status, backgroundJob.attempts)}…`
+                  : backgroundSubmitting ? "Enviando para a fila…" : "Escrevendo o código…"}
               </div>
             ) : (
               plan.map((step, i) => (
@@ -941,7 +1126,7 @@ export function ChatPanel({
             )}
           </div>
         )}
-        {!generating && resumeJob && (
+        {!busy && resumeJob && (
           <div className="space-y-3 rounded-xl border border-brand-500/30 bg-brand-500/10 p-3.5">
             <div className="flex items-start gap-2">
               <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-brand-500" />
@@ -963,7 +1148,7 @@ export function ChatPanel({
             </Button>
           </div>
         )}
-        {!generating && !resumeJob && failedRequests.length > 0 && (
+        {!busy && !resumeJob && failedRequests.length > 0 && (
           <div className="space-y-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5">
             <div className="flex items-start gap-2">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
@@ -996,7 +1181,7 @@ export function ChatPanel({
         <div ref={bottomRef} />
       </div>
 
-      {!generating && (
+      {!busy && (
         <div className="flex flex-wrap gap-1.5 px-4 pb-2">
           {suggestions.slice(0, 3).map((s) => (
             <button
@@ -1073,7 +1258,7 @@ export function ChatPanel({
             }
             rows={2}
             className="min-h-0 resize-none border-0 shadow-none focus-visible:ring-0"
-            disabled={generating}
+            disabled={busy}
           />
           <input
             ref={attachmentInputRef}
@@ -1088,7 +1273,7 @@ export function ChatPanel({
             size="icon"
             variant="ghost"
             onClick={() => attachmentInputRef.current?.click()}
-            disabled={generating || attachments.length >= MAX_PROMPT_ATTACHMENTS}
+            disabled={busy || attachments.length >= MAX_PROMPT_ATTACHMENTS}
             aria-label="Anexar arquivo do computador"
             title="Anexar imagem, texto ou código"
           >
@@ -1099,14 +1284,14 @@ export function ChatPanel({
             size="icon"
             variant={listening ? "brand" : "ghost"}
             onClick={toggleMic}
-            disabled={generating}
+            disabled={busy}
             aria-label={listening ? "Parar de ouvir" : "Ditar por voz"}
             title={voiceSupported === false ? "Ditado indisponível neste navegador" : listening ? "Parar" : "Ditar por voz"}
             className={listening ? "animate-pulse-soft" : ""}
           >
             {listening ? <Square /> : <Mic />}
           </Button>
-          {generating ? (
+          {busy ? (
             <Button
               type="button"
               size="icon"

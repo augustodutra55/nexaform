@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Copy, ExternalLink, Film, Image as ImageIcon, Loader2, UploadCloud, WandSparkles } from "lucide-react";
+import { Copy, ExternalLink, Film, Image as ImageIcon, Loader2, UploadCloud, Volume2, WandSparkles } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import type { AppFile } from "@/lib/engine/app-types";
@@ -26,10 +26,11 @@ interface MediaPanelProps {
   onAssetsChange: (assets: ProjectMediaAsset[]) => Promise<void>;
 }
 
-const ACCEPT = "image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime";
+const ACCEPT = "image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime,audio/mpeg,audio/wav,audio/mp4,audio/webm";
 const MAX_BYTES = 50 * 1024 * 1024;
 
 function kindOf(type: string): MediaKind {
+  if (type.startsWith("audio/")) return "audio";
   return type.startsWith("video/") ? "video" : "image";
 }
 
@@ -61,7 +62,7 @@ export function MediaPanel({ projectId, projectName, files, assets, onReplace, o
 
   async function upload(file: File) {
     if (!ACCEPT.split(",").includes(file.type)) {
-      toast.error("Formato não permitido", { description: "Use PNG, JPG, WebP, GIF, MP4, WebM ou MOV." });
+      toast.error("Formato não permitido", { description: "Use imagem, vídeo ou áudio compatível." });
       return;
     }
     if (file.size > MAX_BYTES) {
@@ -142,6 +143,8 @@ export function MediaPanel({ projectId, projectName, files, assets, onReplace, o
                     <img src={item.source} alt="" className="h-full w-full object-cover" />
                   ) : item.kind === "video" && /^https?:\/\//i.test(item.source) ? (
                     <video src={item.source} className="h-full w-full object-cover" muted />
+                  ) : item.kind === "audio" ? (
+                    <Volume2 className="h-8 w-8 text-muted-foreground" />
                   ) : item.kind === "video" ? (
                     <Film className="h-8 w-8 text-muted-foreground" />
                   ) : (
@@ -150,7 +153,9 @@ export function MediaPanel({ projectId, projectName, files, assets, onReplace, o
                 </div>
                 <div className="space-y-1 p-2.5">
                   <div className="flex items-center gap-2">
-                    <Badge variant="secondary" className="text-[10px]">{item.kind === "video" ? "Vídeo" : "Imagem"}</Badge>
+                    <Badge variant="secondary" className="text-[10px]">
+                      {item.kind === "video" ? "Vídeo" : item.kind === "audio" ? "Áudio" : "Imagem"}
+                    </Badge>
                     <span className="truncate text-[11px] text-muted-foreground">{item.filePath}</span>
                   </div>
                   <p className="line-clamp-2 text-sm font-medium">{item.context}</p>
@@ -173,6 +178,7 @@ export function MediaPanel({ projectId, projectName, files, assets, onReplace, o
               <div className="inline-flex rounded-lg border p-0.5 text-xs">
                 <button onClick={() => setPromptKind("image")} className={cn("rounded-md px-2.5 py-1", promptKind === "image" && "bg-secondary font-medium")}>Imagem</button>
                 <button onClick={() => setPromptKind("video")} className={cn("rounded-md px-2.5 py-1", promptKind === "video" && "bg-secondary font-medium")}>Vídeo</button>
+                <button onClick={() => setPromptKind("audio")} className={cn("rounded-md px-2.5 py-1", promptKind === "audio" && "bg-secondary font-medium")}>Áudio</button>
               </div>
             </div>
             <Textarea value={prompt} readOnly className="min-h-28 resize-none text-xs" />
@@ -201,7 +207,7 @@ export function MediaPanel({ projectId, projectName, files, assets, onReplace, o
           >
             {uploading ? <Loader2 className="h-9 w-9 animate-spin text-brand-500" /> : <UploadCloud className="h-9 w-9 text-brand-500" />}
             <p className="mt-3 text-sm font-semibold">{uploading ? "Enviando…" : "Arraste o arquivo gerado"}</p>
-            <p className="mt-1 text-xs text-muted-foreground">Imagem ou vídeo de até 50 MB</p>
+            <p className="mt-1 text-xs text-muted-foreground">Imagem, áudio ou vídeo de até 50 MB</p>
             <input ref={inputRef} type="file" accept={ACCEPT} className="hidden" onChange={(event) => event.target.files?.[0] && upload(event.target.files[0])} />
             <Button className="mt-4" size="sm" variant="outline" disabled={uploading} onClick={() => inputRef.current?.click()}>
               Escolher arquivo
@@ -218,11 +224,17 @@ export function MediaPanel({ projectId, projectName, files, assets, onReplace, o
                 return (
                   <div key={asset.id} className="flex gap-3 rounded-lg border p-2">
                     <div className="flex h-14 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md bg-secondary">
-                      {assetKind === "image" ? <img src={asset.url} alt="" className="h-full w-full object-cover" /> : <Film className="h-6 w-6 text-muted-foreground" />}
+                      {assetKind === "image"
+                        ? <img src={asset.url} alt="" className="h-full w-full object-cover" />
+                        : assetKind === "audio"
+                          ? <Volume2 className="h-6 w-6 text-muted-foreground" />
+                          : <Film className="h-6 w-6 text-muted-foreground" />}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-medium">{asset.name}</p>
-                      <p className="text-[11px] text-muted-foreground">{assetKind === "video" ? "Vídeo" : "Imagem"} · {(asset.size / 1024 / 1024).toFixed(1)} MB</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {assetKind === "video" ? "Vídeo" : assetKind === "audio" ? "Áudio" : "Imagem"} · {(asset.size / 1024 / 1024).toFixed(1)} MB
+                      </p>
                       <div className="mt-1 flex gap-1">
                         <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={() => copy(asset.url, "URL copiada")}><Copy /> URL</Button>
                         {selected && selected.kind === assetKind && (

@@ -21,6 +21,25 @@ const job: StagedBuildJob = {
     size: 4,
     content: "data:image/png;base64,AAAA",
   }],
+  visualRefinement: {
+    selection: {
+      tag: "button",
+      selector: "button.cta",
+      label: "Comprar",
+      text: "Comprar",
+      role: "button",
+      nearbyText: "Plano Pro Comprar",
+    },
+    sourceCandidates: [{
+      path: "components/Pricing.jsx",
+      score: 18,
+      evidence: "<button>Comprar</button>",
+    }],
+    baseline: [{
+      path: "components/Pricing.jsx",
+      signature: "25:abc123",
+    }],
+  },
   nextStage: 2,
   startedAt: "2026-07-23T12:00:00.000Z",
 };
@@ -39,6 +58,14 @@ describe("retomada da geração por etapas", () => {
     const cloud = stagedJobForCloud(job);
     expect(cloud.imageAttachments).toBeUndefined();
     expect(cloud.nextStage).toBe(2);
+    expect(cloud.visualRefinement).toEqual(job.visualRefinement);
     expect(job.imageAttachments).toHaveLength(1);
+  });
+
+  it("rejeita um contrato visual corrompido", () => {
+    expect(isValidStagedBuildJob({
+      ...job,
+      visualRefinement: { ...job.visualRefinement, baseline: "inválida" },
+    }, "project-1", "thread-1")).toBe(false);
   });
 });

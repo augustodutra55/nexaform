@@ -179,6 +179,16 @@ export async function DELETE(req: NextRequest) {
   const payload = job?.payload as { reservationId?: unknown; requestId?: unknown } | null;
   const reservationId = typeof payload?.reservationId === "string" ? payload.reservationId : null;
   const requestId = typeof payload?.requestId === "string" ? payload.requestId : null;
+  const purge = req.nextUrl.searchParams.get("purge") === "1";
+  if (purge) {
+    const { error } = await supabase
+      .from("staged_generation_jobs")
+      .delete()
+      .eq("project_id", projectId)
+      .in("status", ["completed", "failed", "cancelled"]);
+    if (error) return NextResponse.json({ error: "Não foi possível limpar a etapa finalizada." }, { status: 503 });
+    return NextResponse.json({ purged: true });
+  }
   const { error } = await supabase
     .from("staged_generation_jobs")
     .update({

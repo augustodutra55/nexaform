@@ -34,6 +34,58 @@ export interface BackgroundGenerationPayload {
   result?: unknown;
 }
 
+export interface BackgroundJobSnapshot {
+  id: string;
+  status: BackgroundJobStatus;
+  payload: BackgroundGenerationPayload;
+  attempts: number;
+  next_attempt_at: string | null;
+  last_error: string | null;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export function backgroundJobLabel(
+  status: BackgroundJobStatus,
+  attempts = 0
+): string {
+  switch (status) {
+    case "queued":
+      return "Na fila";
+    case "running":
+      return "Gerando em segundo plano";
+    case "retry":
+      return `Nova tentativa${attempts > 0 ? ` ${attempts + 1}/${BACKGROUND_MAX_ATTEMPTS}` : ""}`;
+    case "completed":
+      return "Aplicando resultado";
+    case "failed":
+      return "Etapa pausada";
+    case "cancelled":
+      return "Cancelada";
+    default:
+      return "Preparando";
+  }
+}
+
+export function isBackgroundJobSnapshot(value: unknown): value is BackgroundJobSnapshot {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Partial<BackgroundJobSnapshot>;
+  return typeof row.id === "string"
+    && typeof row.status === "string"
+    && [
+      "active",
+      "queued",
+      "running",
+      "retry",
+      "completed",
+      "failed",
+      "cancelled",
+    ].includes(row.status)
+    && isBackgroundGenerationPayload(row.payload)
+    && Number.isInteger(row.attempts)
+    && typeof row.updated_at === "string";
+}
+
 const TERMINAL = new Set<BackgroundJobStatus>([
   "completed",
   "failed",

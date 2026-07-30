@@ -64,6 +64,7 @@ export async function GET() {
     observability,
     durableJobs,
     backgroundQueue,
+    backgroundQueueRpc,
     mediaBucket,
   ] = await Promise.all([
     tableProbe(admin, "app_collection_settings", "id,profile,public_read,owner_only"),
@@ -78,8 +79,17 @@ export async function GET() {
     ]).then((results) => results.every(Boolean)),
     tableProbe(admin, "staged_generation_jobs", "id,project_id,thread_id,status,payload"),
     tableProbe(admin, "staged_generation_jobs", "attempts,next_attempt_at,locked_at,locked_by,last_error"),
+    admin.rpc("claim_staged_generation_job", {
+      p_worker_id: "readiness-probe",
+      p_lease_seconds: 0,
+    }).then(({ error }) => !error),
     admin.storage.getBucket("app-uploads").then(({ data, error }) =>
-      !error && !!data && Number(data.file_size_limit ?? 0) >= 52_428_800
+      !error
+      && !!data
+      && Number(data.file_size_limit ?? 0) >= 52_428_800
+      && ["audio/mpeg", "audio/wav", "audio/mp4", "audio/webm"].every(
+        (type) => Array.isArray(data.allowed_mime_types) && data.allowed_mime_types.includes(type)
+      )
     ),
   ]);
 
@@ -104,8 +114,8 @@ export async function GET() {
       id: "migration-0011",
       label: "Central de mídia",
       ok: mediaBucket,
-      readyDetail: "Bucket app-uploads aceita imagens e vídeos de até 50 MB.",
-      missingDetail: "O bucket de mídia está ausente ou ainda possui limite antigo.",
+      readyDetail: "Bucket app-uploads aceita imagens, áudios e vídeos de até 50 MB.",
+      missingDetail: "O bucket de mídia está ausente, possui limite antigo ou não aceita áudio.",
       action: "Aplique supabase/migrations/0011_project_media.sql.",
     }),
     probeCheck({
@@ -135,9 +145,9 @@ export async function GET() {
     probeCheck({
       id: "migration-0015",
       label: "Fila de geração",
-      ok: backgroundQueue,
+      ok: backgroundQueue && backgroundQueueRpc,
       readyDetail: "Fila transacional pronta para processamento em segundo plano.",
-      missingDetail: "A geração ainda não possui lease e repetição transacionais.",
+      missingDetail: "A fila não possui todas as colunas ou a função transacional de claim.",
       action: "Aplique supabase/migrations/0015_background_generation_queue.sql.",
     }),
     probeCheck({

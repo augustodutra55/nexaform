@@ -1,6 +1,6 @@
 import type { AppFile } from "@/lib/engine/app-types";
 
-export type MediaKind = "image" | "video";
+export type MediaKind = "image" | "video" | "audio";
 
 export interface ProjectMediaItem {
   id: string;
@@ -68,6 +68,7 @@ function contextFor(source: string, offset: number, tag: string, projectName: st
 }
 
 function mediaKind(tagName: string, source: string): MediaKind {
+  if (/^audio$/i.test(tagName) || /\.(mp3|wav|m4a|weba|ogg)(?:[?#]|$)/i.test(source)) return "audio";
   if (/^(video|source)$/i.test(tagName) || /\.(mp4|webm|mov)(?:[?#]|$)/i.test(source)) return "video";
   return "image";
 }
@@ -78,7 +79,7 @@ export function findProjectMedia(files: AppFile[], projectName: string): Project
   const seen = new Set<string>();
 
   for (const file of files) {
-    const tagPattern = /<(img|video|source)\b[^>]*\bsrc\s*=\s*(?:["']([^"']*)["']|\{\s*["']([^"']*)["']\s*\})[^>]*>/gi;
+    const tagPattern = /<(img|video|audio|source)\b[^>]*\bsrc\s*=\s*(?:["']([^"']*)["']|\{\s*["']([^"']*)["']\s*\})[^>]*>/gi;
     let match: RegExpExecArray | null;
     while ((match = tagPattern.exec(file.content))) {
       const source = match[2] ?? match[3];
@@ -98,7 +99,7 @@ export function findProjectMedia(files: AppFile[], projectName: string): Project
       });
     }
 
-    const propertyPattern = /(?:image|imagem|photo|foto|video|vídeo|src)\s*:\s*["'`]([^"'`]+)["'`]/gi;
+    const propertyPattern = /(?:image|imagem|photo|foto|video|vídeo|audio|áudio|src)\s*:\s*["'`]([^"'`]+)["'`]/gi;
     while ((match = propertyPattern.exec(file.content))) {
       const source = match[1];
       if (!source || (!/^ADIMG:/i.test(source) && !/^https?:\/\//i.test(source))) continue;
@@ -112,7 +113,7 @@ export function findProjectMedia(files: AppFile[], projectName: string): Project
         filePath: file.path,
         source,
         context: contextFor(file.content, offset, match[0], projectName),
-        kind: mediaKind(/video|vídeo/i.test(match[0]) ? "video" : "img", source),
+        kind: mediaKind(/audio|áudio/i.test(match[0]) ? "audio" : /video|vídeo/i.test(match[0]) ? "video" : "img", source),
         offset,
       });
     }
@@ -130,6 +131,9 @@ export function buildMediaPrompt(item: ProjectMediaItem | null, projectName: str
       : "4:3 landscape";
   if (kind === "video") {
     return `Create a professional cinematic video for ${projectName}. The scene must accurately represent "${context}". ${aspect}, 6 to 8 seconds, natural motion, realistic lighting, premium commercial quality, stable camera, no text, no subtitles, no watermark, no logos.`;
+  }
+  if (kind === "audio") {
+    return `Create professional audio for ${projectName}. It must accurately represent "${context}". Natural Brazilian Portuguese voice when speech is needed, clean studio sound, no clipping, no watermark, concise and commercially usable.`;
   }
   return `Create a professional photorealistic image for ${projectName}. The image must accurately represent "${context}" and match that specific content block. ${aspect}, high-detail premium commercial photography, natural realistic lighting, clean composition, no text, no watermark, no logos.`;
 }

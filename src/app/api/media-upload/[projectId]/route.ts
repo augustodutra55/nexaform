@@ -16,6 +16,10 @@ const BUCKET_MIME_TYPES = [
   "video/mp4",
   "video/webm",
   "video/quicktime",
+  "audio/mpeg",
+  "audio/wav",
+  "audio/mp4",
+  "audio/webm",
   "application/pdf",
   "text/plain",
 ];
@@ -27,6 +31,10 @@ const TYPES: Record<string, string> = {
   "video/mp4": "mp4",
   "video/webm": "webm",
   "video/quicktime": "mov",
+  "audio/mpeg": "mp3",
+  "audio/wav": "wav",
+  "audio/mp4": "m4a",
+  "audio/webm": "weba",
 };
 
 function bad(error: string, status = 400) {
@@ -61,7 +69,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   const size = Number(body?.size || 0);
   const name = String(body?.name || "mídia").slice(0, 180);
   const extension = TYPES[type];
-  if (!extension) return bad("Formato não permitido. Use PNG, JPG, WebP, GIF, MP4, WebM ou MOV.", 415);
+  if (!extension) return bad("Formato não permitido. Use imagem, vídeo ou áudio compatível.", 415);
   if (!Number.isFinite(size) || size < 1 || size > MAX_BYTES) return bad("O arquivo deve ter no máximo 50 MB.", 413);
 
   const admin = createAdminClient();

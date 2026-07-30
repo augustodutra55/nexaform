@@ -170,9 +170,9 @@ export default function SettingsPage() {
               </Label>
               <div className="grid gap-2 sm:grid-cols-3">
                 {[
-                  { id: "auto", name: "Automático", desc: "Modelo barato p/ sites e copy; forte só p/ apps e lógica. Recomendado." },
-                  { id: "economy", name: "Econômico", desc: "Sempre o modelo mais barato. Máxima economia." },
-                  { id: "premium", name: "Premium", desc: "Sempre o modelo forte. Máxima qualidade." },
+                  { id: "auto", name: "Automático", desc: "Escolhe o nível pela complexidade e mantém esse nível até o fim. Recomendado." },
+                  { id: "economy", name: "Econômico", desc: "Usa somente o modelo econômico, sem aumento surpresa de custo." },
+                  { id: "premium", name: "Premium", desc: "Usa somente o modelo forte, sem rebaixamento silencioso." },
                 ].map((m) => (
                   <button
                     key={m.id}

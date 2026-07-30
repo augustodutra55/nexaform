@@ -1,4 +1,6 @@
 import type { PromptAttachment } from "./prompt-attachments";
+import type { PreviewElementSelection, PreviewSourceCandidate } from "@/lib/preview/visual-selection";
+import type { VisualRefinementBaseline } from "@/lib/preview/visual-refinement";
 
 export const STAGED_BUILD_VERSION = 1;
 
@@ -18,8 +20,35 @@ export interface StagedBuildJob {
   kind?: "initial" | "refinement";
   /** Referências visuais preservadas somente enquanto a primeira etapa não concluiu. */
   imageAttachments?: PromptAttachment[];
+  /** Contrato leve que mantém o alvo visual verificável após uma retomada. */
+  visualRefinement?: {
+    selection: PreviewElementSelection;
+    sourceCandidates: PreviewSourceCandidate[];
+    baseline: VisualRefinementBaseline[];
+  };
   nextStage: number;
   startedAt: string;
+}
+
+function isValidVisualRefinement(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!value || typeof value !== "object") return false;
+  const refinement = value as NonNullable<StagedBuildJob["visualRefinement"]>;
+  return !!refinement.selection
+    && typeof refinement.selection === "object"
+    && typeof refinement.selection.tag === "string"
+    && typeof refinement.selection.selector === "string"
+    && Array.isArray(refinement.sourceCandidates)
+    && refinement.sourceCandidates.every((candidate) =>
+      !!candidate
+      && typeof candidate.path === "string"
+      && typeof candidate.score === "number"
+      && typeof candidate.evidence === "string"
+    )
+    && Array.isArray(refinement.baseline)
+    && refinement.baseline.every((file) =>
+      !!file && typeof file.path === "string" && typeof file.signature === "string"
+    );
 }
 
 export function isValidStagedBuildJob(
@@ -40,7 +69,8 @@ export function isValidStagedBuildJob(
     && Number.isInteger(job.nextStage)
     && Number(job.nextStage) >= 0
     && Number(job.nextStage) < total
-    && typeof job.startedAt === "string";
+    && typeof job.startedAt === "string"
+    && isValidVisualRefinement(job.visualRefinement);
 }
 
 /** A retomada em nuvem não guarda imagens em base64; elas podem exceder o

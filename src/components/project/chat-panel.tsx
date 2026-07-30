@@ -36,6 +36,11 @@ import {
   findPreviewSourceCandidates,
   type PreviewElementSelection,
 } from "@/lib/preview/visual-selection";
+import {
+  buildVisualRefinementRecoveryPrompt,
+  createVisualRefinementBaseline,
+  verifyVisualRefinementBaseline,
+} from "@/lib/preview/visual-refinement";
 
 interface Message {
   id: string;
@@ -411,10 +416,21 @@ export function ChatPanel({
       : codeRef.current
         ? [{ path: "App.jsx", content: codeRef.current }]
         : [];
+    const activeVisualSelection = !isAutoFix
+      ? resumedJob?.visualRefinement?.selection ?? visualSelection
+      : null;
+    const visualSourceCandidates = resumedJob?.visualRefinement?.sourceCandidates ??
+      (activeVisualSelection
+        ? findPreviewSourceCandidates(activeVisualSelection, selectionFiles)
+        : []);
+    const visualBaseline = resumedJob?.visualRefinement?.baseline ??
+      (activeVisualSelection
+        ? createVisualRefinementBaseline(codeRef.current, filesRef.current)
+        : []);
     const contextualContent = !resumedJob && !isAutoFix && visualSelection
       ? `${content}\n\n${buildVisualSelectionContext(
           visualSelection,
-          findPreviewSourceCandidates(visualSelection, selectionFiles)
+          visualSourceCandidates
         )}`
       : content;
     const requestAttachments = resumedJob
@@ -497,6 +513,43 @@ export function ChatPanel({
         allowTemplate: genModeRef.current === "template",
         attachments: stageAttachments,
       });
+      const verifySelectedResult = (data: any) => {
+        if (!activeVisualSelection || !data?.app) return null;
+        return verifyVisualRefinementBaseline(visualBaseline, data.app, visualSourceCandidates);
+      };
+      const recoverSelectedResult = async (
+        data: any,
+        recoveryCode: string | null,
+        recoveryFiles: AppFile[] | null
+      ) => {
+        const verification = verifySelectedResult(data);
+        if (!verification || verification.valid) return data;
+        const recoveryPrompt = buildVisualRefinementRecoveryPrompt({
+          originalRequest: content,
+          selection: activeVisualSelection!,
+          verification,
+          candidates: visualSourceCandidates,
+        });
+        const recovered = await request(appPayload(
+          recoveryPrompt,
+          recoveryCode,
+          recoveryFiles,
+          [],
+          crypto.randomUUID()
+        ));
+        const recoveredVerification = verifySelectedResult(recovered);
+        if (!recoveredVerification?.valid) {
+          throw new Error(
+            recoveredVerification?.reason === "target_not_changed"
+              ? "A IA respondeu duas vezes, mas não alterou o componente selecionado. O projeto anterior foi preservado."
+              : "A IA respondeu duas vezes sem produzir uma alteração verificável. O projeto anterior foi preservado."
+          );
+        }
+        toast.success("Alteração confirmada no elemento selecionado", {
+          description: recoveredVerification.changedPaths.join(", "),
+        });
+        return recovered;
+      };
 
       if (useStagedBuild) {
         const jobKind = resumedJob?.kind ?? (hasCurrentProject ? "refinement" : "initial");
@@ -509,6 +562,11 @@ export function ChatPanel({
           masterPrompt: buildMasterPrompt(contextualContent, requestAttachments),
           kind: jobKind,
           imageAttachments: requestAttachments.filter((attachment) => attachment.kind === "image"),
+          visualRefinement: activeVisualSelection ? {
+            selection: activeVisualSelection,
+            sourceCandidates: visualSourceCandidates,
+            baseline: visualBaseline,
+          } : undefined,
           nextStage: 0,
           startedAt: new Date().toISOString(),
         };
@@ -542,6 +600,16 @@ export function ChatPanel({
             setStageStatus({ current: index + 1, total: stages.length, label: `${stage.label} · nova tentativa` });
             const retryPrompt = buildStageRetryPrompt(job.masterPrompt, stage, index, stages.length, jobKind);
             data = await request(appPayload(retryPrompt, workingCode, workingFiles, stageAttachments, stageRequestId));
+          }
+          if (activeVisualSelection && index === stages.length - 1) {
+            const generatedApp = (data as AppGenerationResult).app;
+            const recoveryFiles = generatedApp.files?.length ? generatedApp.files : null;
+            const recoveryCode = recoveryFiles ? null : generatedApp.code ?? null;
+            data = await recoverSelectedResult(
+              data,
+              recoveryCode,
+              recoveryFiles
+            );
           }
           lastData = data;
 
@@ -602,7 +670,14 @@ export function ChatPanel({
             userProvider: localStorage.getItem("nexaform:ai-provider") || null,
             costMode,
           };
-      const data = await request(payload);
+      let data = await request(payload);
+      if (useApp && activeVisualSelection) {
+        data = await recoverSelectedResult(
+          data,
+          codeRef.current,
+          filesRef.current ?? null
+        );
+      }
 
       const steps: string[] = Array.isArray(data.plan) ? data.plan : [];
       setPlan(steps);

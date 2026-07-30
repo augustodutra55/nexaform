@@ -24,6 +24,9 @@ alter table public.staged_generation_jobs
   validate constraint staged_generation_jobs_status_check;
 
 alter table public.staged_generation_jobs
+  drop constraint if exists staged_generation_jobs_attempts_check;
+
+alter table public.staged_generation_jobs
   add constraint staged_generation_jobs_attempts_check
   check (attempts between 0 and 10) not valid;
 

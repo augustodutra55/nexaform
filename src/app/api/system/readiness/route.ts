@@ -43,6 +43,14 @@ export async function GET() {
       missingDetail: "A service role não está configurada.",
       action: "Configure SUPABASE_SERVICE_ROLE_KEY na Vercel.",
     }),
+    probeCheck({
+      id: "background-worker",
+      label: "Worker de geração em segundo plano",
+      ok: !!process.env.CRON_SECRET && !!process.env.OPENROUTER_API_KEY,
+      readyDetail: "Cron autenticado e provedor do servidor estão configurados.",
+      missingDetail: "O worker não possui todas as credenciais necessárias.",
+      action: "Configure CRON_SECRET e OPENROUTER_API_KEY na Vercel.",
+    }),
   ];
 
   if (!admin) {

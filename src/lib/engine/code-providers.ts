@@ -8,7 +8,7 @@
 import { AppFile, AppGenerationResult, GenerationMediaAsset, ProjectQualityReport, codeStats, projectStats } from "./app-types";
 import { CODE_SYSTEM_PROMPT, CODE_REFINE_SYSTEM_PROMPT, buildCodeUserPrompt } from "./code-prompts";
 import { matchTemplate } from "./code-templates";
-import { CostMode, pickTier, modelFor, estimateCost, isFunctionalRefinement } from "./models";
+import { CostMode, pickTier, modelExecutionPlan, estimateCost, isFunctionalRefinement } from "./models";
 import type { PromptAttachment } from "./prompt-attachments";
 import { applyFileOperations, parseOperationBlocks } from "./operation-blocks";
 import { buildGenerationPlan, renderGenerationPlan } from "./generation-plan";
@@ -574,25 +574,20 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
   const diag: string[] = [];
   const hadKey = !!(a.userKey || process.env.ANTHROPIC_API_KEY || process.env.OPENROUTER_API_KEY);
 
-  // ── AUTO-CURA (comportamento tipo Lovable) ────────────────────────────────
-  // Para cada provedor, tentamos o modelo escolhido e, se falhar (modelo fora do
-  // ar, resposta truncada, erro transitório), caímos AUTOMATICAMENTE para o
-  // outro modelo — o principal com 1 retry. Assim uma falha pontual vira
-  // conserto automático em vez de um beco sem saída.
+  // ── AUTO-CURA PREVISÍVEL ──────────────────────────────────────────────────
+  // Repetimos falhas transitórias e podemos tentar outra chave/provedor, mas
+  // preservamos o tier escolhido. Nunca rebaixamos Premium para Haiku nem
+  // elevamos Econômico para Premium sem uma nova escolha do usuário.
   async function tryChain(
     provider: "claude" | "openrouter",
     key: string,
     call: (k: string, args: Args, model: string, d: string[]) => Promise<AppGenerationResult | null>
   ): Promise<AppGenerationResult | null> {
-    const primary = modelFor(tier, provider);
-    const secondary = modelFor(tier === "premium" ? "economy" : "premium", provider);
-    // Superprompts e alterações funcionais permanecem no Premium. Cair para
-    // Haiku escondido reduz qualidade e torna o diagnóstico enganoso.
-    const chain = premiumOnly || primary === secondary ? [primary] : [primary, secondary];
+    const chain = modelExecutionPlan(tier, provider);
     for (let i = 0; i < chain.length; i++) {
       // Refinamento: 1 tentativa no principal (rápido, cabe nos 60s do Hobby).
       // Primeira geração: 2 tentativas (mais robusto, vale a espera).
-      const attempts = premiumOnly ? 1 : i === 0 && !isRefinement ? 2 : 1;
+      const attempts = premiumOnly ? 1 : !isRefinement ? 2 : 1;
       for (let t = 0; t < attempts; t++) {
         const r = await call(key, a, chain[i], diag);
         if (r) return r;

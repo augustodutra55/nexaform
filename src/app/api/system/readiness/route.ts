@@ -55,6 +55,7 @@ export async function GET() {
     professionalBackend,
     observability,
     durableJobs,
+    backgroundQueue,
     mediaBucket,
   ] = await Promise.all([
     tableProbe(admin, "app_collection_settings", "id,profile,public_read,owner_only"),
@@ -68,6 +69,7 @@ export async function GET() {
       tableProbe(admin, "generations", "request_id,attempt,kind,duration_ms,error_code"),
     ]).then((results) => results.every(Boolean)),
     tableProbe(admin, "staged_generation_jobs", "id,project_id,thread_id,status,payload"),
+    tableProbe(admin, "staged_generation_jobs", "attempts,next_attempt_at,locked_at,locked_by,last_error"),
     admin.storage.getBucket("app-uploads").then(({ data, error }) =>
       !error && !!data && Number(data.file_size_limit ?? 0) >= 52_428_800
     ),
@@ -121,6 +123,14 @@ export async function GET() {
       readyDetail: "Gerações por etapas podem ser retomadas em outro navegador.",
       missingDetail: "A retomada ainda depende somente do navegador.",
       action: "Aplique supabase/migrations/0014_durable_generation_jobs.sql.",
+    }),
+    probeCheck({
+      id: "migration-0015",
+      label: "Fila de geração",
+      ok: backgroundQueue,
+      readyDetail: "Fila transacional pronta para processamento em segundo plano.",
+      missingDetail: "A geração ainda não possui lease e repetição transacionais.",
+      action: "Aplique supabase/migrations/0015_background_generation_queue.sql.",
     }),
     probeCheck({
       id: "openrouter-server",

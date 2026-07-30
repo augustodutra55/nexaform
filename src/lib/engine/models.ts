@@ -64,6 +64,21 @@ export function modelFor(tier: Tier, provider: "openrouter" | "claude"): string 
   return tier === "premium" ? PREMIUM_MODEL_ANTHROPIC : ECON_MODEL_ANTHROPIC;
 }
 
+/**
+ * Plano de execução previsível para uma geração.
+ *
+ * O modelo escolhido pelo modo de custo é uma decisão do usuário. Uma falha
+ * pode ser repetida no mesmo modelo ou encaminhada a outro provedor, mas nunca
+ * deve trocar silenciosamente Premium por Econômico (perda de qualidade) nem
+ * Econômico por Premium (aumento inesperado de custo).
+ */
+export function modelExecutionPlan(
+  tier: Tier,
+  provider: "openrouter" | "claude"
+): string[] {
+  return [modelFor(tier, provider)];
+}
+
 /** Preços de referência (USD por 1M tokens) para estimar custo quando o
  *  provedor não devolve o custo real. Aproximado; o custo real prevalece. */
 const PRICE: Record<string, { in: number; out: number }> = {

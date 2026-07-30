@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  BACKGROUND_GENERATION_VERSION,
+  isBackgroundGenerationPayload,
   isTerminalJobStatus,
   nextBackgroundJobStatus,
   retryDelaySeconds,
@@ -40,5 +42,36 @@ describe("background generation jobs", () => {
     expect(retryDelaySeconds(1)).toBe(30);
     expect(retryDelaySeconds(2)).toBe(60);
     expect(retryDelaySeconds(10)).toBe(900);
+  });
+
+  it("aceita somente payload da etapa e do projeto corretos", () => {
+    const payload = {
+      version: BACKGROUND_GENERATION_VERSION,
+      projectId: "project-1",
+      threadId: "thread-1",
+      userId: "user-1",
+      stagedJob: {
+        version: 1,
+        projectId: "project-1",
+        threadId: "thread-1",
+        originalPrompt: "Crie um app",
+        masterPrompt: "Crie um app completo",
+        kind: "initial" as const,
+        nextStage: 2,
+        startedAt: new Date().toISOString(),
+      },
+      stageIndex: 2,
+      requestId: "request-1",
+      reservationId: "reservation-1",
+      name: "Meu app",
+      costMode: "auto" as const,
+      queuedAt: new Date().toISOString(),
+    };
+    expect(isBackgroundGenerationPayload(payload)).toBe(true);
+    expect(isBackgroundGenerationPayload({ ...payload, stageIndex: 1 })).toBe(false);
+    expect(isBackgroundGenerationPayload({
+      ...payload,
+      stagedJob: { ...payload.stagedJob, projectId: "outro" },
+    })).toBe(false);
   });
 });

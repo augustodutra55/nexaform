@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   BACKGROUND_GENERATION_VERSION,
+  backgroundJobLabel,
   isBackgroundGenerationPayload,
+  isBackgroundJobSnapshot,
   isTerminalJobStatus,
   nextBackgroundJobStatus,
   retryDelaySeconds,
@@ -73,5 +75,22 @@ describe("background generation jobs", () => {
       ...payload,
       stagedJob: { ...payload.stagedJob, projectId: "outro" },
     })).toBe(false);
+    expect(isBackgroundJobSnapshot({
+      id: "job-1",
+      status: "completed",
+      payload,
+      attempts: 1,
+      next_attempt_at: null,
+      last_error: null,
+      updated_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+    })).toBe(true);
+  });
+
+  it("explica o estado da fila em linguagem de interface", () => {
+    expect(backgroundJobLabel("queued")).toBe("Na fila");
+    expect(backgroundJobLabel("running")).toBe("Gerando em segundo plano");
+    expect(backgroundJobLabel("retry", 1)).toContain("2/3");
+    expect(backgroundJobLabel("completed")).toBe("Aplicando resultado");
   });
 });

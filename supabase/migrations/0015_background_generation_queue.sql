@@ -5,6 +5,12 @@
 alter table public.staged_generation_jobs
   drop constraint if exists staged_generation_jobs_status_check;
 
+-- A migration pode ser retomada depois de uma execução parcial. Remova também
+-- a constraint de tentativas antes de qualquer ADD para manter o script
+-- idempotente no SQL Editor do Supabase.
+alter table public.staged_generation_jobs
+  drop constraint if exists staged_generation_jobs_attempts_check;
+
 alter table public.staged_generation_jobs
   add column if not exists attempts integer not null default 0,
   add column if not exists next_attempt_at timestamptz not null default now(),
@@ -22,9 +28,6 @@ alter table public.staged_generation_jobs
 
 alter table public.staged_generation_jobs
   validate constraint staged_generation_jobs_status_check;
-
-alter table public.staged_generation_jobs
-  drop constraint if exists staged_generation_jobs_attempts_check;
 
 alter table public.staged_generation_jobs
   add constraint staged_generation_jobs_attempts_check

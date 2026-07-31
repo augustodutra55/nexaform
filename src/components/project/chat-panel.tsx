@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout, Mic, Square, Cpu, FileCode2, AlertTriangle, Paperclip, X, Image as ImageIcon, MousePointer2 } from "lucide-react";
+import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout, Mic, Square, Cpu, FileCode2, AlertTriangle, Paperclip, X, Image as ImageIcon, MousePointer2, Save } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AppSchema, GenerationResult } from "@/lib/engine/types";
 import { AppFile, AppGenerationResult, CodeStats, EngineMode, MediaGenerationReport, looksLikeApp } from "@/lib/engine/app-types";
@@ -123,6 +123,7 @@ interface ChatPanelProps {
   onEngineMode?: (mode: EngineMode | null) => void;
   visualSelection?: PreviewElementSelection | null;
   onClearVisualSelection?: () => void;
+  onDirectVisualEdit?: (text: string) => Promise<boolean>;
 }
 
 const SITE_SUGGESTIONS = [
@@ -167,6 +168,7 @@ export function ChatPanel({
   onEngineMode,
   visualSelection,
   onClearVisualSelection,
+  onDirectVisualEdit,
 }: ChatPanelProps) {
   const supabase = useMemo(() => createClient(), []);
   const [messages, setMessages] = useState<Message[]>(() => {
@@ -180,6 +182,12 @@ export function ChatPanel({
     } catch {}
     return initialMessages;
   });
+  const [visualTextDraft, setVisualTextDraft] = useState(visualSelection?.text ?? "");
+  const [applyingVisualText, setApplyingVisualText] = useState(false);
+
+  useEffect(() => {
+    setVisualTextDraft(visualSelection?.text ?? "");
+  }, [visualSelection]);
   const recoveredFailureKey = `adstudio:recovered-failures:${threadId}`;
   const [recoveredFailureIds, setRecoveredFailureIds] = useState<string[]>(() => {
     try {
@@ -1203,22 +1211,56 @@ export function ChatPanel({
         className="border-t p-3"
       >
         {visualSelection && (
-          <div className="mb-2 flex items-center gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-2 text-[11px]">
-            <MousePointer2 className="h-3.5 w-3.5 shrink-0 text-violet-600 dark:text-violet-300" />
-            <div className="min-w-0 flex-1">
-              <p className="font-medium text-foreground">Editando o elemento selecionado</p>
-              <p className="truncate text-muted-foreground">
-                {visualSelection.label} · &lt;{visualSelection.tag}&gt;
-              </p>
+          <div className="mb-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-2 text-[11px]">
+            <div className="flex items-center gap-2">
+              <MousePointer2 className="h-3.5 w-3.5 shrink-0 text-violet-600 dark:text-violet-300" />
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-foreground">Elemento selecionado</p>
+                <p className="truncate text-muted-foreground">
+                  {visualSelection.label} · &lt;{visualSelection.tag}&gt;
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onClearVisualSelection}
+                className="rounded p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                aria-label="Remover seleção visual"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={onClearVisualSelection}
-              className="rounded p-1 text-muted-foreground hover:bg-background hover:text-foreground"
-              aria-label="Remover seleção visual"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
+            {visualSelection.text && onDirectVisualEdit && (
+              <div className="mt-2 flex gap-1.5">
+                <input
+                  value={visualTextDraft}
+                  onChange={(event) => setVisualTextDraft(event.target.value)}
+                  className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1.5 text-xs text-foreground outline-none focus:border-violet-500"
+                  aria-label="Novo texto do elemento"
+                  maxLength={500}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="brand"
+                  className="h-7 gap-1 px-2 text-[11px]"
+                  disabled={applyingVisualText || !visualTextDraft.trim() || visualTextDraft.trim() === visualSelection.text}
+                  onClick={async () => {
+                    setApplyingVisualText(true);
+                    try {
+                      await onDirectVisualEdit(visualTextDraft);
+                    } finally {
+                      setApplyingVisualText(false);
+                    }
+                  }}
+                >
+                  {applyingVisualText ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                  Aplicar
+                </Button>
+              </div>
+            )}
+            <p className="mt-1.5 text-[10px] text-muted-foreground">
+              Edite o texto acima ou descreva no campo abaixo uma mudança visual completa.
+            </p>
           </div>
         )}
         {attachments.length > 0 && (

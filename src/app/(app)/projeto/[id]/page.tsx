@@ -30,6 +30,7 @@ import { buildAcceptanceReport } from "@/lib/engine/acceptance-report";
 import { acceptanceRepairFingerprint, buildAcceptanceRepairPrompt } from "@/lib/engine/acceptance-repair";
 import type { RuntimeAuditReport } from "@/lib/preview/runtime-audit";
 import type { PreviewElementSelection } from "@/lib/preview/visual-selection";
+import { applyDirectVisualTextEdit } from "@/lib/preview/direct-visual-edit";
 
 interface ProjectRow {
   id: string;
@@ -559,6 +560,30 @@ export default function ProjectPage() {
     toast.info("Código em verificação", { description: "A alteração será salva depois que o preview for aprovado." });
   }
 
+  async function handleDirectVisualEdit(text: string): Promise<boolean> {
+    if (!visualSelection) return false;
+    const result = applyDirectVisualTextEdit(codeFiles, visualSelection, text);
+    if (!result.changed) {
+      const descriptions = {
+        empty_text: "Digite um texto antes de aplicar.",
+        unsupported_element: "Esse tipo de elemento precisa ser alterado pelo pedido à IA.",
+        source_not_found: "O texto é dinâmico ou composto. Descreva a mudança no campo abaixo.",
+        ambiguous_source: "O mesmo texto aparece em mais de um lugar. Descreva qual deles deve mudar.",
+        changed: "",
+      } as const;
+      toast.info("Use o refinamento assistido para este elemento", {
+        description: descriptions[result.reason],
+      });
+      return false;
+    }
+    setVisualSelection(null);
+    await handleApplyCode(result.files);
+    toast.success("Texto alterado no preview", {
+      description: `${result.path} será salvo após a verificação automática.`,
+    });
+    return true;
+  }
+
   async function handleReplaceMedia(item: ProjectMediaItem, url: string) {
     const edited = replaceProjectMedia(codeFiles, item, url);
     if (!edited) {
@@ -937,6 +962,7 @@ export default function ProjectPage() {
             onEngineMode={setEngineMode}
             visualSelection={visualSelection}
             onClearVisualSelection={() => setVisualSelection(null)}
+            onDirectVisualEdit={handleDirectVisualEdit}
           />
         </aside>
 

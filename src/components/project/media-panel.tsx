@@ -22,6 +22,7 @@ interface MediaPanelProps {
   projectName: string;
   files: AppFile[];
   assets: ProjectMediaAsset[];
+  focusSource?: string | null;
   onReplace: (item: ProjectMediaItem, url: string) => Promise<void>;
   onAssetsChange: (assets: ProjectMediaAsset[]) => Promise<void>;
 }
@@ -34,7 +35,7 @@ function kindOf(type: string): MediaKind {
   return type.startsWith("video/") ? "video" : "image";
 }
 
-export function MediaPanel({ projectId, projectName, files, assets, onReplace, onAssetsChange }: MediaPanelProps) {
+export function MediaPanel({ projectId, projectName, files, assets, focusSource, onReplace, onAssetsChange }: MediaPanelProps) {
   const supabase = useMemo(() => createClient(), []);
   const items = useMemo(() => findProjectMedia(files, projectName), [files, projectName]);
   const [selectedId, setSelectedId] = useState(items[0]?.id || "");
@@ -48,6 +49,12 @@ export function MediaPanel({ projectId, projectName, files, assets, onReplace, o
     if (!selectedId && items[0]) setSelectedId(items[0].id);
     if (selectedId && !items.some((item) => item.id === selectedId)) setSelectedId(items[0]?.id || "");
   }, [items, selectedId]);
+
+  useEffect(() => {
+    if (!focusSource) return;
+    const focused = items.find((item) => item.source === focusSource);
+    if (focused) setSelectedId(focused.id);
+  }, [focusSource, items]);
 
   useEffect(() => {
     if (selected) setPromptKind(selected.kind);

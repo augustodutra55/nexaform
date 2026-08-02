@@ -69,6 +69,7 @@ export default function ProjectPage() {
   const [engineMode, setEngineMode] = useState<EngineMode | null>(null);
   const [appView, setAppView] = useState<"preview" | "code" | "data" | "media" | "quality">("preview");
   const [visualSelection, setVisualSelection] = useState<PreviewElementSelection | null>(null);
+  const [focusedMediaSource, setFocusedMediaSource] = useState<string | null>(null);
   const [views, setViews] = useState<number | null>(null);
 
   // Visitas do site publicado (analytics agregado). Só busca quando publicado.
@@ -603,6 +604,12 @@ export default function ProjectPage() {
     return true;
   }
 
+  function handleOpenSelectedMedia() {
+    if (!visualSelection?.src) return;
+    setFocusedMediaSource(visualSelection.src);
+    setAppView("media");
+  }
+
   async function handleReplaceMedia(item: ProjectMediaItem, url: string) {
     const edited = replaceProjectMedia(codeFiles, item, url);
     if (!edited) {
@@ -983,6 +990,7 @@ export default function ProjectPage() {
             onClearVisualSelection={() => setVisualSelection(null)}
             onDirectVisualEdit={handleDirectVisualEdit}
             onDirectVisualStyleEdit={handleDirectVisualStyleEdit}
+            onOpenSelectedMedia={handleOpenSelectedMedia}
           />
         </aside>
 
@@ -1059,6 +1067,7 @@ export default function ProjectPage() {
                     projectName={project.name}
                     files={codeFiles}
                     assets={meta.media || []}
+                    focusSource={focusedMediaSource}
                     onReplace={handleReplaceMedia}
                     onAssetsChange={handleMediaAssetsChange}
                   />

@@ -15,6 +15,7 @@ describe("visual selection", () => {
       label: "",
       nearbyText: "Hero da clínica",
       className: "",
+      src: "",
     });
     expect(selection).toEqual({
       tag: "button",
@@ -24,7 +25,18 @@ describe("visual selection", () => {
       label: "Agendar agora",
       nearbyText: "Hero da clínica",
       className: "",
+      src: "",
     });
+  });
+
+  it("preserva a origem da mídia selecionada", () => {
+    const selection = normalizePreviewSelection({
+      tag: "img",
+      selector: "img.hero",
+      label: "Equipe da clínica",
+      src: "https://cdn.example.com/equipe.webp",
+    });
+    expect(selection?.src).toBe("https://cdn.example.com/equipe.webp");
   });
 
   it("recusa mensagens sem elemento identificável", () => {

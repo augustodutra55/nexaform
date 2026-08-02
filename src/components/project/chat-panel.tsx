@@ -126,6 +126,7 @@ interface ChatPanelProps {
   onClearVisualSelection?: () => void;
   onDirectVisualEdit?: (text: string) => Promise<boolean>;
   onDirectVisualStyleEdit?: (preset: DirectVisualStylePreset) => Promise<boolean>;
+  onOpenSelectedMedia?: () => void;
 }
 
 const SITE_SUGGESTIONS = [
@@ -172,6 +173,7 @@ export function ChatPanel({
   onClearVisualSelection,
   onDirectVisualEdit,
   onDirectVisualStyleEdit,
+  onOpenSelectedMedia,
 }: ChatPanelProps) {
   const supabase = useMemo(() => createClient(), []);
   const [messages, setMessages] = useState<Message[]>(() => {
@@ -1291,6 +1293,18 @@ export function ChatPanel({
                   ))}
                 </div>
               </div>
+            )}
+            {visualSelection.src && onOpenSelectedMedia && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="mt-2 h-7 w-full gap-1.5 text-[11px]"
+                onClick={onOpenSelectedMedia}
+              >
+                <ImageIcon className="h-3.5 w-3.5" />
+                Trocar esta mídia
+              </Button>
             )}
             <p className="mt-1.5 text-[10px] text-muted-foreground">
               Edite texto e aparência acima ou descreva no campo abaixo uma mudança visual completa.

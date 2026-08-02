@@ -9,6 +9,7 @@ export interface PreviewElementSelection {
   nearbyText: string;
   className?: string;
   src?: string;
+  href?: string;
 }
 
 export interface PreviewSourceCandidate {
@@ -96,6 +97,7 @@ export function normalizePreviewSelection(value: unknown): PreviewElementSelecti
     nearbyText: clean(raw.nearbyText, 360),
     className: clean(raw.className, 600),
     src: clean(raw.src, 1200),
+    href: clean(raw.href, 1200),
   };
 }
 
@@ -173,6 +175,7 @@ export function visualSelectionSource(): string {
       nearbyText:nxText(container||el.parentElement,360)
       ,className:String((el.getAttribute&&el.getAttribute('class'))||'').slice(0,600)
       ,src:String((el.getAttribute&&el.getAttribute('src'))||'').slice(0,1200)
+      ,href:String((el.getAttribute&&el.getAttribute('href'))||'').slice(0,1200)
     };
   }
   function nxSetMode(enabled){

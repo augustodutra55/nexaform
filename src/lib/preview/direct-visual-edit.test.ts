@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyDirectVisualStyleEdit, applyDirectVisualTextEdit } from "./direct-visual-edit";
+import { applyDirectVisualLinkEdit, applyDirectVisualStyleEdit, applyDirectVisualTextEdit } from "./direct-visual-edit";
 
 const selection = {
   tag: "h2",
@@ -101,5 +101,40 @@ describe("direct visual style edit", () => {
     );
     expect(result.changed).toBe(false);
     expect(result.reason).toBe("unsupported_element");
+  });
+});
+
+describe("direct visual link edit", () => {
+  const linkSelection = { ...selection, tag: "a", text: "Agendar", href: "/agendar" };
+
+  it("altera um href literal identificado pelo texto", () => {
+    const result = applyDirectVisualLinkEdit(
+      [{ path: "Header.jsx", content: '<a href="/agendar">Agendar</a>' }],
+      linkSelection,
+      "https://empresa.com/agenda?origem=site&canal=cta"
+    );
+    expect(result.changed).toBe(true);
+    expect(result.files[0].content).toContain('href="https://empresa.com/agenda?origem=site&amp;canal=cta"');
+  });
+
+  it("recusa protocolos executáveis", () => {
+    const result = applyDirectVisualLinkEdit(
+      [{ path: "Header.jsx", content: '<a href="/agendar">Agendar</a>' }],
+      linkSelection,
+      "javascript:alert(1)"
+    );
+    expect(result.changed).toBe(false);
+    expect(result.reason).toBe("unsafe_value");
+  });
+
+  it("usa o texto para diferenciar links com o mesmo destino", () => {
+    const result = applyDirectVisualLinkEdit(
+      [{ path: "App.jsx", content: '<><a href="/agendar">Agendar</a><a href="/agendar">Contato</a></>' }],
+      linkSelection,
+      "#formulario"
+    );
+    expect(result.changed).toBe(true);
+    expect(result.files[0].content).toContain('<a href="#formulario">Agendar</a>');
+    expect(result.files[0].content).toContain('<a href="/agendar">Contato</a>');
   });
 });

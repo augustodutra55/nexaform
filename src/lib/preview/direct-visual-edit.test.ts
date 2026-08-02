@@ -124,6 +124,34 @@ describe("direct visual style edit", () => {
     expect(result.changed).toBe(false);
     expect(result.reason).toBe("unsupported_element");
   });
+
+  it("aumenta o texto removendo apenas o tamanho conflitante", () => {
+    const result = applyDirectVisualStyleEdit(
+      [{ path: "Hero.jsx", content: 'export default () => <h2 className="text-sm font-bold text-slate-900">Nossos serviços</h2>' }],
+      selection,
+      "larger"
+    );
+    expect(result.changed).toBe(true);
+    expect(result.files[0].content).toContain('className="font-bold text-slate-900 text-2xl"');
+  });
+
+  it("aplica estilo primário sem conservar cores conflitantes", () => {
+    const result = applyDirectVisualStyleEdit(
+      [{ path: "Cta.jsx", content: 'export default () => <button className="bg-red-500 text-slate-900 hover:bg-red-600 px-4">Nossos serviços</button>' }],
+      { ...selection, tag: "button" },
+      "primary"
+    );
+    expect(result.changed).toBe(true);
+    expect(result.files[0].content).toContain('className="px-4 bg-violet-600 text-white hover:bg-violet-700 transition-colors"');
+  });
+
+  it("permite tornar o elemento compacto e ocupar toda a largura em sequência", () => {
+    const initial = [{ path: "Card.jsx", content: 'export default () => <h2 className="p-8 w-auto">Nossos serviços</h2>' }];
+    const compact = applyDirectVisualStyleEdit(initial, selection, "compact");
+    const full = applyDirectVisualStyleEdit(compact.files, selection, "fullWidth");
+    expect(full.changed).toBe(true);
+    expect(full.files[0].content).toContain('className="p-3 w-full"');
+  });
 });
 
 describe("direct visual link edit", () => {

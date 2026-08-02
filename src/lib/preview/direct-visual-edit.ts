@@ -14,7 +14,13 @@ export type DirectVisualStylePreset =
   | "subtle"
   | "rounded"
   | "spacious"
-  | "centered";
+  | "compact"
+  | "centered"
+  | "larger"
+  | "smaller"
+  | "primary"
+  | "dark"
+  | "fullWidth";
 
 export interface DirectVisualEditResult {
   changed: boolean;
@@ -58,9 +64,37 @@ const STYLE_PRESETS: Record<DirectVisualStylePreset, { add: string[]; remove: Re
     add: ["p-6"],
     remove: [/^p-\d+(?:\.5)?$/],
   },
+  compact: {
+    add: ["p-3"],
+    remove: [/^p-\d+(?:\.5)?$/],
+  },
   centered: {
     add: ["text-center"],
     remove: [/^text-(?:left|right|justify|start|end)$/],
+  },
+  larger: {
+    add: ["text-2xl"],
+    remove: [/^text-(?:xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl)$/],
+  },
+  smaller: {
+    add: ["text-sm"],
+    remove: [/^text-(?:xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl)$/],
+  },
+  primary: {
+    add: ["bg-violet-600", "text-white", "hover:bg-violet-700", "transition-colors"],
+    remove: [
+      /^bg-[a-z]+-\d{2,3}$/,
+      /^text-[a-z]+-\d{2,3}$/,
+      /^hover:bg-[a-z]+-\d{2,3}$/,
+    ],
+  },
+  dark: {
+    add: ["bg-slate-950", "text-white"],
+    remove: [/^bg-[a-z]+-\d{2,3}$/, /^text-[a-z]+-\d{2,3}$/],
+  },
+  fullWidth: {
+    add: ["w-full"],
+    remove: [/^w-(?:auto|fit|full|screen|min|max|\d+(?:\/\d+)?)$/],
   },
 };
 

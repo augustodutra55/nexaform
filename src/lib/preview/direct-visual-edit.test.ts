@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyDirectVisualTextEdit } from "./direct-visual-edit";
+import { applyDirectVisualStyleEdit, applyDirectVisualTextEdit } from "./direct-visual-edit";
 
 const selection = {
   tag: "h2",
@@ -8,6 +8,7 @@ const selection = {
   text: "Nossos serviços",
   role: "",
   nearbyText: "Nossos serviços para sua empresa",
+  className: "text-left font-normal",
 };
 
 describe("direct visual edit", () => {
@@ -68,5 +69,37 @@ describe("direct visual edit", () => {
     );
     expect(result.changed).toBe(false);
     expect(result.reason).toBe("source_not_found");
+  });
+});
+
+describe("direct visual style edit", () => {
+  it("aplica preset e substitui classes conflitantes", () => {
+    const result = applyDirectVisualStyleEdit(
+      [{ path: "Hero.jsx", content: 'export default () => <h2 className="text-left font-normal">Nossos serviços</h2>' }],
+      selection,
+      "centered"
+    );
+    expect(result.changed).toBe(true);
+    expect(result.files[0].content).toContain('className="font-normal text-center"');
+  });
+
+  it("adiciona className quando o elemento ainda não possui", () => {
+    const result = applyDirectVisualStyleEdit(
+      [{ path: "Card.jsx", content: "export default () => <h2>Nossos serviços</h2>" }],
+      selection,
+      "rounded"
+    );
+    expect(result.changed).toBe(true);
+    expect(result.files[0].content).toContain('className="rounded-2xl shadow-lg"');
+  });
+
+  it("recusa className dinâmico", () => {
+    const result = applyDirectVisualStyleEdit(
+      [{ path: "Card.jsx", content: "export default () => <h2 className={active ? 'a' : 'b'}>Nossos serviços</h2>" }],
+      selection,
+      "emphasis"
+    );
+    expect(result.changed).toBe(false);
+    expect(result.reason).toBe("unsupported_element");
   });
 });

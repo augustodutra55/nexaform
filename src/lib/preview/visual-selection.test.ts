@@ -14,6 +14,7 @@ describe("visual selection", () => {
       role: "button",
       label: "",
       nearbyText: "Hero da clínica",
+      className: "",
     });
     expect(selection).toEqual({
       tag: "button",
@@ -22,6 +23,7 @@ describe("visual selection", () => {
       role: "button",
       label: "Agendar agora",
       nearbyText: "Hero da clínica",
+      className: "",
     });
   });
 

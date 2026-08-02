@@ -61,7 +61,29 @@ describe("direct visual edit", () => {
     expect(result.files[0].content).toContain("<h2>Soluções</h2>");
   });
 
-  it("deixa elementos compostos para o refinamento por IA", () => {
+  it("preserva o ícone ao editar o texto literal de um botão composto", () => {
+    const buttonSelection = { ...selection, tag: "button", text: "Agendar agora" };
+    const result = applyDirectVisualTextEdit(
+      [{ path: "Cta.jsx", content: "export default () => <button><Calendar className=\"h-4 w-4\" /> Agendar agora</button>" }],
+      buttonSelection,
+      "Marcar consulta"
+    );
+    expect(result.changed).toBe(true);
+    expect(result.files[0].content).toContain('<Calendar className="h-4 w-4" /> Marcar consulta');
+  });
+
+  it("edita texto literal dentro de marcação sem remover a estrutura", () => {
+    const buttonSelection = { ...selection, tag: "button", text: "Comprar" };
+    const result = applyDirectVisualTextEdit(
+      [{ path: "Cta.jsx", content: "export default () => <button><span>Comprar</span></button>" }],
+      buttonSelection,
+      "Conhecer plano"
+    );
+    expect(result.changed).toBe(true);
+    expect(result.files[0].content).toContain("<span>Conhecer plano</span>");
+  });
+
+  it("deixa textos divididos entre vários filhos para o refinamento por IA", () => {
     const result = applyDirectVisualTextEdit(
       [{ path: "App.jsx", content: "export default () => <h2>Nossos <strong>serviços</strong></h2>" }],
       selection,

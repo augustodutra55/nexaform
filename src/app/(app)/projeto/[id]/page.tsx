@@ -30,7 +30,7 @@ import { buildAcceptanceReport } from "@/lib/engine/acceptance-report";
 import { acceptanceRepairFingerprint, buildAcceptanceRepairPrompt } from "@/lib/engine/acceptance-repair";
 import type { RuntimeAuditReport } from "@/lib/preview/runtime-audit";
 import type { PreviewElementSelection } from "@/lib/preview/visual-selection";
-import { applyDirectVisualStyleEdit, applyDirectVisualTextEdit, type DirectVisualStylePreset } from "@/lib/preview/direct-visual-edit";
+import { applyDirectVisualLinkEdit, applyDirectVisualStyleEdit, applyDirectVisualTextEdit, type DirectVisualStylePreset } from "@/lib/preview/direct-visual-edit";
 
 interface ProjectRow {
   id: string;
@@ -568,6 +568,7 @@ export default function ProjectPage() {
       const descriptions = {
         empty_text: "Digite um texto antes de aplicar.",
         unsupported_element: "Esse tipo de elemento precisa ser alterado pelo pedido à IA.",
+        unsafe_value: "O valor informado foi bloqueado por segurança.",
         source_not_found: "O texto é dinâmico ou composto. Descreva a mudança no campo abaixo.",
         ambiguous_source: "O mesmo texto aparece em mais de um lugar. Descreva qual deles deve mudar.",
         changed: "",
@@ -608,6 +609,25 @@ export default function ProjectPage() {
     if (!visualSelection?.src) return;
     setFocusedMediaSource(visualSelection.src);
     setAppView("media");
+  }
+
+  async function handleDirectVisualLinkEdit(href: string): Promise<boolean> {
+    if (!visualSelection) return false;
+    const result = applyDirectVisualLinkEdit(codeFiles, visualSelection, href);
+    if (!result.changed) {
+      toast.info("Não foi possível alterar este link diretamente", {
+        description: result.reason === "unsafe_value"
+          ? "Use HTTPS, um caminho interno, âncora, e-mail ou telefone. Protocolos executáveis são bloqueados."
+          : "O destino é dinâmico ou aparece em mais de um elemento. Use o refinamento assistido.",
+      });
+      return false;
+    }
+    setVisualSelection(null);
+    await handleApplyCode(result.files);
+    toast.success("Destino do link alterado", {
+      description: `${result.path} será salvo após a verificação automática.`,
+    });
+    return true;
   }
 
   async function handleReplaceMedia(item: ProjectMediaItem, url: string) {
@@ -991,6 +1011,7 @@ export default function ProjectPage() {
             onDirectVisualEdit={handleDirectVisualEdit}
             onDirectVisualStyleEdit={handleDirectVisualStyleEdit}
             onOpenSelectedMedia={handleOpenSelectedMedia}
+            onDirectVisualLinkEdit={handleDirectVisualLinkEdit}
           />
         </aside>
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout, Mic, Square, Cpu, FileCode2, AlertTriangle, Paperclip, X, Image as ImageIcon, MousePointer2, Save, Palette } from "lucide-react";
+import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout, Mic, Square, Cpu, FileCode2, AlertTriangle, Paperclip, X, Image as ImageIcon, MousePointer2, Save, Palette, Link2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AppSchema, GenerationResult } from "@/lib/engine/types";
 import { AppFile, AppGenerationResult, CodeStats, EngineMode, MediaGenerationReport, looksLikeApp } from "@/lib/engine/app-types";
@@ -127,6 +127,7 @@ interface ChatPanelProps {
   onDirectVisualEdit?: (text: string) => Promise<boolean>;
   onDirectVisualStyleEdit?: (preset: DirectVisualStylePreset) => Promise<boolean>;
   onOpenSelectedMedia?: () => void;
+  onDirectVisualLinkEdit?: (href: string) => Promise<boolean>;
 }
 
 const SITE_SUGGESTIONS = [
@@ -174,6 +175,7 @@ export function ChatPanel({
   onDirectVisualEdit,
   onDirectVisualStyleEdit,
   onOpenSelectedMedia,
+  onDirectVisualLinkEdit,
 }: ChatPanelProps) {
   const supabase = useMemo(() => createClient(), []);
   const [messages, setMessages] = useState<Message[]>(() => {
@@ -190,9 +192,12 @@ export function ChatPanel({
   const [visualTextDraft, setVisualTextDraft] = useState(visualSelection?.text ?? "");
   const [applyingVisualText, setApplyingVisualText] = useState(false);
   const [applyingVisualStyle, setApplyingVisualStyle] = useState<DirectVisualStylePreset | null>(null);
+  const [visualHrefDraft, setVisualHrefDraft] = useState(visualSelection?.href ?? "");
+  const [applyingVisualHref, setApplyingVisualHref] = useState(false);
 
   useEffect(() => {
     setVisualTextDraft(visualSelection?.text ?? "");
+    setVisualHrefDraft(visualSelection?.href ?? "");
   }, [visualSelection]);
   const recoveredFailureKey = `adstudio:recovered-failures:${threadId}`;
   const [recoveredFailureIds, setRecoveredFailureIds] = useState<string[]>(() => {
@@ -1305,6 +1310,35 @@ export function ChatPanel({
                 <ImageIcon className="h-3.5 w-3.5" />
                 Trocar esta mídia
               </Button>
+            )}
+            {visualSelection.tag === "a" && visualSelection.href && onDirectVisualLinkEdit && (
+              <div className="mt-2 flex gap-1.5">
+                <div className="relative min-w-0 flex-1">
+                  <Link2 className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    value={visualHrefDraft}
+                    onChange={(event) => setVisualHrefDraft(event.target.value)}
+                    className="h-7 w-full rounded-md border bg-background py-1 pl-7 pr-2 text-[11px] text-foreground outline-none focus:border-violet-500"
+                    aria-label="Novo destino do link"
+                    placeholder="https://… ou /pagina"
+                    maxLength={1200}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2 text-[11px]"
+                  disabled={applyingVisualHref || !visualHrefDraft.trim() || visualHrefDraft.trim() === visualSelection.href}
+                  onClick={async () => {
+                    setApplyingVisualHref(true);
+                    try { await onDirectVisualLinkEdit(visualHrefDraft); }
+                    finally { setApplyingVisualHref(false); }
+                  }}
+                >
+                  {applyingVisualHref ? <Loader2 className="h-3 w-3 animate-spin" /> : "Alterar link"}
+                </Button>
+              </div>
             )}
             <p className="mt-1.5 text-[10px] text-muted-foreground">
               Edite texto e aparência acima ou descreva no campo abaixo uma mudança visual completa.

@@ -5,6 +5,7 @@ export type DirectVisualEditReason =
   | "changed"
   | "empty_text"
   | "unsupported_element"
+  | "unsafe_value"
   | "source_not_found"
   | "ambiguous_source";
 
@@ -180,5 +181,55 @@ export function applyDirectVisualStyleEdit(
       ? { ...file, content: file.content.slice(0, target.match.index) + target.match[0].replace(opening, updated) + file.content.slice((target.match.index ?? 0) + target.match[0].length) }
       : file
   );
+  return { changed: true, files: edited, path: target.file.path, reason: "changed" };
+}
+
+function safeHref(value: string): string | null {
+  const href = value.trim().slice(0, 1200);
+  if (!href || /[\u0000-\u001f\u007f"'<>\{\}]/.test(href)) return null;
+  if (/^(?:https:\/\/|mailto:|tel:|#|\/(?!\/)|\.\.?\/)/i.test(href)) {
+    return href.replace(/&/g, "&amp;");
+  }
+  return null;
+}
+
+/** Atualiza apenas href literal de um link identificado sem ambiguidade. */
+export function applyDirectVisualLinkEdit(
+  files: AppFile[],
+  selection: PreviewElementSelection,
+  nextHref: string
+): DirectVisualEditResult {
+  if (selection.tag !== "a" || !selection.href) {
+    return { changed: false, files, reason: "unsupported_element" };
+  }
+  const replacement = safeHref(nextHref);
+  if (!replacement) return { changed: false, files, reason: "unsafe_value" };
+
+  const matches = files.flatMap((file) => {
+    const pattern = /<a\b[^>]*>/g;
+    return Array.from(file.content.matchAll(pattern))
+      .filter((match) => {
+        const href = match[0].match(/\bhref\s*=\s*(["'])([^"']*)\1/);
+        return href?.[2] === selection.href;
+      })
+      .map((match) => ({ file, match }));
+  });
+  const narrowed = matches.length > 1 && selection.text
+    ? matches.filter(({ file, match }) => {
+        const after = file.content.slice((match.index ?? 0) + match[0].length, (match.index ?? 0) + match[0].length + 1200);
+        const closing = after.indexOf("</a>");
+        return closing >= 0 && after.slice(0, closing).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() === selection.text;
+      })
+    : matches;
+  if (!narrowed.length) return { changed: false, files, reason: "source_not_found" };
+  if (narrowed.length > 1) return { changed: false, files, reason: "ambiguous_source" };
+
+  const target = narrowed[0];
+  const opening = target.match[0];
+  const updated = opening.replace(/\bhref\s*=\s*(["'])([^"']*)\1/, (_all, quote) => `href=${quote}${replacement}${quote}`);
+  const start = target.match.index ?? 0;
+  const edited = files.map((file) => file.path === target.file.path
+    ? { ...file, content: file.content.slice(0, start) + updated + file.content.slice(start + opening.length) }
+    : file);
   return { changed: true, files: edited, path: target.file.path, reason: "changed" };
 }

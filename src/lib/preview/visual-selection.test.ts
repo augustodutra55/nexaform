@@ -16,6 +16,7 @@ describe("visual selection", () => {
       nearbyText: "Hero da clínica",
       className: "",
       src: "",
+      href: "",
     });
     expect(selection).toEqual({
       tag: "button",
@@ -26,7 +27,18 @@ describe("visual selection", () => {
       nearbyText: "Hero da clínica",
       className: "",
       src: "",
+      href: "",
     });
+  });
+
+  it("preserva o destino do link selecionado", () => {
+    const selection = normalizePreviewSelection({
+      tag: "a",
+      selector: "a.cta",
+      label: "Agendar",
+      href: "/agendar",
+    });
+    expect(selection?.href).toBe("/agendar");
   });
 
   it("preserva a origem da mídia selecionada", () => {

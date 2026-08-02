@@ -86,6 +86,44 @@ function directTextPattern(value: string, tag: string): RegExp {
   );
 }
 
+interface NestedTextMatch {
+  file: AppFile;
+  start: number;
+  length: number;
+  replacement: string;
+}
+
+function nestedLiteralTextMatches(file: AppFile, value: string, tag: string): NestedTextMatch[] {
+  const safeTag = escapeRegex(tag);
+  const elementPattern = new RegExp(`<${safeTag}\\b[^>]*>([\\s\\S]*?)</${safeTag}>`, "g");
+  const expected = value.replace(/\s+/g, " ").trim();
+  const matches: NestedTextMatch[] = [];
+
+  for (const element of Array.from(file.content.matchAll(elementPattern))) {
+    const inner = element[1];
+    const innerStart = (element.index ?? 0) + element[0].indexOf(inner);
+    const tags = Array.from(inner.matchAll(/<[^>]+>/g));
+    const boundaries = [0]
+      .concat(tags.flatMap((match) => [match.index ?? 0, (match.index ?? 0) + match[0].length]))
+      .concat(inner.length);
+    for (let index = 0; index < boundaries.length - 1; index += 2) {
+      const start = boundaries[index];
+      const end = boundaries[index + 1];
+      const literal = inner.slice(start, end);
+      if (/[{}]/.test(literal) || literal.replace(/\s+/g, " ").trim() !== expected) continue;
+      const leading = literal.match(/^\s*/)?.[0] ?? "";
+      const trailing = literal.match(/\s*$/)?.[0] ?? "";
+      matches.push({
+        file,
+        start: innerStart + start,
+        length: literal.length,
+        replacement: `${leading}${jsxText(value)}${trailing}`,
+      });
+    }
+  }
+  return matches;
+}
+
 /**
  * Edita somente texto JSX direto e comprovadamente único. Conteúdo dinâmico,
  * texto composto por filhos e correspondências repetidas ficam para o fluxo de
@@ -110,7 +148,19 @@ export function applyDirectVisualTextEdit(
     return Array.from(file.content.matchAll(pattern)).map((match) => ({ file, match }));
   });
   if (!matches.length) {
-    return { changed: false, files, reason: "source_not_found" };
+    const nestedMatches = files.flatMap((file) => nestedLiteralTextMatches(file, currentText, selection.tag));
+    if (!nestedMatches.length) return { changed: false, files, reason: "source_not_found" };
+    if (nestedMatches.length > 1) return { changed: false, files, reason: "ambiguous_source" };
+    const target = nestedMatches[0];
+    const edited = files.map((file) => file.path === target.file.path
+      ? {
+          ...file,
+          content: file.content.slice(0, target.start)
+            + target.replacement.replace(jsxText(currentText), jsxText(cleanNextText))
+            + file.content.slice(target.start + target.length),
+        }
+      : file);
+    return { changed: true, files: edited, path: target.file.path, reason: "changed" };
   }
   if (matches.length > 1) {
     return { changed: false, files, reason: "ambiguous_source" };

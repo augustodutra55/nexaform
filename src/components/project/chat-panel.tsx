@@ -1280,7 +1280,13 @@ export function ChatPanel({
                     ["subtle", "Suave"],
                     ["rounded", "Card"],
                     ["spacious", "Espaço"],
+                    ["compact", "Compacto"],
                     ["centered", "Centralizar"],
+                    ["larger", "Maior"],
+                    ["smaller", "Menor"],
+                    ["primary", "Primário"],
+                    ["dark", "Escuro"],
+                    ["fullWidth", "Largura total"],
                   ] as Array<[DirectVisualStylePreset, string]>).map(([preset, label]) => (
                     <button
                       key={preset}

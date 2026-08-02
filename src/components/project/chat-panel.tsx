@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout, Mic, Square, Cpu, FileCode2, AlertTriangle, Paperclip, X, Image as ImageIcon, MousePointer2, Save } from "lucide-react";
+import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout, Mic, Square, Cpu, FileCode2, AlertTriangle, Paperclip, X, Image as ImageIcon, MousePointer2, Save, Palette } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AppSchema, GenerationResult } from "@/lib/engine/types";
 import { AppFile, AppGenerationResult, CodeStats, EngineMode, MediaGenerationReport, looksLikeApp } from "@/lib/engine/app-types";
@@ -47,6 +47,7 @@ import {
   createVisualRefinementBaseline,
   verifyVisualRefinementBaseline,
 } from "@/lib/preview/visual-refinement";
+import type { DirectVisualStylePreset } from "@/lib/preview/direct-visual-edit";
 
 interface Message {
   id: string;
@@ -124,6 +125,7 @@ interface ChatPanelProps {
   visualSelection?: PreviewElementSelection | null;
   onClearVisualSelection?: () => void;
   onDirectVisualEdit?: (text: string) => Promise<boolean>;
+  onDirectVisualStyleEdit?: (preset: DirectVisualStylePreset) => Promise<boolean>;
 }
 
 const SITE_SUGGESTIONS = [
@@ -169,6 +171,7 @@ export function ChatPanel({
   visualSelection,
   onClearVisualSelection,
   onDirectVisualEdit,
+  onDirectVisualStyleEdit,
 }: ChatPanelProps) {
   const supabase = useMemo(() => createClient(), []);
   const [messages, setMessages] = useState<Message[]>(() => {
@@ -184,6 +187,7 @@ export function ChatPanel({
   });
   const [visualTextDraft, setVisualTextDraft] = useState(visualSelection?.text ?? "");
   const [applyingVisualText, setApplyingVisualText] = useState(false);
+  const [applyingVisualStyle, setApplyingVisualStyle] = useState<DirectVisualStylePreset | null>(null);
 
   useEffect(() => {
     setVisualTextDraft(visualSelection?.text ?? "");
@@ -1258,8 +1262,38 @@ export function ChatPanel({
                 </Button>
               </div>
             )}
+            {visualSelection.text && onDirectVisualStyleEdit && (
+              <div className="mt-2">
+                <p className="mb-1 flex items-center gap-1 text-[10px] font-medium text-foreground">
+                  <Palette className="h-3 w-3" /> Aparência rápida
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {([
+                    ["emphasis", "Destaque"],
+                    ["subtle", "Suave"],
+                    ["rounded", "Card"],
+                    ["spacious", "Espaço"],
+                    ["centered", "Centralizar"],
+                  ] as Array<[DirectVisualStylePreset, string]>).map(([preset, label]) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      disabled={!!applyingVisualStyle}
+                      onClick={async () => {
+                        setApplyingVisualStyle(preset);
+                        try { await onDirectVisualStyleEdit(preset); }
+                        finally { setApplyingVisualStyle(null); }
+                      }}
+                      className="rounded-md border bg-background px-2 py-1 text-[10px] text-foreground hover:border-violet-500 disabled:opacity-50"
+                    >
+                      {applyingVisualStyle === preset ? "Aplicando…" : label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <p className="mt-1.5 text-[10px] text-muted-foreground">
-              Edite o texto acima ou descreva no campo abaixo uma mudança visual completa.
+              Edite texto e aparência acima ou descreva no campo abaixo uma mudança visual completa.
             </p>
           </div>
         )}

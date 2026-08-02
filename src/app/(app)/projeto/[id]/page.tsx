@@ -30,7 +30,7 @@ import { buildAcceptanceReport } from "@/lib/engine/acceptance-report";
 import { acceptanceRepairFingerprint, buildAcceptanceRepairPrompt } from "@/lib/engine/acceptance-repair";
 import type { RuntimeAuditReport } from "@/lib/preview/runtime-audit";
 import type { PreviewElementSelection } from "@/lib/preview/visual-selection";
-import { applyDirectVisualTextEdit } from "@/lib/preview/direct-visual-edit";
+import { applyDirectVisualStyleEdit, applyDirectVisualTextEdit, type DirectVisualStylePreset } from "@/lib/preview/direct-visual-edit";
 
 interface ProjectRow {
   id: string;
@@ -584,6 +584,25 @@ export default function ProjectPage() {
     return true;
   }
 
+  async function handleDirectVisualStyleEdit(preset: DirectVisualStylePreset): Promise<boolean> {
+    if (!visualSelection) return false;
+    const result = applyDirectVisualStyleEdit(codeFiles, visualSelection, preset);
+    if (!result.changed) {
+      toast.info("Use o refinamento assistido para este elemento", {
+        description: result.reason === "ambiguous_source"
+          ? "Há mais de um elemento igual no código. Descreva qual deles deve mudar."
+          : "Este elemento usa estilo ou conteúdo dinâmico e precisa ser alterado pela IA.",
+      });
+      return false;
+    }
+    setVisualSelection(null);
+    await handleApplyCode(result.files);
+    toast.success("Aparência alterada no preview", {
+      description: `${result.path} será salvo após a verificação automática.`,
+    });
+    return true;
+  }
+
   async function handleReplaceMedia(item: ProjectMediaItem, url: string) {
     const edited = replaceProjectMedia(codeFiles, item, url);
     if (!edited) {
@@ -963,6 +982,7 @@ export default function ProjectPage() {
             visualSelection={visualSelection}
             onClearVisualSelection={() => setVisualSelection(null)}
             onDirectVisualEdit={handleDirectVisualEdit}
+            onDirectVisualStyleEdit={handleDirectVisualStyleEdit}
           />
         </aside>
 

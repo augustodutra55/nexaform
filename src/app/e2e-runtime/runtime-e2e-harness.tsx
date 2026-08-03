@@ -209,6 +209,7 @@ export function RuntimeE2EHarness() {
         {ready ? <span data-testid="runtime-ready">preview aprovado</span> : null}
         {error ? <span data-testid="runtime-error">{error}</span> : null}
         {audit ? <span data-testid="runtime-audit">{audit.issues.length} ocorrências</span> : null}
+        {audit?.smoke ? <span data-testid="runtime-smoke">{audit.smoke.attempted}:{audit.smoke.changed}</span> : null}
         {selection ? <span data-testid="visual-selection-result">{selection.label}</span> : null}
       </div>
       <AppRunner

@@ -117,6 +117,14 @@ export function buildAcceptanceReport(input: AcceptanceInput): AcceptanceReport 
         : "Desktop e mobile executaram sem erros ou avisos detectáveis.",
       status: "passed",
     });
+    items.push({
+      id: "interaction-smoke",
+      label: "Teste dos fluxos descobertos",
+      detail: runtime.smoke
+        ? `${runtime.smoke.attempted} controle(s) seguro(s) percorrido(s); ${runtime.smoke.changed} mudança(s) de tela comprovada(s).`
+        : "Use “Testar fluxos” no preview para percorrer automaticamente menus e abas deste aplicativo.",
+      status: runtime.smoke ? (runtime.smoke.attempted > 0 && runtime.smoke.changed === 0 ? "warning" : "passed") : "warning",
+    });
     const detailedIssues = runtime.issues.filter((issue) => issue.code !== "mobile_overflow").slice(0, 8);
     for (let index = 0; index < detailedIssues.length; index++) {
       const issue = detailedIssues[index];

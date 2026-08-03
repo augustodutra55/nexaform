@@ -181,6 +181,16 @@ export function usePreviewBridge(
             height: Number(raw.viewport?.height) || 0,
             overflowX: Number(raw.viewport?.overflowX) || 0,
           },
+          smoke: raw.smoke && typeof raw.smoke === "object"
+            ? {
+                attempted: Math.max(0, Number(raw.smoke.attempted) || 0),
+                changed: Math.max(0, Number(raw.smoke.changed) || 0),
+                labels: Array.isArray(raw.smoke.labels)
+                  ? raw.smoke.labels.slice(0, 12).map((label: unknown) => String(label).slice(0, 80))
+                  : [],
+                completedAt: Number(raw.smoke.completedAt) || Date.now(),
+              }
+            : undefined,
           checkedAt: Number(raw.checkedAt) || Date.now(),
         };
         const blocking = issues.filter((issue) => issue.severity === "error");

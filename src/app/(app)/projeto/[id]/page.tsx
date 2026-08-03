@@ -29,8 +29,8 @@ import { sanitizePromptAttachments, type PromptAttachment } from "@/lib/engine/p
 import { buildAcceptanceReport } from "@/lib/engine/acceptance-report";
 import { acceptanceRepairFingerprint, buildAcceptanceRepairPrompt } from "@/lib/engine/acceptance-repair";
 import type { RuntimeAuditReport } from "@/lib/preview/runtime-audit";
-import type { PreviewElementSelection } from "@/lib/preview/visual-selection";
-import { applyDirectVisualLinkEdit, applyDirectVisualStyleEdit, applyDirectVisualTextEdit, type DirectVisualStylePreset } from "@/lib/preview/direct-visual-edit";
+import { findPreviewSourceCandidates, type PreviewElementSelection } from "@/lib/preview/visual-selection";
+import { applyDirectVisualLinkEdit, applyDirectVisualStructureEdit, applyDirectVisualStyleEdit, applyDirectVisualTextEdit, type DirectVisualStructureAction, type DirectVisualStylePreset } from "@/lib/preview/direct-visual-edit";
 
 interface ProjectRow {
   id: string;
@@ -630,6 +630,34 @@ export default function ProjectPage() {
     return true;
   }
 
+  async function handleDirectVisualStructureEdit(action: DirectVisualStructureAction): Promise<boolean> {
+    if (!visualSelection || !appFiles?.length || !appEntry) return false;
+    const candidates = findPreviewSourceCandidates(visualSelection, appFiles);
+    const result = applyDirectVisualStructureEdit(appFiles, appEntry, candidates, action);
+    if (!result.changed) {
+      toast.info("Esta seção precisa do refinamento assistido", {
+        description: result.reason === "ambiguous_source"
+          ? "Encontrei mais de uma seção possível e preservei o projeto para não alterar a errada."
+          : result.reason === "unsupported_element"
+            ? "A seção já está no limite dessa direção ou usa uma composição dinâmica."
+            : "Não consegui ligar este elemento a um componente único do App.jsx.",
+      });
+      return false;
+    }
+    setVisualSelection(null);
+    await handleApplyCode(result.files);
+    const labels: Record<DirectVisualStructureAction, string> = {
+      moveUp: "Seção movida para cima",
+      moveDown: "Seção movida para baixo",
+      duplicate: "Seção duplicada",
+      remove: "Seção removida",
+    };
+    toast.success(labels[action], {
+      description: `${result.path} será salvo depois da verificação automática. O histórico permite restaurar a versão anterior.`,
+    });
+    return true;
+  }
+
   async function handleReplaceMedia(item: ProjectMediaItem, url: string) {
     const edited = replaceProjectMedia(codeFiles, item, url);
     if (!edited) {
@@ -1012,6 +1040,7 @@ export default function ProjectPage() {
             onDirectVisualStyleEdit={handleDirectVisualStyleEdit}
             onOpenSelectedMedia={handleOpenSelectedMedia}
             onDirectVisualLinkEdit={handleDirectVisualLinkEdit}
+            onDirectVisualStructureEdit={appFiles?.length && appEntry ? handleDirectVisualStructureEdit : undefined}
           />
         </aside>
 

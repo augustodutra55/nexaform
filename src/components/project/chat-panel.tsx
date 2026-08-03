@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ArrowUp, Check, Loader2, Sparkles, Code2, Layout, Mic, Square, Cpu, FileCode2, AlertTriangle, Paperclip, X, Image as ImageIcon, MousePointer2, Save, Palette, Link2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Copy, Loader2, Sparkles, Code2, Layout, Mic, Square, Cpu, FileCode2, AlertTriangle, Paperclip, X, Image as ImageIcon, MousePointer2, Save, Palette, Link2, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AppSchema, GenerationResult } from "@/lib/engine/types";
 import { AppFile, AppGenerationResult, CodeStats, EngineMode, MediaGenerationReport, looksLikeApp } from "@/lib/engine/app-types";
@@ -47,7 +47,7 @@ import {
   createVisualRefinementBaseline,
   verifyVisualRefinementBaseline,
 } from "@/lib/preview/visual-refinement";
-import type { DirectVisualStylePreset } from "@/lib/preview/direct-visual-edit";
+import type { DirectVisualStructureAction, DirectVisualStylePreset } from "@/lib/preview/direct-visual-edit";
 
 interface Message {
   id: string;
@@ -128,6 +128,7 @@ interface ChatPanelProps {
   onDirectVisualStyleEdit?: (preset: DirectVisualStylePreset) => Promise<boolean>;
   onOpenSelectedMedia?: () => void;
   onDirectVisualLinkEdit?: (href: string) => Promise<boolean>;
+  onDirectVisualStructureEdit?: (action: DirectVisualStructureAction) => Promise<boolean>;
 }
 
 const SITE_SUGGESTIONS = [
@@ -176,6 +177,7 @@ export function ChatPanel({
   onDirectVisualStyleEdit,
   onOpenSelectedMedia,
   onDirectVisualLinkEdit,
+  onDirectVisualStructureEdit,
 }: ChatPanelProps) {
   const supabase = useMemo(() => createClient(), []);
   const [messages, setMessages] = useState<Message[]>(() => {
@@ -194,6 +196,7 @@ export function ChatPanel({
   const [applyingVisualStyle, setApplyingVisualStyle] = useState<DirectVisualStylePreset | null>(null);
   const [visualHrefDraft, setVisualHrefDraft] = useState(visualSelection?.href ?? "");
   const [applyingVisualHref, setApplyingVisualHref] = useState(false);
+  const [applyingVisualStructure, setApplyingVisualStructure] = useState<DirectVisualStructureAction | null>(null);
 
   useEffect(() => {
     setVisualTextDraft(visualSelection?.text ?? "");
@@ -1346,8 +1349,42 @@ export function ChatPanel({
                 </Button>
               </div>
             )}
+            {onDirectVisualStructureEdit && (
+              <div className="mt-2">
+                <p className="mb-1 text-[10px] font-medium text-foreground">Organizar seção</p>
+                <div className="grid grid-cols-4 gap-1">
+                  {([
+                    ["moveUp", "Subir", ArrowUp],
+                    ["moveDown", "Descer", ArrowDown],
+                    ["duplicate", "Duplicar", Copy],
+                    ["remove", "Remover", Trash2],
+                  ] as Array<[DirectVisualStructureAction, string, typeof ArrowUp]>).map(([action, label, Icon]) => (
+                    <button
+                      key={action}
+                      type="button"
+                      disabled={!!applyingVisualStructure}
+                      className={cn(
+                        "flex flex-col items-center gap-0.5 rounded-md border bg-background px-1 py-1.5 text-[9px] text-foreground hover:border-violet-500 disabled:opacity-50",
+                        action === "remove" && "hover:border-red-500 hover:text-red-600"
+                      )}
+                      onClick={async () => {
+                        if (action === "remove" && !window.confirm("Remover esta seção? A versão anterior continuará disponível no histórico.")) return;
+                        setApplyingVisualStructure(action);
+                        try { await onDirectVisualStructureEdit(action); }
+                        finally { setApplyingVisualStructure(null); }
+                      }}
+                    >
+                      {applyingVisualStructure === action
+                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        : <Icon className="h-3 w-3" />}
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <p className="mt-1.5 text-[10px] text-muted-foreground">
-              Edite texto e aparência acima ou descreva no campo abaixo uma mudança visual completa.
+              Edite texto, aparência e posição acima ou descreva no campo abaixo uma mudança visual completa.
             </p>
           </div>
         )}

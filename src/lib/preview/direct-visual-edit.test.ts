@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyDirectVisualLinkEdit, applyDirectVisualStyleEdit, applyDirectVisualTextEdit } from "./direct-visual-edit";
+import { applyDirectVisualLinkEdit, applyDirectVisualStructureEdit, applyDirectVisualStyleEdit, applyDirectVisualTextEdit } from "./direct-visual-edit";
 
 const selection = {
   tag: "h2",
@@ -186,5 +186,52 @@ describe("direct visual link edit", () => {
     expect(result.changed).toBe(true);
     expect(result.files[0].content).toContain('<a href="#formulario">Agendar</a>');
     expect(result.files[0].content).toContain('<a href="/agendar">Contato</a>');
+  });
+});
+
+describe("direct visual structure edit", () => {
+  const files = [
+    {
+      path: "App.jsx",
+      content: [
+        "import Header from './components/Header.jsx';",
+        "import Hero from './components/Hero.jsx';",
+        "import Services from './components/Services.jsx';",
+        "export default function App(){ return <main><Header /><Hero /><Services /></main>; }",
+      ].join("\n"),
+    },
+    { path: "components/Header.jsx", content: "export default () => <header>Menu</header>" },
+    { path: "components/Hero.jsx", content: "export default () => <section><h1>Clínica Aurora</h1></section>" },
+    { path: "components/Services.jsx", content: "export default () => <section><h2>Serviços</h2></section>" },
+  ];
+  const candidate = [{ path: "components/Hero.jsx", score: 12, evidence: "Clínica Aurora" }];
+
+  it("move uma seção para baixo no arquivo de entrada", () => {
+    const result = applyDirectVisualStructureEdit(files, "App.jsx", candidate, "moveDown");
+    expect(result.changed).toBe(true);
+    expect(result.files[0].content).toContain("<Header /><Services /><Hero />");
+  });
+
+  it("duplica somente a chamada do componente selecionado", () => {
+    const result = applyDirectVisualStructureEdit(files, "App.jsx", candidate, "duplicate");
+    expect(result.changed).toBe(true);
+    expect(result.files[0].content.match(/<Hero \/>/g)).toHaveLength(2);
+    expect(result.files).toHaveLength(files.length);
+  });
+
+  it("remove a seção sem apagar seu arquivo-fonte", () => {
+    const result = applyDirectVisualStructureEdit(files, "App.jsx", candidate, "remove");
+    expect(result.changed).toBe(true);
+    expect(result.files[0].content).not.toContain("<Hero />");
+    expect(result.files.some((file) => file.path === "components/Hero.jsx")).toBe(true);
+  });
+
+  it("recusa componente renderizado mais de uma vez", () => {
+    const repeated = files.map((file) => file.path === "App.jsx"
+      ? { ...file, content: file.content.replace("<Hero />", "<Hero /><Hero />") }
+      : file);
+    const result = applyDirectVisualStructureEdit(repeated, "App.jsx", candidate, "remove");
+    expect(result.changed).toBe(false);
+    expect(result.reason).toBe("ambiguous_source");
   });
 });

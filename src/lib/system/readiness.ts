@@ -60,36 +60,36 @@ export function summarizeReadiness(
   };
 }
 
-const capabilityGates: ReleaseGate[] = [
-  gate(1, "architecture", "Arquitetura e código multi-arquivo", [
+const capabilityGates = [
+  { number: 1, id: "architecture", label: "Arquitetura e código multi-arquivo", evidence: [
     "Planejamento determinístico antes da geração",
     "App.jsx fino e componentes pequenos por seção",
-  ]),
-  gate(2, "model-routing", "Roteamento de IA previsível", [
+  ] },
+  { number: 2, id: "model-routing", label: "Roteamento de IA previsível", evidence: [
     "Modos econômico, automático e premium",
     "Sem rebaixamento silencioso de modelo",
-  ]),
-  gate(4, "quality-repair", "Qualidade e autorreparo", [
+  ] },
+  { number: 4, id: "quality-repair", label: "Qualidade e autorreparo", evidence: [
     "Quality gate estrutural antes de salvar",
     "Auditoria de runtime e correção cirúrgica",
-  ]),
-  gate(5, "interaction-tests", "Testes reais de interação", [
+  ] },
+  { number: 5, id: "interaction-tests", label: "Testes reais de interação", evidence: [
     "Playwright cobre login, menus, formulário, CRUD e mobile",
     "TypeScript, unitários, build e E2E executados no CI",
-  ]),
-  gate(8, "visual-engine", "Motor visual premium", [
+  ] },
+  { number: 8, id: "visual-engine", label: "Motor visual premium", evidence: [
     "Blueprint visual por segmento",
     "Movimento, mídia e 3D com orçamento de performance",
-  ]),
-  gate(9, "visual-editor", "Editor visual clicável", [
+  ] },
+  { number: 9, id: "visual-editor", label: "Editor visual clicável", evidence: [
     "Seleção de elemento diretamente no preview",
     "Refinamento preserva e verifica o alvo visual",
-  ]),
-  gate(10, "versions-portability", "Versões e portabilidade", [
+  ] },
+  { number: 10, id: "versions-portability", label: "Versões e portabilidade", evidence: [
     "Histórico, desfazer e retomada por etapas",
     "Importação e exportação React + Vite",
-  ]),
-];
+  ] },
+] as const;
 
 function gate(number: number, id: string, label: string, evidence: string[]): ReleaseGate {
   return {
@@ -127,6 +127,9 @@ function checkGate(
 }
 
 export function buildReleaseCertification(checks: ReadinessCheck[]): ReleaseCertification {
+  const verifiedCapabilityGates = capabilityGates.map((item) =>
+    checkGate(item.number, item.id, item.label, checks, ["release-ci"], Array.from(item.evidence))
+  );
   const dynamicGates = [
     checkGate(3, "durable-generation", "Fila durável de geração", checks,
       ["background-worker", "migration-0014", "migration-0015"],
@@ -144,7 +147,7 @@ export function buildReleaseCertification(checks: ReadinessCheck[]): ReleaseCert
       ["migration-0013"],
       ["Custos, latência e falhas de geração", "Erros reais de apps publicados"]),
   ];
-  const gates = capabilityGates.concat(dynamicGates).sort((a, b) => a.number - b.number);
+  const gates = verifiedCapabilityGates.concat(dynamicGates).sort((a, b) => a.number - b.number);
   const status = gates.reduce<ReadinessStatus>(
     (current, item) => severity[item.status] > severity[current] ? item.status : current,
     "ready"

@@ -42,6 +42,16 @@ export function blockingIssueCodes(
   return codes.filter((code, index, values) => values.indexOf(code) === index).sort();
 }
 
+/** Preserva os gatilhos já vistos e incorpora a auditoria que chegou depois. */
+export function mergeBlockingIssueCodes(
+  existing: string[],
+  runtime?: RuntimeAuditReport,
+  structural?: ProjectQualityReport
+): string[] {
+  const codes = existing.concat(blockingIssueCodes(runtime, structural));
+  return codes.filter((code, index, values) => values.indexOf(code) === index).sort();
+}
+
 /**
  * Aprova uma correção somente quando ela alterou o código, passou pela validação
  * estrutural e recebeu uma auditoria nova sem bloqueios.

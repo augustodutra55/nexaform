@@ -106,6 +106,16 @@ export function AcceptancePanel({ app, acceptance, repair, previewHealth, onRepa
                 <p className="text-sm font-semibold">{repairCopy[repair.status].label}</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">{repairCopy[repair.status].detail}</p>
                 <p className="mt-1 text-[11px] text-muted-foreground">Tentativa {repair.attempt}/{repair.maxAttempts}</p>
+                {repair.status === "verified" && (
+                  <p className="mt-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                    {(repair.resolvedIssueCodes?.length || 0)} falha(s) resolvida(s) · auditoria nova aprovada
+                  </p>
+                )}
+                {!!repair.introducedIssueCodes?.length && (
+                  <p className="mt-1 text-[11px] font-medium text-red-700 dark:text-red-300">
+                    A tentativa introduziu: {repair.introducedIssueCodes.join(", ")}
+                  </p>
+                )}
               </div>
             </div>
             {repair.status === "failed" && report.blockers > 0 && onRepair && (

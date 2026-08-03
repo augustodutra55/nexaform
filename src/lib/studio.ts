@@ -21,6 +21,14 @@ export interface AcceptanceRepairSnapshot {
   startedAt: string;
   updatedAt: string;
   lastError?: string;
+  /** Código quebrado que originou o ciclo; impede aprovar resposta sem mudança real. */
+  baselineAppFingerprint?: string;
+  /** Código candidato efetivamente auditado. */
+  candidateAppFingerprint?: string;
+  /** Evidência comparável do que a correção eliminou ou introduziu. */
+  resolvedIssueCodes?: string[];
+  introducedIssueCodes?: string[];
+  verifiedAt?: string;
 }
 
 /** Evidências persistidas do último código aprovado no preview. */

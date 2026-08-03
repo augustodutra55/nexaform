@@ -26,7 +26,7 @@ describe("buildAcceptanceReport interaction smoke", () => {
     const report = buildAcceptanceReport({
       app,
       previewHealth: "healthy",
-      runtime: { ...runtime, smoke: { attempted: 3, changed: 2, labels: ["Início", "Clientes", "Produtos"], completedAt: Date.now() } },
+      runtime: { ...runtime, smoke: { attempted: 3, changed: 2, labels: ["Início", "Clientes", "Produtos"], fieldsAttempted: 2, fieldsEditable: 2, fieldLabels: ["Nome", "E-mail"], completedAt: Date.now() } },
     });
     expect(report.items.find((item) => item.id === "interaction-smoke")).toMatchObject({ status: "passed" });
   });
@@ -35,7 +35,7 @@ describe("buildAcceptanceReport interaction smoke", () => {
     const report = buildAcceptanceReport({
       app,
       previewHealth: "healthy",
-      runtime: { ...runtime, smoke: { attempted: 2, changed: 0, labels: ["Início", "Clientes"], completedAt: Date.now() } },
+      runtime: { ...runtime, smoke: { attempted: 2, changed: 0, labels: ["Início", "Clientes"], fieldsAttempted: 1, fieldsEditable: 1, fieldLabels: ["Busca"], completedAt: Date.now() } },
     });
     expect(report.items.find((item) => item.id === "interaction-smoke")).toMatchObject({ status: "warning" });
   });

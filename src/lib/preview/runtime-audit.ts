@@ -17,16 +17,24 @@ export interface RuntimeAuditReport {
     images: number;
   };
   viewport: { width: number; height: number; overflowX: number };
+  smoke?: {
+    attempted: number;
+    changed: number;
+    labels: string[];
+    completedAt: number;
+  };
   checkedAt: number;
 }
 
 /**
  * Auditoria leve executada dentro do iframe depois da montagem do React.
- * Não clica nem envia formulários: inspeciona o DOM e os handlers registrados
- * pelo React, evitando efeitos destrutivos ou chamadas duplicadas ao backend.
+ * A auditoria automática apenas inspeciona o DOM. O smoke test, disparado
+ * explicitamente pelo editor, percorre somente controles de navegação seguros;
+ * nunca envia formulários nem aciona operações destrutivas.
  */
 export function runtimeAuditSource(): string {
   return `
+  var nxSmokeResult=null;
   function nxReactProps(el){
     try { var key=Object.keys(el).find(function(name){return name.indexOf('__reactProps$')===0;}); return key?el[key]||{}:{}; }
     catch(e){ return {}; }
@@ -93,7 +101,7 @@ export function runtimeAuditSource(): string {
     var overflow=Math.max(0,document.documentElement.scrollWidth-window.innerWidth);
     if(window.innerWidth<=500&&overflow>8)add('mobile_overflow','error','O layout ultrapassa a largura mobile em '+overflow+'px.',root);
     if(!document.querySelector('h1,h2,[role="heading"]'))add('missing_heading','warning','A tela não possui título semântico.',root);
-    return {issues:issues,stats:{buttons:buttons.length,links:links.length,forms:forms.length,inputs:inputs.length,images:images.length},viewport:{width:window.innerWidth,height:window.innerHeight,overflowX:overflow},checkedAt:Date.now()};
+    return {issues:issues,stats:{buttons:buttons.length,links:links.length,forms:forms.length,inputs:inputs.length,images:images.length},viewport:{width:window.innerWidth,height:window.innerHeight,overflowX:overflow},smoke:nxSmokeResult||undefined,checkedAt:Date.now()};
   }
   var nxAuditTimer=null;
   function nxPostAudit(){
@@ -101,5 +109,53 @@ export function runtimeAuditSource(): string {
     nxAuditTimer=setTimeout(function(){try{_nxHost.postMessage({__nx_audit:nxRunAudit()},'*');}catch(e){}},250);
   }
   window.addEventListener('resize',nxPostAudit);
+  function nxControlLabel(el){
+    return String(el.innerText||el.getAttribute('aria-label')||el.getAttribute('title')||'').replace(/\\s+/g,' ').trim().slice(0,80);
+  }
+  function nxScreenSignature(){
+    var root=document.getElementById('root');
+    if(!root)return '';
+    var headings=Array.from(root.querySelectorAll('h1,h2,[role="heading"]')).filter(nxVisible).map(nxControlLabel).join('|');
+    var landmarks=Array.from(root.querySelectorAll('main,[data-testid$="-screen"],[role="main"]')).filter(nxVisible).map(function(el){return String(el.getAttribute('data-testid')||nxControlLabel(el)).slice(0,100);}).join('|');
+    return (headings+'#'+landmarks+'#'+String(root.innerText||'').replace(/\\s+/g,' ').trim().slice(0,240)).slice(0,900);
+  }
+  function nxSafeNavigationControls(){
+    var destructive=/\\b(excluir|remover|apagar|deletar|delete|comprar|pagar|checkout|enviar|salvar|criar|adicionar|confirmar|sair|logout|cancelar)\\b/i;
+    return Array.from(document.querySelectorAll('nav button,nav a,[role="navigation"] button,[role="navigation"] a,[role="tab"],header button,header a'))
+      .filter(function(el){
+        if(!nxVisible(el)||el.disabled||el.closest('form'))return false;
+        var label=nxControlLabel(el);
+        if(!label||destructive.test(label))return false;
+        var props=nxReactProps(el), href=String(el.getAttribute('href')||'');
+        return typeof props.onClick==='function'||href==='#'||href.indexOf('javascript:')===0;
+      })
+      .filter(function(el,index,list){
+        var label=nxControlLabel(el).toLowerCase();
+        return list.findIndex(function(item){return nxControlLabel(item).toLowerCase()===label;})===index;
+      })
+      .slice(0,12);
+  }
+  function nxWait(ms){return new Promise(function(resolve){setTimeout(resolve,ms);});}
+  async function nxRunSmoke(){
+    var controls=nxSafeNavigationControls(), attempted=0, changed=0, labels=[];
+    var previous=nxScreenSignature();
+    for(var index=0;index<controls.length;index++){
+      var original=controls[index], label=nxControlLabel(original);
+      var current=Array.from(document.querySelectorAll('button,a,[role="tab"]')).find(function(el){return nxVisible(el)&&nxControlLabel(el)===label;});
+      if(!current)continue;
+      attempted+=1; labels.push(label);
+      try{current.click();}catch(e){}
+      await nxWait(180);
+      var next=nxScreenSignature();
+      if(next&&next!==previous)changed+=1;
+      previous=next||previous;
+      if(document.querySelector('.nx-error'))break;
+    }
+    nxSmokeResult={attempted:attempted,changed:changed,labels:labels,completedAt:Date.now()};
+    try{_nxHost.postMessage({__nx_audit:nxRunAudit()},'*');}catch(e){}
+  }
+  window.addEventListener('message',function(event){
+    if(event.data&&event.data.__nx_run_smoke===true)nxRunSmoke();
+  });
   `;
 }

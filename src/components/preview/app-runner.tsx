@@ -12,7 +12,7 @@
  * o código do usuário fica isolado da app e dos cookies/sessão.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Loader2, Monitor, Smartphone, RefreshCw, Cpu, Layout, Maximize2, Minimize2, ScanSearch } from "lucide-react";
+import { AlertTriangle, Loader2, Monitor, Smartphone, RefreshCw, Cpu, Layout, Maximize2, Minimize2, ScanSearch, TestTube2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AppFile, EngineMode } from "@/lib/engine/app-types";
 import { bundleApp, buildBundledSrcDoc } from "@/lib/preview/bundler";
@@ -336,6 +336,7 @@ export function AppRunner({
   const [auditPhase, setAuditPhase] = useState<"desktop" | "mobile" | "done">("desktop");
   const [auditReport, setAuditReport] = useState<RuntimeAuditReport | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
+  const [smokeRunning, setSmokeRunning] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const onErrorRef = useRef(onError);
   const onReadyRef = useRef(onReady);
@@ -359,13 +360,13 @@ export function AppRunner({
     onReadyRef.current?.();
   }, []);
   const reportPreviewAudit = useCallback((report: RuntimeAuditReport) => {
-    if (report.viewport.width > 500 && !desktopAuditRef.current) {
-      desktopAuditRef.current = report;
+    const firstDesktop = report.viewport.width > 500 && !desktopAuditRef.current;
+    if (report.viewport.width > 500) desktopAuditRef.current = report;
+    else mobileAuditRef.current = report;
+    if (firstDesktop && !mobileAuditRef.current) {
       setAuditPhase("mobile");
       return;
     }
-    if (report.viewport.width <= 500) mobileAuditRef.current = report;
-    else if (!desktopAuditRef.current) desktopAuditRef.current = report;
 
     if (!desktopAuditRef.current || !mobileAuditRef.current) return;
     const issueMap = new Map<string, RuntimeAuditReport["issues"][number]>();
@@ -375,10 +376,12 @@ export function AppRunner({
     const combined: RuntimeAuditReport = {
       ...desktopAuditRef.current,
       issues: Array.from(issueMap.values()),
+      smoke: report.smoke ?? desktopAuditRef.current.smoke ?? mobileAuditRef.current.smoke,
       viewport: mobileAuditRef.current.viewport,
       checkedAt: Math.max(desktopAuditRef.current.checkedAt, mobileAuditRef.current.checkedAt),
     };
     setAuditReport(combined);
+    if (combined.smoke) setSmokeRunning(false);
     setAuditPhase("done");
     onAuditRef.current?.(combined);
     if (pendingReadyRef.current && !combined.issues.some((issue) => issue.severity === "error")) {
@@ -387,6 +390,17 @@ export function AppRunner({
       onReadyRef.current?.();
     }
   }, []);
+
+  const runSmokeTest = useCallback(() => {
+    setSmokeRunning(true);
+    iframeRef.current?.contentWindow?.postMessage({ __nx_run_smoke: true }, "*");
+  }, []);
+
+  useEffect(() => {
+    if (!smokeRunning) return;
+    const timeout = window.setTimeout(() => setSmokeRunning(false), 8_000);
+    return () => window.clearTimeout(timeout);
+  }, [smokeRunning]);
   usePreviewBridge(iframeRef, projectId, reportPreviewError, editorSession, reportPreviewReady, reportPreviewAudit);
 
   useEffect(() => {
@@ -530,6 +544,19 @@ export function AppRunner({
             >
               <ScanSearch className="h-4 w-4" />
               <span className="hidden sm:inline">{selectionMode ? "Clique no elemento" : "Selecionar"}</span>
+            </button>
+          )}
+          {editorSession && (
+            <button
+              type="button"
+              onClick={runSmokeTest}
+              disabled={smokeRunning || health === "error" || loading}
+              aria-label="Testar navegação do aplicativo"
+              title="Percorre menus e abas sem enviar formulários nem executar ações destrutivas"
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
+            >
+              {smokeRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <TestTube2 className="h-4 w-4" />}
+              <span className="hidden sm:inline">{smokeRunning ? "Testando…" : "Testar fluxos"}</span>
             </button>
           )}
           <button

@@ -83,6 +83,6 @@ test("seleciona um elemento real do preview e o devolve ao editor", async ({ pag
 test("descobre e percorre a navegação do aplicativo sem acionar operações destrutivas", async ({ page }) => {
   await signIn(page);
   await page.getByRole("button", { name: "Testar navegação do aplicativo" }).click();
-  await expect(page.getByTestId("runtime-smoke")).toHaveText(/^[1-9]\\d*:[1-9]\\d*$/);
+  await expect(page.getByTestId("runtime-smoke")).toHaveText(/^[1-9]\d*:[1-9]\d*$/);
   await expect(page.getByTestId("runtime-error")).toHaveCount(0);
 });

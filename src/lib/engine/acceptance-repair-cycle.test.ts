@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appCodeFingerprint, evaluateRepairCandidate } from "./acceptance-repair-cycle";
+import { appCodeFingerprint, evaluateRepairCandidate, mergeBlockingIssueCodes } from "./acceptance-repair-cycle";
 
 const startedAt = "2026-08-03T12:00:00.000Z";
 const app = (content: string) => ({ kind: "app" as const, name: "Teste", description: "", code: content });
@@ -18,6 +18,14 @@ describe("ciclo de reparo do aceite", () => {
     ] };
     const second = { ...first, files: first.files.slice().reverse() };
     expect(appCodeFingerprint(first)).toBe(appCodeFingerprint(second));
+  });
+
+  it("preserva o erro gatilho quando a auditoria combinada chega depois", () => {
+    const merged = mergeBlockingIssueCodes(
+      ["preview_crash"],
+      runtime(["form_submit_failed"]),
+    );
+    expect(merged).toEqual(["form_submit_failed", "preview_crash"]);
   });
 
   it("recusa uma resposta que não alterou o código", () => {

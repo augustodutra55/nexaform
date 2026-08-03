@@ -28,7 +28,7 @@ import { replaceProjectMedia, type ProjectMediaAsset, type ProjectMediaItem } fr
 import { sanitizePromptAttachments, type PromptAttachment } from "@/lib/engine/prompt-attachments";
 import { buildAcceptanceReport } from "@/lib/engine/acceptance-report";
 import { acceptanceRepairFingerprint, buildAcceptanceRepairPrompt } from "@/lib/engine/acceptance-repair";
-import { appCodeFingerprint, blockingIssueCodes, evaluateRepairCandidate } from "@/lib/engine/acceptance-repair-cycle";
+import { appCodeFingerprint, blockingIssueCodes, evaluateRepairCandidate, mergeBlockingIssueCodes } from "@/lib/engine/acceptance-repair-cycle";
 import type { RuntimeAuditReport } from "@/lib/preview/runtime-audit";
 import { findPreviewSourceCandidates, type PreviewElementSelection } from "@/lib/preview/visual-selection";
 import { applyDirectVisualLinkEdit, applyDirectVisualStructureEdit, applyDirectVisualStyleEdit, applyDirectVisualTextEdit, type DirectVisualStructureAction, type DirectVisualStylePreset } from "@/lib/preview/direct-visual-edit";
@@ -883,6 +883,17 @@ export default function ProjectPage() {
   function handlePreviewAudit(report: RuntimeAuditReport) {
     latestAuditRef.current = report;
     const pending = pendingAppApproval.current;
+    const activeRepair = repairStateRef.current;
+    if (activeRepair && (activeRepair.status === "repairing" || activeRepair.status === "verifying")) {
+      const issueCodes = mergeBlockingIssueCodes(
+        activeRepair.issueCodes,
+        report,
+        pending?.acceptance?.structural || metaRef.current.acceptance?.structural
+      ).slice(0, 20);
+      if (issueCodes.join("|") !== activeRepair.issueCodes.join("|")) {
+        updateRepairState({ ...activeRepair, issueCodes });
+      }
+    }
     if (pending) {
       pending.acceptance = {
         ...pending.acceptance,

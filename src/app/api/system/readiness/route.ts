@@ -6,7 +6,6 @@ import { probeCheck, summarizeReadiness } from "@/lib/system/readiness";
 
 export const dynamic = "force-dynamic";
 
-
 async function releaseCiProbe(): Promise<{ ok: boolean; detail: string }> {
   const sha = process.env.VERCEL_GIT_COMMIT_SHA;
   if (!sha) {
@@ -16,7 +15,7 @@ async function releaseCiProbe(): Promise<{ ok: boolean; detail: string }> {
     const response = await fetch(
       `https://api.github.com/repos/augustodutra55/nexaform/commits/${sha}/check-runs`,
       {
-        cache: "no-store",
+        next: { revalidate: 300 },
         headers: {
           accept: "application/vnd.github+json",
           "user-agent": "ad-studio-readiness",

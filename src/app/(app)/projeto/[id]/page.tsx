@@ -28,6 +28,7 @@ import { replaceProjectMedia, type ProjectMediaAsset, type ProjectMediaItem } fr
 import { sanitizePromptAttachments, type PromptAttachment } from "@/lib/engine/prompt-attachments";
 import { buildAcceptanceReport } from "@/lib/engine/acceptance-report";
 import { acceptanceRepairFingerprint, buildAcceptanceRepairPrompt } from "@/lib/engine/acceptance-repair";
+import { appCodeFingerprint, blockingIssueCodes, evaluateRepairCandidate } from "@/lib/engine/acceptance-repair-cycle";
 import type { RuntimeAuditReport } from "@/lib/preview/runtime-audit";
 import { findPreviewSourceCandidates, type PreviewElementSelection } from "@/lib/preview/visual-selection";
 import { applyDirectVisualLinkEdit, applyDirectVisualStructureEdit, applyDirectVisualStyleEdit, applyDirectVisualTextEdit, type DirectVisualStructureAction, type DirectVisualStylePreset } from "@/lib/preview/direct-visual-edit";
@@ -262,6 +263,7 @@ export default function ProjectPage() {
       const previous = currentApp();
       if (previewHealth === "healthy" && previous) lastHealthyApp.current = previous;
       setPreviewHealth("checking");
+      latestAuditRef.current = undefined;
       setMode("app");
       setAppName(result.app.name ?? "App");
       if (isMultiFile(result.app)) {
@@ -278,7 +280,14 @@ export default function ProjectPage() {
       const existingAcceptance = metaRef.current.acceptance;
       let currentRepair = repairStateRef.current;
       if (currentRepair?.status === "repairing") {
-        currentRepair = { ...currentRepair, status: "verifying", updatedAt: new Date().toISOString() };
+        currentRepair = {
+          ...currentRepair,
+          status: "verifying",
+          candidateAppFingerprint: appCodeFingerprint(result.app),
+          resolvedIssueCodes: undefined,
+          introducedIssueCodes: undefined,
+          updatedAt: new Date().toISOString(),
+        };
         repairStateRef.current = currentRepair;
         setRepairState(currentRepair);
       }
@@ -549,6 +558,7 @@ export default function ProjectPage() {
     }
     setAppVer((n) => n + 1);
     setPreviewHealth("checking");
+    latestAuditRef.current = undefined;
     setAppView("preview");
     pendingAppApproval.current = {
       app,
@@ -678,6 +688,7 @@ export default function ProjectPage() {
     }
     setAppVer((value) => value + 1);
     setPreviewHealth("checking");
+    latestAuditRef.current = undefined;
     setAppView("preview");
     pendingAppApproval.current = {
       app,
@@ -724,12 +735,7 @@ export default function ProjectPage() {
     lastAutoFixTriggerRef.current = message;
     const now = new Date().toISOString();
     const previous = repairStateRef.current;
-    const issueCodes = (runtime?.issues || [])
-      .filter((issue) => issue.severity === "error")
-      .map((issue) => issue.code)
-      .concat((structural?.errors || []).map((issue) => issue.code))
-      .filter((code, index, values) => values.indexOf(code) === index)
-      .slice(0, 20);
+    const issueCodes = blockingIssueCodes(runtime, structural).slice(0, 20);
     const next: AcceptanceRepairSnapshot = {
       status: "repairing",
       attempt: autoFixCount.current,
@@ -739,6 +745,11 @@ export default function ProjectPage() {
       startedAt: previous?.fingerprint === fingerprint ? previous.startedAt : now,
       updatedAt: now,
       lastError: message.slice(0, 800),
+      baselineAppFingerprint: appCodeFingerprint(currentApp()),
+      candidateAppFingerprint: undefined,
+      resolvedIssueCodes: undefined,
+      introducedIssueCodes: undefined,
+      verifiedAt: undefined,
     };
     updateRepairState(next);
     setAutoFixError(buildAcceptanceRepairPrompt({
@@ -790,6 +801,7 @@ export default function ProjectPage() {
       setAppEntry(null);
     }
     setPreviewHealth("checking");
+    latestAuditRef.current = undefined;
     setAutoFixError(null);
     pendingAppApproval.current = null;
     setAppVer((value) => value + 1);
@@ -817,13 +829,51 @@ export default function ProjectPage() {
   }
 
   function handleAppReady() {
-    setPreviewHealth("healthy");
     const safe = currentApp();
-    if (safe) lastHealthyApp.current = safe;
     const repair = repairStateRef.current;
-    if (repair && (repair.status === "repairing" || repair.status === "verifying")) {
-      updateRepairState({ ...repair, status: "verified", updatedAt: new Date().toISOString(), lastError: undefined }, !pendingAppApproval.current);
+    if (repair && (repair.status === "repairing" || repair.status === "verifying") && safe) {
+      const pending = pendingAppApproval.current;
+      const evaluation = evaluateRepairCandidate({
+        baselineAppFingerprint: repair.baselineAppFingerprint || "none",
+        baselineIssueCodes: repair.issueCodes,
+        candidate: safe,
+        structural: pending?.acceptance?.structural,
+        runtime: latestAuditRef.current || pending?.acceptance?.runtime,
+        repairStartedAt: repair.updatedAt,
+      });
+      if (!evaluation.approved) {
+        const reason = evaluation.reason === "unchanged"
+          ? "A IA não alterou o código que causou a falha."
+          : evaluation.reason === "audit_missing"
+          ? "A correção ainda não recebeu uma auditoria nova de desktop e mobile."
+          : "A versão candidata ainda contém uma falha comprovada.";
+        setPreviewHealth("error");
+        updateRepairState({
+          ...repair,
+          candidateAppFingerprint: evaluation.candidateFingerprint,
+          resolvedIssueCodes: evaluation.resolvedIssueCodes,
+          introducedIssueCodes: evaluation.introducedIssueCodes,
+          updatedAt: new Date().toISOString(),
+          lastError: reason,
+        });
+        lastAutoFixTriggerRef.current = reason;
+        handleAutoFixFailed();
+        return;
+      }
+      const verifiedAt = new Date().toISOString();
+      updateRepairState({
+        ...repair,
+        status: "verified",
+        candidateAppFingerprint: evaluation.candidateFingerprint,
+        resolvedIssueCodes: evaluation.resolvedIssueCodes,
+        introducedIssueCodes: evaluation.introducedIssueCodes,
+        verifiedAt,
+        updatedAt: verifiedAt,
+        lastError: undefined,
+      }, !pendingAppApproval.current);
     }
+    setPreviewHealth("healthy");
+    if (safe) lastHealthyApp.current = safe;
     autoFixCount.current = 0;
     autoFixFinishingRef.current = false;
     lastAutoFixTriggerRef.current = "";
@@ -947,6 +997,7 @@ export default function ProjectPage() {
       if (previewHealth === "healthy" && previous) lastHealthyApp.current = previous;
       pendingAppApproval.current = null;
       setPreviewHealth("checking");
+      latestAuditRef.current = undefined;
       setMode("app");
       setAppName(v.schema.name ?? "App");
       if (isMultiFile(v.schema)) {

@@ -1,5 +1,5 @@
 import type { AppFile } from "@/lib/engine/app-types";
-import type { PreviewElementSelection } from "./visual-selection";
+import type { PreviewElementSelection, PreviewSourceCandidate } from "./visual-selection";
 
 export type DirectVisualEditReason =
   | "changed"
@@ -22,11 +22,18 @@ export type DirectVisualStylePreset =
   | "dark"
   | "fullWidth";
 
+export type DirectVisualStructureAction = "moveUp" | "moveDown" | "duplicate" | "remove";
+
 export interface DirectVisualEditResult {
   changed: boolean;
   files: AppFile[];
   path?: string;
   reason: DirectVisualEditReason;
+}
+
+interface ImportedComponent {
+  name: string;
+  sourcePath: string;
 }
 
 const TEXT_TAGS = new Set([
@@ -316,4 +323,109 @@ export function applyDirectVisualLinkEdit(
     ? { ...file, content: file.content.slice(0, start) + updated + file.content.slice(start + opening.length) }
     : file);
   return { changed: true, files: edited, path: target.file.path, reason: "changed" };
+}
+
+function normalizePath(path: string): string {
+  const parts = path.replace(/^\.\//, "").split("/");
+  const output: string[] = [];
+  for (const part of parts) {
+    if (!part || part === ".") continue;
+    if (part === "..") output.pop();
+    else output.push(part);
+  }
+  return output.join("/");
+}
+
+function resolveImportPath(entryPath: string, specifier: string, files: AppFile[]): string | null {
+  const directory = entryPath.includes("/") ? entryPath.replace(/\/[^/]*$/, "") : "";
+  const base = normalizePath(`${directory ? `${directory}/` : ""}${specifier}`);
+  const candidates = [base, `${base}.jsx`, `${base}.tsx`, `${base}.js`, `${base}.ts`, `${base}/index.jsx`, `${base}/index.tsx`];
+  return candidates.find((candidate) => files.some((file) => normalizePath(file.path) === candidate)) ?? null;
+}
+
+function importedComponents(entry: AppFile, files: AppFile[]): ImportedComponent[] {
+  const imports = /import\s+([A-Z][A-Za-z0-9_$]*)\s+from\s+(["'])(\.{1,2}\/[^"']+)\2\s*;?/g;
+  return Array.from(entry.content.matchAll(imports)).flatMap((match) => {
+    const sourcePath = resolveImportPath(entry.path, match[3], files);
+    return sourcePath ? [{ name: match[1], sourcePath }] : [];
+  });
+}
+
+interface ComponentInvocation {
+  name: string;
+  start: number;
+  end: number;
+  source: string;
+}
+
+function componentInvocations(content: string, components: ImportedComponent[]): ComponentInvocation[] {
+  const names = new Set(components.map((component) => component.name));
+  const pattern = /<([A-Z][A-Za-z0-9_$]*)\b[^>]*(?:\/>|>[\s\S]*?<\/\1\s*>)/g;
+  return Array.from(content.matchAll(pattern)).flatMap((match) => {
+    if (!names.has(match[1])) return [];
+    const start = match.index ?? 0;
+    return [{ name: match[1], start, end: start + match[0].length, source: match[0] }];
+  });
+}
+
+/**
+ * Reordena ou replica uma seção multi-arquivo pelo componente importado no
+ * arquivo de entrada. A operação só ocorre quando o arquivo-fonte e a chamada
+ * JSX são únicos; qualquer ambiguidade mantém o projeto anterior intacto.
+ */
+export function applyDirectVisualStructureEdit(
+  files: AppFile[],
+  entryPath: string | null | undefined,
+  sourceCandidates: PreviewSourceCandidate[],
+  action: DirectVisualStructureAction
+): DirectVisualEditResult {
+  if (!files.length || !entryPath || !sourceCandidates.length) {
+    return { changed: false, files, reason: "source_not_found" };
+  }
+  const entry = files.find((file) => normalizePath(file.path) === normalizePath(entryPath));
+  if (!entry) return { changed: false, files, reason: "source_not_found" };
+
+  const imports = importedComponents(entry, files);
+  const ranked = sourceCandidates
+    .map((candidate) => ({
+      candidate,
+      component: imports.find((item) => normalizePath(item.sourcePath) === normalizePath(candidate.path)),
+    }))
+    .filter((item): item is { candidate: PreviewSourceCandidate; component: ImportedComponent } => !!item.component);
+  if (!ranked.length) return { changed: false, files, reason: "source_not_found" };
+  if (ranked.length > 1 && ranked[0].candidate.score === ranked[1].candidate.score) {
+    return { changed: false, files, reason: "ambiguous_source" };
+  }
+
+  const targetComponent = ranked[0].component;
+  const invocations = componentInvocations(entry.content, imports);
+  const targets = invocations.filter((invocation) => invocation.name === targetComponent.name);
+  if (!targets.length) return { changed: false, files, reason: "source_not_found" };
+  if (targets.length > 1) return { changed: false, files, reason: "ambiguous_source" };
+  const target = targets[0];
+  let content = entry.content;
+
+  if (action === "remove") {
+    content = content.slice(0, target.start) + content.slice(target.end);
+  } else if (action === "duplicate") {
+    const indentation = content.slice(0, target.start).match(/(?:^|\n)([ \t]*)[^\n]*$/)?.[1] ?? "";
+    content = content.slice(0, target.end) + `\n${indentation}${target.source}` + content.slice(target.end);
+  } else {
+    const ordered = invocations.sort((a, b) => a.start - b.start);
+    const index = ordered.findIndex((invocation) => invocation.start === target.start);
+    const neighbor = action === "moveUp" ? ordered[index - 1] : ordered[index + 1];
+    if (!neighbor) return { changed: false, files, reason: "unsupported_element" };
+    const first = target.start < neighbor.start ? target : neighbor;
+    const second = target.start < neighbor.start ? neighbor : target;
+    const between = content.slice(first.end, second.start);
+    content = content.slice(0, first.start) + second.source + between + first.source + content.slice(second.end);
+  }
+
+  if (content === entry.content) return { changed: false, files, reason: "unsupported_element" };
+  return {
+    changed: true,
+    files: files.map((file) => file.path === entry.path ? { ...file, content } : file),
+    path: entry.path,
+    reason: "changed",
+  };
 }

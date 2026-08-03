@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildReleaseCertification, type ReadinessCheck } from "./readiness";
 
 const required: ReadinessCheck[] = [
+  "release-ci",
   "background-worker",
   "migration-0014",
   "migration-0015",
@@ -23,6 +24,15 @@ describe("certificação 12/12", () => {
     expect(report.gates.map((gate) => gate.number)).toEqual(
       Array.from({ length: 12 }, (_, index) => index + 1)
     );
+  });
+
+
+  it("não certifica capacidades estáticas sem CI comprovado para o commit", () => {
+    const report = buildReleaseCertification(required.filter((check) => check.id !== "release-ci"));
+    expect(report.certified).toBe(false);
+    expect(report.ready).toBe(5);
+    expect(report.gates.find((gate) => gate.id === "architecture")?.status).toBe("warning");
+    expect(report.gates.find((gate) => gate.id === "interaction-tests")?.status).toBe("warning");
   });
 
   it("expõe o bloqueio real sem declarar 10/10", () => {

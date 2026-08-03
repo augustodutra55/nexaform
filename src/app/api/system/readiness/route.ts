@@ -6,6 +6,40 @@ import { probeCheck, summarizeReadiness } from "@/lib/system/readiness";
 
 export const dynamic = "force-dynamic";
 
+async function releaseCiProbe(): Promise<{ ok: boolean; detail: string }> {
+  const sha = process.env.VERCEL_GIT_COMMIT_SHA;
+  if (!sha) {
+    return { ok: false, detail: "O deployment não informa o commit Git que está em execução." };
+  }
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/augustodutra55/nexaform/commits/${sha}/check-runs`,
+      {
+        next: { revalidate: 300 },
+        headers: {
+          accept: "application/vnd.github+json",
+          "user-agent": "ad-studio-readiness",
+          "x-github-api-version": "2022-11-28",
+        },
+      }
+    );
+    if (!response.ok) {
+      return { ok: false, detail: `O GitHub não confirmou o CI deste commit (HTTP ${response.status}).` };
+    }
+    const payload = await response.json() as {
+      check_runs?: Array<{ name?: string; conclusion?: string | null }>;
+    };
+    const quality = Array.isArray(payload.check_runs)
+      ? payload.check_runs.find((run) => run.name === "Build e interações reais")
+      : undefined;
+    return quality?.conclusion === "success"
+      ? { ok: true, detail: `CI completo aprovado para o commit ${sha.slice(0, 7)}.` }
+      : { ok: false, detail: "Build, testes unitários e Playwright ainda não foram aprovados para este deployment." };
+  } catch {
+    return { ok: false, detail: "Não foi possível consultar a evidência do CI no GitHub." };
+  }
+}
+
 async function tableProbe(
   admin: NonNullable<ReturnType<typeof createAdminClient>>,
   table: string,
@@ -26,7 +60,16 @@ export async function GET() {
   }
 
   const admin = createAdminClient();
+  const releaseCi = await releaseCiProbe();
   const checks = [
+    probeCheck({
+      id: "release-ci",
+      label: "Certificação do commit publicado",
+      ok: releaseCi.ok,
+      readyDetail: releaseCi.detail,
+      missingDetail: releaseCi.detail,
+      action: "Publique somente um commit cuja verificação Qualidade esteja verde no GitHub.",
+    }),
     probeCheck({
       id: "supabase-public",
       label: "Conexão pública com Supabase",

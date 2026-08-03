@@ -188,6 +188,11 @@ export function usePreviewBridge(
                 labels: Array.isArray(raw.smoke.labels)
                   ? raw.smoke.labels.slice(0, 12).map((label: unknown) => String(label).slice(0, 80))
                   : [],
+                fieldsAttempted: Math.max(0, Number(raw.smoke.fieldsAttempted) || 0),
+                fieldsEditable: Math.max(0, Number(raw.smoke.fieldsEditable) || 0),
+                fieldLabels: Array.isArray(raw.smoke.fieldLabels)
+                  ? raw.smoke.fieldLabels.slice(0, 20).map((label: unknown) => String(label).slice(0, 80))
+                  : [],
                 completedAt: Number(raw.smoke.completedAt) || Date.now(),
               }
             : undefined,

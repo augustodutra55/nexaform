@@ -21,6 +21,9 @@ export interface RuntimeAuditReport {
     attempted: number;
     changed: number;
     labels: string[];
+    fieldsAttempted: number;
+    fieldsEditable: number;
+    fieldLabels: string[];
     completedAt: number;
   };
   checkedAt: number;
@@ -29,8 +32,9 @@ export interface RuntimeAuditReport {
 /**
  * Auditoria leve executada dentro do iframe depois da montagem do React.
  * A auditoria automática apenas inspeciona o DOM. O smoke test, disparado
- * explicitamente pelo editor, percorre somente controles de navegação seguros;
- * nunca envia formulários nem aciona operações destrutivas.
+ * explicitamente pelo editor, percorre somente controles de navegação seguros
+ * e comprova que campos visíveis aceitam edição. Nunca envia formulários,
+ * dispara eventos de mudança nem aciona operações destrutivas.
  */
 export function runtimeAuditSource(): string {
   return `
@@ -136,8 +140,46 @@ export function runtimeAuditSource(): string {
       .slice(0,12);
   }
   function nxWait(ms){return new Promise(function(resolve){setTimeout(resolve,ms);});}
+  function nxFieldLabel(el){
+    var id=String(el.id||''), label=id?document.querySelector('label[for="'+id.replace(/"/g,'')+'"]'):null;
+    return String(label&&label.innerText||el.getAttribute('aria-label')||el.getAttribute('placeholder')||el.getAttribute('name')||el.tagName||'campo').replace(/\s+/g,' ').trim().slice(0,80);
+  }
+  function nxSafeEditableFields(){
+    return Array.from(document.querySelectorAll('form input,form textarea,form select'))
+      .filter(function(el){
+        var type=String(el.getAttribute('type')||'text').toLowerCase();
+        return nxVisible(el)&&!el.disabled&&!el.readOnly&&['hidden','password','file','submit','button','reset','image','checkbox','radio','color','range'].indexOf(type)<0;
+      });
+  }
+  function nxProbeFields(seen,result){
+    nxSafeEditableFields().forEach(function(el){
+      var label=nxFieldLabel(el), key=String(el.tagName)+'#'+label.toLowerCase();
+      if(seen[key])return; seen[key]=true;
+      var original=String(el.value||''), sample='Teste AD Studio';
+      var type=String(el.getAttribute('type')||'text').toLowerCase();
+      if(el.tagName==='SELECT'){
+        var option=Array.from(el.options||[]).find(function(item){return !item.disabled&&String(item.value)!==original;});
+        if(!option)return; sample=String(option.value);
+      }else if(type==='email')sample='qa+fluxo@adstudio.local';
+      else if(type==='number')sample='1';
+      else if(type==='date')sample='2026-01-15';
+      else if(type==='datetime-local')sample='2026-01-15T10:00';
+      else if(type==='month')sample='2026-01';
+      else if(type==='time')sample='10:00';
+      else if(type==='tel')sample='21999999999';
+      else if(type==='url')sample='https://example.com';
+      result.fieldsAttempted+=1; result.fieldLabels.push(label);
+      try{
+        el.value=sample;
+        if(String(el.value||'')===sample)result.fieldsEditable+=1;
+        el.value=original;
+      }catch(e){try{el.value=original;}catch(ignore){}}
+    });
+  }
   async function nxRunSmoke(){
     var controls=nxSafeNavigationControls(), attempted=0, changed=0, labels=[];
+    var fields={fieldsAttempted:0,fieldsEditable:0,fieldLabels:[]}, seenFields={};
+    nxProbeFields(seenFields,fields);
     var previous=nxScreenSignature();
     for(var index=0;index<controls.length;index++){
       var original=controls[index], label=nxControlLabel(original);
@@ -149,9 +191,10 @@ export function runtimeAuditSource(): string {
       var next=nxScreenSignature();
       if(next&&next!==previous)changed+=1;
       previous=next||previous;
+      nxProbeFields(seenFields,fields);
       if(document.querySelector('.nx-error'))break;
     }
-    nxSmokeResult={attempted:attempted,changed:changed,labels:labels,completedAt:Date.now()};
+    nxSmokeResult={attempted:attempted,changed:changed,labels:labels,fieldsAttempted:fields.fieldsAttempted,fieldsEditable:fields.fieldsEditable,fieldLabels:fields.fieldLabels.slice(0,20),completedAt:Date.now()};
     try{_nxHost.postMessage({__nx_audit:nxRunAudit()},'*');}catch(e){}
   }
   window.addEventListener('message',function(event){

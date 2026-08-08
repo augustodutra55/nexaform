@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   isValidStagedBuildJob,
+  shouldStageInitialBuild,
+  shouldStageRefinement,
   stagedJobForCloud,
   STAGED_BUILD_VERSION,
   type StagedBuildJob,
@@ -67,5 +69,37 @@ describe("retomada da geração por etapas", () => {
       ...job,
       visualRefinement: { ...job.visualRefinement, baseline: "inválida" },
     }, "project-1", "thread-1")).toBe(false);
+  });
+});
+
+describe("seleção automática da construção por etapas", () => {
+  it("divide uma especificação funcional complexa escrita em texto corrido", () => {
+    const prompt = [
+      "Crie uma esmalteria com agenda para o cliente escolher o melhor dia e horário.",
+      "Cadastre nome completo e data de nascimento.",
+      "Envie notificações ao cliente e à esmalteria 24 horas e uma hora antes.",
+      "O link permite desmarcar até 24 horas antes; depois disso, somente pelo WhatsApp.",
+      "Com três faltas consecutivas, bloqueie novos reagendamentos.",
+      "Envie mensagem automática de aniversário e revisão após 15 dias.",
+      "Inclua um catálogo com paleta das cores de esmalte mais usadas.",
+    ].join(" ");
+
+    expect(shouldStageInitialBuild(prompt, [], false)).toBe(true);
+  });
+
+  it("mantém um pedido simples em uma única geração", () => {
+    expect(shouldStageInitialBuild(
+      "Crie uma landing page elegante para uma cafeteria com hero, cardápio e botão de WhatsApp.",
+      [],
+      false
+    )).toBe(false);
+  });
+
+  it("divide um refinamento que adiciona vários domínios funcionais", () => {
+    expect(shouldStageRefinement(
+      "Adicione agenda, cadastro de clientes, cancelamento, bloqueio por faltas, notificações e catálogo.",
+      [],
+      true
+    )).toBe(true);
   });
 });

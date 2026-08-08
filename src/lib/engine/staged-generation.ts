@@ -91,7 +91,35 @@ const COMPLEX_SCOPE = [
   /\b(?:relat[oó]rios?|gr[aá]ficos?|campanhas?|fidelidade)\b/i,
   /\b(?:hist[oó]rico|auditoria|logs? de atividade)\b/i,
   /\b(?:m[uú]ltiplas? unidades|multi.?tenant|m[uú]ltiplas? empresas)\b/i,
+  /\b(?:agenda|agendamento|disponibilidade|hor[aá]rios?|calend[aá]rio)\b/i,
+  /\b(?:cadastro de clientes?|dados pessoais|nome completo|data de nascimento)\b/i,
+  /\b(?:cancelar|cancelamento|desmarcar|reagendar|reagendamento)\b/i,
+  /\b(?:bloquead[oa]|bloqueio|suspender|marca[çc][oõ]es? consecutivas?)\b/i,
+  /\b(?:anivers[aá]rio|p[oó]s.?atendimento|revis[aã]o ap[oó]s|follow.?up)\b/i,
+  /\b(?:cat[aá]logo|paleta de cores?|produtos? mais (?:vendidos?|usados?)|estoque)\b/i,
+  /\b(?:regra de neg[oó]cio|obrigat[oó]ri[oa]|somente pode|s[oó] pode|se .{0,80} ent[aã]o)\b/i,
 ];
+
+interface SpecificationComplexity {
+  length: number;
+  bulletCount: number;
+  headingCount: number;
+  scopeScore: number;
+}
+
+function specificationComplexity(message: string, attachments: PromptAttachment[]): SpecificationComplexity {
+  const attachmentText = attachments
+    .filter((attachment) => attachment.kind === "text")
+    .map((attachment) => attachment.content)
+    .join("\n");
+  const specification = `${message}\n${attachmentText}`;
+  return {
+    length: specification.length,
+    bulletCount: (specification.match(/^\s*(?:[-*]|\d+[.)])\s+/gm) || []).length,
+    headingCount: (specification.match(/^\s*[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s/()-]{5,}$/gm) || []).length,
+    scopeScore: COMPLEX_SCOPE.reduce((score, pattern) => score + (pattern.test(specification) ? 1 : 0), 0),
+  };
+}
 
 /** Detecta especificações que não cabem com segurança em uma única resposta. */
 export function shouldStageInitialBuild(
@@ -100,18 +128,16 @@ export function shouldStageInitialBuild(
   hasCurrentProject: boolean
 ): boolean {
   if (hasCurrentProject) return false;
-  const attachmentText = attachments
-    .filter((attachment) => attachment.kind === "text")
-    .map((attachment) => attachment.content)
-    .join("\n");
-  const specification = `${message}\n${attachmentText}`;
-  const bulletCount = (specification.match(/^\s*(?:[-*]|\d+[.)])\s+/gm) || []).length;
-  const headingCount = (specification.match(/^\s*[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s/()-]{5,}$/gm) || []).length;
-  const scopeScore = COMPLEX_SCOPE.reduce((score, pattern) => score + (pattern.test(specification) ? 1 : 0), 0);
+  const complexity = specificationComplexity(message, attachments);
 
-  return specification.length >= 8_000
-    || bulletCount >= 45
-    || (specification.length >= 3_500 && (scopeScore >= 5 || headingCount >= 10));
+  return complexity.length >= 8_000
+    || complexity.bulletCount >= 45
+    // Texto corrido também pode representar um sistema inteiro. Seis domínios
+    // funcionais independentes já exigem etapas, mesmo sem títulos ou bullets.
+    || complexity.scopeScore >= 6
+    || (complexity.length >= 1_200 && complexity.scopeScore >= 4)
+    || (complexity.length >= 2_000 && (complexity.scopeScore >= 3 || complexity.headingCount >= 6))
+    || (complexity.length >= 3_500 && complexity.headingCount >= 10);
 }
 
 /** Detecta refinamentos amplos que precisam ser aplicados e salvos em partes. */
@@ -121,18 +147,12 @@ export function shouldStageRefinement(
   hasCurrentProject: boolean
 ): boolean {
   if (!hasCurrentProject) return false;
-  const attachmentText = attachments
-    .filter((attachment) => attachment.kind === "text")
-    .map((attachment) => attachment.content)
-    .join("\n");
-  const specification = `${message}\n${attachmentText}`;
-  const bulletCount = (specification.match(/^\s*(?:[-*]|\d+[.)])\s+/gm) || []).length;
-  const headingCount = (specification.match(/^\s*[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s/()-]{5,}$/gm) || []).length;
-  const scopeScore = COMPLEX_SCOPE.reduce((score, pattern) => score + (pattern.test(specification) ? 1 : 0), 0);
+  const complexity = specificationComplexity(message, attachments);
 
-  return specification.length >= 2_000
-    || bulletCount >= 12
-    || (specification.length >= 900 && (scopeScore >= 2 || headingCount >= 4));
+  return complexity.length >= 2_000
+    || complexity.bulletCount >= 12
+    || complexity.scopeScore >= 5
+    || (complexity.length >= 900 && (complexity.scopeScore >= 2 || complexity.headingCount >= 4));
 }
 
 /** Incorpora anexos de texto à especificação que acompanhará todas as etapas. */

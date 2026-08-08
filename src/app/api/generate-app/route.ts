@@ -347,7 +347,18 @@ export async function POST(req: NextRequest) {
     limit: plan.maxGenerationsPerMonth, unlimited: owner,
     requestId, kind: "app",
   });
-  if (reservation.error) return NextResponse.json({ error: "Não foi possível reservar sua geração. Tente novamente." }, { status: 503 });
+  if (reservation.error) {
+    console.error("[generation] falha ao reservar geração", {
+      projectId,
+      userId: user.id,
+      owner,
+      error: safeOperationalMessage(reservation.error),
+    });
+    return NextResponse.json(
+      { error: "Não foi possível reservar sua geração. Tente novamente.", errorCode: "generation_reservation_failed" },
+      { status: 503 }
+    );
+  }
   if (reservation.limitReached) return NextResponse.json(
     { error: `Limite de ${plan.maxGenerationsPerMonth} gerações do plano ${plan.name} atingido este mês.`, limitReached: true },
     { status: 402 }

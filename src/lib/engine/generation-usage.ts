@@ -1,5 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+// Os RPCs do Supabase recebem p_limit como PostgreSQL integer (int4).
+// Number.MAX_SAFE_INTEGER, usado pelo plano Owner, não cabe nesse tipo e fazia
+// a reserva falhar antes mesmo de a IA ser chamada.
+export const POSTGRES_INTEGER_MAX = 2_147_483_647;
+
 interface ReserveArgs {
   supabase: SupabaseClient; userId: string; projectId: string;
   prompt: string; limit: number; unlimited?: boolean;
@@ -24,9 +29,12 @@ function unavailableObservedRpc(error: { code?: string; message?: string } | nul
 
 export async function reserveGeneration(args: ReserveArgs): Promise<ReservationResult> {
   if (args.requestId) {
+    const rpcLimit = args.unlimited
+      ? POSTGRES_INTEGER_MAX
+      : Math.max(1, Math.min(POSTGRES_INTEGER_MAX, Math.floor(args.limit)));
     const { data, error } = await args.supabase.rpc("reserve_generation_observed", {
       p_project_id: args.projectId,
-      p_limit: args.limit,
+      p_limit: rpcLimit,
       p_prompt: args.prompt.slice(0, 2000),
       p_request_id: args.requestId,
       p_kind: args.kind ?? "app",

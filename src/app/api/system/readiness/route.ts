@@ -6,10 +6,16 @@ import { probeCheck, summarizeReadiness } from "@/lib/system/readiness";
 
 export const dynamic = "force-dynamic";
 
-async function releaseCiProbe(): Promise<{ ok: boolean; detail: string }> {
+interface ReleaseCiProbe {
+  core: { ok: boolean; detail: string };
+  e2e: { ok: boolean; detail: string };
+}
+
+async function releaseCiProbe(): Promise<ReleaseCiProbe> {
   const sha = process.env.VERCEL_GIT_COMMIT_SHA;
   if (!sha) {
-    return { ok: false, detail: "O deployment não informa o commit Git que está em execução." };
+    const missing = { ok: false, detail: "O deployment não informa o commit Git que está em execução." };
+    return { core: missing, e2e: missing };
   }
   try {
     const response = await fetch(
@@ -24,19 +30,26 @@ async function releaseCiProbe(): Promise<{ ok: boolean; detail: string }> {
       }
     );
     if (!response.ok) {
-      return { ok: false, detail: `O GitHub não confirmou o CI deste commit (HTTP ${response.status}).` };
+      const missing = { ok: false, detail: `O GitHub não confirmou o CI deste commit (HTTP ${response.status}).` };
+      return { core: missing, e2e: missing };
     }
     const payload = await response.json() as {
       check_runs?: Array<{ name?: string; conclusion?: string | null }>;
     };
-    const quality = Array.isArray(payload.check_runs)
-      ? payload.check_runs.find((run) => run.name === "Build e interações reais")
-      : undefined;
-    return quality?.conclusion === "success"
-      ? { ok: true, detail: `CI completo aprovado para o commit ${sha.slice(0, 7)}.` }
-      : { ok: false, detail: "Build, testes unitários e Playwright ainda não foram aprovados para este deployment." };
+    const runs = Array.isArray(payload.check_runs) ? payload.check_runs : [];
+    const core = runs.find((run) => run.name === "Build, contratos e componentes");
+    const e2e = runs.find((run) => run.name === "Interações reais no navegador");
+    return {
+      core: core?.conclusion === "success"
+        ? { ok: true, detail: `Build, TypeScript e contratos aprovados para ${sha.slice(0, 7)}.` }
+        : { ok: false, detail: "Build, TypeScript e contratos ainda não foram aprovados para este deployment." },
+      e2e: e2e?.conclusion === "success"
+        ? { ok: true, detail: `Playwright aprovou os fluxos reais para ${sha.slice(0, 7)}.` }
+        : { ok: false, detail: "Login, navegação, formulários, CRUD, mobile e editor visual ainda não foram aprovados pelo Playwright." },
+    };
   } catch {
-    return { ok: false, detail: "Não foi possível consultar a evidência do CI no GitHub." };
+    const missing = { ok: false, detail: "Não foi possível consultar a evidência do CI no GitHub." };
+    return { core: missing, e2e: missing };
   }
 }
 
@@ -63,12 +76,20 @@ export async function GET() {
   const releaseCi = await releaseCiProbe();
   const checks = [
     probeCheck({
-      id: "release-ci",
-      label: "Certificação do commit publicado",
-      ok: releaseCi.ok,
-      readyDetail: releaseCi.detail,
-      missingDetail: releaseCi.detail,
-      action: "Publique somente um commit cuja verificação Qualidade esteja verde no GitHub.",
+      id: "release-core-ci",
+      label: "Build e contratos do commit publicado",
+      ok: releaseCi.core.ok,
+      readyDetail: releaseCi.core.detail,
+      missingDetail: releaseCi.core.detail,
+      action: "Publique somente um commit cujo job Build, contratos e componentes esteja verde no GitHub.",
+    }),
+    probeCheck({
+      id: "release-e2e-ci",
+      label: "Interações reais do commit publicado",
+      ok: releaseCi.e2e.ok,
+      readyDetail: releaseCi.e2e.detail,
+      missingDetail: releaseCi.e2e.detail,
+      action: "Publique somente um commit cujo job Interações reais no navegador esteja verde no GitHub.",
     }),
     probeCheck({
       id: "supabase-public",

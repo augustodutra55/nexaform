@@ -68,22 +68,51 @@ function parse(
   current?: AppFile[] | null
 ): AppGenerationResult | null {
   try {
-    const operationBlocks = current?.length ? parseOperationBlocks(text) : null;
+    const operationBlocks = parseOperationBlocks(text);
     const cleaned = text.replace(/^```(?:json)?/m, "").replace(/```\s*$/m, "").trim();
-    // Interpretação ROBUSTA: tenta o texto direto; se falhar (o modelo às vezes
-    // manda uma frase antes/depois do JSON, ou cerca a mais), isola do primeiro
-    // "{" até o último "}" e tenta de novo. Assim uma resposta boa não é
-    // descartada só por causa de texto em volta.
-    let j: any = operationBlocks;
-    if (!j) {
-      try {
-        j = JSON.parse(cleaned);
-      } catch {
-        const first = cleaned.indexOf("{");
-        const last = cleaned.lastIndexOf("}");
-        if (first < 0 || last <= first) throw new Error("sem objeto JSON");
-        j = JSON.parse(cleaned.slice(first, last + 1));
+    // Alguns modelos devolvem arquivos como AD_FILE ou títulos Markdown seguidos
+    // de cercas de código. Na primeira etapa esses arquivos completos já são um
+    // projeto válido e devem ser aproveitados sem cobrar outra geração.
+    let blockEnvelope: any = null;
+    if (operationBlocks) {
+      if (current?.length) {
+        blockEnvelope = operationBlocks;
+      } else {
+        const blockFiles: Array<{ path: string; content: string }> = [];
+        let completeFilesOnly = true;
+        for (const operation of operationBlocks.ops) {
+          if (operation.op !== "create" && operation.op !== "update") {
+            completeFilesOnly = false;
+            break;
+          }
+          blockFiles.push({ path: operation.path, content: operation.content });
+        }
+        if (completeFilesOnly && blockFiles.length) {
+          blockEnvelope = { files: blockFiles, reply: operationBlocks.reply };
+        }
       }
+    }
+
+    // Interpretação robusta: tenta texto direto, cada cerca JSON e o maior
+    // objeto aparente. Não altera conteúdo nem tenta adivinhar JSON truncado.
+    let j: any = blockEnvelope;
+    if (!j) {
+      const candidates = [cleaned];
+      const fencedPattern = /```(?:json)?[^\S\r\n]*\r?\n([\s\S]*?)```/gi;
+      let fencedMatch: RegExpExecArray | null;
+      while ((fencedMatch = fencedPattern.exec(text)) !== null) {
+        candidates.push(fencedMatch[1].trim());
+      }
+      const first = cleaned.indexOf("{");
+      const last = cleaned.lastIndexOf("}");
+      if (first >= 0 && last > first) candidates.push(cleaned.slice(first, last + 1));
+      for (const candidate of candidates) {
+        try {
+          j = JSON.parse(candidate);
+          break;
+        } catch {}
+      }
+      if (!j) throw new Error("sem resposta estruturada aproveitável");
     }
 
     // Edição cirúrgica: aplica ops sobre os arquivos atuais (refinamento).

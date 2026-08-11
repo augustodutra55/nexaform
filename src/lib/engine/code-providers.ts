@@ -31,6 +31,10 @@ interface Args {
   attachments?: PromptAttachment[];
   /** Arquivos confiáveis já enviados à Central de Mídia do projeto. */
   mediaAssets?: GenerationMediaAsset[];
+  /** Tentativa transacional da fila; usada apenas para diagnóstico e limites. */
+  backgroundAttempt?: number;
+  /** Na fila, uma resposta inválida vira retry em vez de duplicar a chamada no mesmo worker. */
+  skipQualityRepair?: boolean;
 }
 
 /** Normaliza e valida os arquivos devolvidos pelo modelo. */
@@ -168,8 +172,8 @@ function systemPromptFor(a: Args): string {
 function maxOutputTokens(a: Args): number {
   const isRefinement = !!(a.currentFiles?.length || a.currentCode);
   const isStaged = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
-  if (isStaged && isRefinement) return 5_000;
-  if (isStaged) return 8_000;
+  if (isStaged && isRefinement) return 3_000;
+  if (isStaged) return 4_500;
   // Refinamentos comuns agora usam patches curtos. Reservar 8k tokens fazia o
   // OpenRouter recusar pedidos por saldo mesmo quando a resposta precisava de
   // poucas centenas de tokens.
@@ -309,7 +313,7 @@ function reasonFromException(provider: string, model: string, e: any): string {
 function providerTimeoutMs(a: Args, repair = false): number {
   const isRefinement = !!(a.currentFiles?.length || a.currentCode);
   const isStaged = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
-  if (isStaged) return repair ? 45_000 : 75_000;
+  if (isStaged) return repair ? 25_000 : 55_000;
   if (isRefinement) return repair ? 60_000 : 90_000;
   return 120_000;
 }
@@ -373,6 +377,10 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
     if (r) {
       const quality = assessCandidate(r, a);
       if (quality.valid) return r;
+      if (a.skipQualityRepair) {
+        diag.push(`Claude: ${model} falhou no quality gate; a fila fará uma nova tentativa curta.`);
+        return null;
+      }
       diag.push(`Claude: ${model} gerou código estruturalmente inválido; quality gate iniciou uma correção.`);
       const qualityRes = await send([
         ...initialMessages,
@@ -468,6 +476,10 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
     if (r) {
       const quality = assessCandidate(r, a);
       if (quality.valid) return r;
+      if (a.skipQualityRepair) {
+        diag.push(`OpenRouter: ${model} falhou no quality gate; a fila fará uma nova tentativa curta.`);
+        return null;
+      }
       diag.push(`OpenRouter: ${model} gerou código estruturalmente inválido; quality gate iniciou uma correção.`);
       const qualityRes = await send([
         ...initialMessages,

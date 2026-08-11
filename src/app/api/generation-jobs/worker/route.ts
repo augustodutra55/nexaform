@@ -8,11 +8,11 @@ import {
   nextBackgroundJobStatus,
   retryDelaySeconds,
 } from "@/lib/engine/background-jobs";
-import { buildStagePrompt, stagedStages } from "@/lib/engine/staged-generation";
+import { buildStagePrompt, buildStageRetryPrompt, stagedStages } from "@/lib/engine/staged-generation";
 import { classifyGenerationFailure, safeOperationalMessage } from "@/lib/engine/observability";
 
 export const maxDuration = 300;
-const WORKER_MAX_MS = Math.min(270_000, Number(process.env.GEN_MAX_MS) || 260_000);
+const WORKER_MAX_MS = Math.min(210_000, Number(process.env.GEN_MAX_MS) || 200_000);
 
 function authorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -118,7 +118,9 @@ export async function GET(req: NextRequest) {
   const current = isAppCode(project.schema) ? project.schema : null;
   const currentFiles = current && isMultiFile(current) ? current.files : null;
   const currentCode = current && !isMultiFile(current) ? current.code ?? null : null;
-  const prompt = buildStagePrompt(
+  const attempts = Number(row.attempts) || 1;
+  const promptBuilder = attempts > 1 ? buildStageRetryPrompt : buildStagePrompt;
+  const prompt = promptBuilder(
     payload.stagedJob.masterPrompt,
     stage,
     payload.stageIndex,
@@ -152,7 +154,6 @@ export async function GET(req: NextRequest) {
     }
   } catch (error) {
     const message = safeOperationalMessage(error);
-    const attempts = Number(row.attempts) || 1;
     const status = nextBackgroundJobStatus({
       status: "running",
       succeeded: false,

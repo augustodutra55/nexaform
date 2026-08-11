@@ -9,7 +9,9 @@ import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { PublicPreview } from "./public-preview";
 
-export const revalidate = 10;
+// Republicações precisam aparecer imediatamente. Manter cache de rota aqui
+// podia exibir por alguns segundos o bundle anterior depois de “Publicar”.
+export const dynamic = "force-dynamic";
 
 interface PublicProject {
   id: string; name: string; description: string | null; schema: unknown;

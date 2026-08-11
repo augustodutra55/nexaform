@@ -6,6 +6,7 @@
 import type { ProjectMediaAsset } from "@/lib/media/project-media";
 import type { GenerationPlan, ProjectQualityReport } from "@/lib/engine/app-types";
 import type { RuntimeAuditReport } from "@/lib/preview/runtime-audit";
+import type { ReleaseVerificationSnapshot } from "@/lib/delivery/release-verification";
 
 export type ProjectStatus = "rascunho" | "producao" | "revisao" | "entregue";
 
@@ -51,6 +52,8 @@ export interface CommercialDeliveryMeta {
   customDomain?: string;
   handoffNotes?: string;
   deliveredAt?: string;
+  /** Evidência de que a versão pública realmente montou depois da publicação. */
+  releaseVerification?: ReleaseVerificationSnapshot;
 }
 
 export interface BackendProvisioningMeta {

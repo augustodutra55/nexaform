@@ -24,6 +24,11 @@ import { bundleApp } from "@/lib/preview/bundler";
 import { Skeleton } from "@/components/ui/skeleton";
 import { buildViteProject } from "@/lib/export/vite-project";
 import { buildDeliveryChecklist, buildHandoffDocuments } from "@/lib/delivery/commercial-handoff";
+import {
+  parseReleaseProbeMessage,
+  releaseProbeUrl,
+  type ReleaseVerificationSnapshot,
+} from "@/lib/delivery/release-verification";
 import { replaceProjectMedia, type ProjectMediaAsset, type ProjectMediaItem } from "@/lib/media/project-media";
 import { sanitizePromptAttachments, type PromptAttachment } from "@/lib/engine/prompt-attachments";
 import { buildAcceptanceReport } from "@/lib/engine/acceptance-report";
@@ -40,6 +45,59 @@ interface ProjectRow {
   published: boolean;
   share_slug: string | null;
   meta: any;
+  build_bundle: string | null;
+}
+
+const RELEASE_PROBE_TIMEOUT_MS = 20_000;
+
+async function verifyPublishedRelease(slug: string, expectsRuntime: boolean): Promise<void> {
+  const nonce = crypto.randomUUID();
+  const url = releaseProbeUrl(slug, nonce);
+  if (!expectsRuntime) {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) throw new Error(`A página publicada respondeu HTTP ${response.status}.`);
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const iframe = document.createElement("iframe");
+    iframe.title = "Verificação da publicação";
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.style.position = "fixed";
+    iframe.style.width = "1px";
+    iframe.style.height = "1px";
+    iframe.style.opacity = "0";
+    iframe.style.pointerEvents = "none";
+    iframe.style.left = "-10000px";
+
+    let finished = false;
+    const finish = (error?: Error) => {
+      if (finished) return;
+      finished = true;
+      window.clearTimeout(timer);
+      window.removeEventListener("message", onMessage);
+      iframe.remove();
+      if (error) reject(error);
+      else resolve();
+    };
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin || event.source !== iframe.contentWindow) return;
+      const message = parseReleaseProbeMessage(event.data);
+      if (!message) return;
+      if (message.status === "error") {
+        finish(new Error(message.message || "O aplicativo publicado falhou ao iniciar."));
+      } else {
+        finish();
+      }
+    };
+    const timer = window.setTimeout(() => {
+      finish(new Error("A versão pública não confirmou a inicialização dentro de 20 segundos."));
+    }, RELEASE_PROBE_TIMEOUT_MS);
+
+    window.addEventListener("message", onMessage);
+    iframe.src = url;
+    document.body.appendChild(iframe);
+  });
 }
 
 export default function ProjectPage() {
@@ -116,7 +174,7 @@ export default function ProjectPage() {
     (async () => {
       const { data: proj, error } = await supabase
         .from("projects")
-        .select("id, name, schema, published, share_slug, meta")
+        .select("id, name, schema, published, share_slug, meta, build_bundle")
         .eq("id", projectId)
         .maybeSingle();
       if (cancelled) return;
@@ -375,14 +433,9 @@ export default function ProjectPage() {
     const slug = project.share_slug ?? nanoid(10);
     const payload = mode === "app" ? appPayload : store.schema;
 
-    if (mode === "app") {
-      const backendReady = await provisionCurrentBackend(false);
-      if (!backendReady) return null;
-    }
-
-    // Build de produção: pré-compila o app AGORA (esbuild-wasm já carregado) e
-    // salva o bundle para o site publicado carregar sem Babel/esbuild no visitante.
-    // Se falhar, salva null → a página pública cai no runtime completo (fallback).
+    // Build de produção obrigatório: o link do cliente nunca deve depender do
+    // runtime Babel de contingência. Se o bundle falhar, preserva integralmente
+    // a publicação anterior e informa a causa antes de colocar algo quebrado no ar.
     let buildBundle: string | null = null;
     if (mode === "app") {
       try {
@@ -397,9 +450,30 @@ export default function ProjectPage() {
           const { code } = await bundleApp(files, entry);
           buildBundle = code;
         }
-      } catch {
-        buildBundle = null; // fallback seguro
+        if (!buildBundle) throw new Error("O bundler não produziu o arquivo de produção.");
+      } catch (error) {
+        toast.error("A publicação foi bloqueada antes de ir ao ar", {
+          description: error instanceof Error
+            ? error.message
+            : "Não foi possível compilar a versão de produção.",
+        });
+        return null;
       }
+    }
+
+    if (mode === "app") {
+      const backendReady = await provisionCurrentBackend(false);
+      if (!backendReady) return null;
+    }
+
+    const { data: previousRelease, error: snapshotError } = await supabase
+      .from("projects")
+      .select("published, share_slug, schema, build_bundle")
+      .eq("id", project.id)
+      .single();
+    if (snapshotError || !previousRelease) {
+      toast.error("Não foi possível proteger a publicação anterior");
+      return null;
     }
 
     const { error } = await supabase
@@ -410,7 +484,62 @@ export default function ProjectPage() {
       toast.error("Não foi possível publicar");
       return null;
     }
-    setProject({ ...project, published: true, share_slug: slug });
+
+    try {
+      await verifyPublishedRelease(slug, mode === "app");
+    } catch (verificationError) {
+      const { error: rollbackError } = await supabase
+        .from("projects")
+        .update({
+          published: previousRelease.published,
+          share_slug: previousRelease.share_slug,
+          schema: previousRelease.schema,
+          build_bundle: previousRelease.build_bundle,
+        })
+        .eq("id", project.id);
+      const checkedAt = new Date().toISOString();
+      const failedVerification: ReleaseVerificationSnapshot = {
+        version: 1,
+        status: "failed",
+        slug,
+        checkedAt,
+        bundleBytes: buildBundle?.length || 0,
+        message: verificationError instanceof Error
+          ? verificationError.message.slice(0, 800)
+          : "A versão pública não iniciou.",
+      };
+      await handleMetaChange({
+        delivery: {
+          ...(metaRef.current.delivery || {}),
+          releaseVerification: failedVerification,
+        },
+      });
+      toast.error("A versão pública falhou na verificação", {
+        description: rollbackError
+          ? "A publicação foi bloqueada, mas a restauração automática precisa ser conferida no histórico."
+          : `${failedVerification.message} A publicação anterior foi restaurada.`,
+      });
+      return null;
+    }
+
+    const verifiedAt = new Date().toISOString();
+    const releaseVerification: ReleaseVerificationSnapshot = {
+      version: 1,
+      status: "verified",
+      slug,
+      checkedAt: verifiedAt,
+      bundleBytes: buildBundle?.length || 0,
+    };
+    await handleMetaChange({
+      delivery: {
+        ...(metaRef.current.delivery || {}),
+        releaseVerification,
+      },
+    });
+    setProject({ ...project, published: true, share_slug: slug, build_bundle: buildBundle });
+    toast.success("Publicação verificada", {
+      description: "O link público abriu e o aplicativo confirmou a inicialização.",
+    });
     return slug;
   }
 

@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: write
+
 concurrency:
   group: quality-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -17,6 +20,8 @@ jobs:
     steps:
       - name: Baixar o código
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
@@ -24,11 +29,23 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Sincronizar lockfile da correção
+        if: github.event_name == 'pull_request' && github.event.pull_request.number == 68
+        run: |
+          npm install --package-lock-only
+          if ! git diff --quiet -- package-lock.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "Atualiza lockfile das dependências seguras"
+            git push
+          fi
+
       - name: Instalar dependências
         run: npm ci
 
-      - name: Diagnosticar vulnerabilidades
-        run: npm audit --json || true
+      - name: Bloquear vulnerabilidades altas
+        run: npm audit --audit-level=high
 
       - name: Verificar TypeScript
         run: npm run typecheck

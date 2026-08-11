@@ -636,8 +636,15 @@ export function ChatPanel({
       modeRef.current === "app" ||
       (modeRef.current !== "site" && (genModeRef.current === "real" || looksLikeApp(contextualContent)));
     const hasCurrentProject = !!(codeRef.current || filesRef.current?.length);
+    // A primeira geração real nunca deve depender da heurística de complexidade:
+    // mesmo um pedido curto pode produzir muitos arquivos e ultrapassar o limite
+    // da requisição síncrona. Sem anexos/seleção visual, ela sempre usa a fila.
+    const mustQueueFirstGeneration = !hasCurrentProject
+      && requestAttachments.length === 0
+      && !activeVisualSelection;
     const useStagedBuild = !isAutoFix && useApp && genModeRef.current === "real" && !!(
       resumedJob ||
+      mustQueueFirstGeneration ||
       shouldStageInitialBuild(contextualContent, requestAttachments, hasCurrentProject) ||
       shouldStageRefinement(contextualContent, requestAttachments, hasCurrentProject)
     );

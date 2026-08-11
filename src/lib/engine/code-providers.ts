@@ -342,9 +342,15 @@ function reasonFromException(provider: string, model: string, e: any): string {
 function providerTimeoutMs(a: Args, repair = false): number {
   const isRefinement = !!(a.currentFiles?.length || a.currentCode);
   const isStaged = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
-  if (isStaged) return repair ? 18_000 : 38_000;
+  // O worker dispõe de até 245 s. O limite antigo de 38 s abortava o Sonnet
+  // antes que ele terminasse até a fundação mínima, causando três cobranças e
+  // nenhum preview. Reservamos tempo suficiente para uma resposta e, quando
+  // necessário, uma única normalização de formato no mesmo worker.
+  if (isStaged) return repair ? 60_000 : 135_000;
   if (isRefinement) return repair ? 60_000 : 90_000;
-  return 120_000;
+  // A primeira geração pode produzir um projeto completo. Com o teto da rota
+  // em 280 s, 180 s ainda deixam margem para imagens, persistência e resposta.
+  return 180_000;
 }
 
 function responseText(value: any): string | null {

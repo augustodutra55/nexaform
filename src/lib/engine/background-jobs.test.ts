@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   BACKGROUND_GENERATION_VERSION,
+  BACKGROUND_MAX_ATTEMPTS,
   backgroundJobLabel,
   isBackgroundGenerationPayload,
   isBackgroundJobSnapshot,
+  isRetryableBackgroundFailure,
   isTerminalJobStatus,
   nextBackgroundJobStatus,
   retryDelaySeconds,
@@ -27,7 +29,18 @@ describe("background generation jobs", () => {
     expect(nextBackgroundJobStatus({
       status: "running",
       succeeded: false,
-      attempts: 3,
+      attempts: BACKGROUND_MAX_ATTEMPTS,
+    })).toBe("failed");
+  });
+
+  it("não repete falhas permanentes e permite uma repetição transitória", () => {
+    expect(isRetryableBackgroundFailure("OpenRouter: HTTP 402 — sem saldo.")).toBe(false);
+    expect(isRetryableBackgroundFailure("O modelo não respondeu dentro do tempo limite.")).toBe(true);
+    expect(nextBackgroundJobStatus({
+      status: "running",
+      succeeded: false,
+      attempts: 1,
+      retryable: false,
     })).toBe("failed");
   });
 
@@ -40,10 +53,10 @@ describe("background generation jobs", () => {
     })).toBe("cancelled");
   });
 
-  it("aplica espera exponencial limitada a 15 minutos", () => {
-    expect(retryDelaySeconds(1)).toBe(30);
-    expect(retryDelaySeconds(2)).toBe(60);
-    expect(retryDelaySeconds(10)).toBe(900);
+  it("aplica espera curta e limitada a 2 minutos", () => {
+    expect(retryDelaySeconds(1)).toBe(10);
+    expect(retryDelaySeconds(2)).toBe(20);
+    expect(retryDelaySeconds(10)).toBe(120);
   });
 
   it("aceita somente payload da etapa e do projeto corretos", () => {
@@ -88,9 +101,9 @@ describe("background generation jobs", () => {
   });
 
   it("explica o estado da fila em linguagem de interface", () => {
-    expect(backgroundJobLabel("queued")).toBe("Na fila");
-    expect(backgroundJobLabel("running")).toBe("Gerando em segundo plano");
-    expect(backgroundJobLabel("retry", 1)).toContain("2/3");
+    expect(backgroundJobLabel("queued")).toBe("Na fila · aguardando execução");
+    expect(backgroundJobLabel("running", 1)).toBe("Gerando etapa · tentativa 1/2");
+    expect(backgroundJobLabel("retry", 1)).toContain("2/2");
     expect(backgroundJobLabel("completed")).toBe("Aplicando resultado");
   });
 });

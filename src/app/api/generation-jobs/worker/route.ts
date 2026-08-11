@@ -5,6 +5,7 @@ import { isAppCode, isMultiFile } from "@/lib/engine/app-types";
 import {
   BACKGROUND_MAX_ATTEMPTS,
   isBackgroundGenerationPayload,
+  isRetryableBackgroundFailure,
   nextBackgroundJobStatus,
   retryDelaySeconds,
 } from "@/lib/engine/background-jobs";
@@ -12,7 +13,13 @@ import { buildStagePrompt, buildStageRetryPrompt, stagedStages } from "@/lib/eng
 import { classifyGenerationFailure, safeOperationalMessage } from "@/lib/engine/observability";
 
 export const maxDuration = 300;
-const WORKER_MAX_MS = Math.min(65_000, Number(process.env.GEN_MAX_MS) || 65_000);
+const configuredMaxMs = Number(process.env.GEN_MAX_MS);
+const WORKER_MAX_MS = Math.min(
+  245_000,
+  Number.isFinite(configuredMaxMs) && configuredMaxMs > 0
+    ? Math.max(90_000, configuredMaxMs)
+    : 245_000
+);
 
 function authorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -165,12 +172,15 @@ export async function GET(req: NextRequest) {
       succeeded: false,
       attempts,
       maxAttempts: BACKGROUND_MAX_ATTEMPTS,
+      retryable: isRetryableBackgroundFailure(message),
     });
     const delay = retryDelaySeconds(attempts);
     await admin.from("staged_generation_jobs").update({
       status,
       last_error: message.slice(0, 800),
-      next_attempt_at: new Date(Date.now() + delay * 1000).toISOString(),
+      next_attempt_at: status === "retry"
+        ? new Date(Date.now() + delay * 1000).toISOString()
+        : new Date().toISOString(),
       locked_at: null,
       locked_by: null,
       completed_at: status === "failed" ? new Date().toISOString() : null,

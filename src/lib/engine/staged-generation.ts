@@ -104,7 +104,7 @@ export function shouldStageInitialBuild(
     .filter((attachment) => attachment.kind === "text")
     .map((attachment) => attachment.content)
     .join("\n");
-  const specification = `${message}\n${attachmentText}`;
+  const specification = `${sanitizeGenerationPrompt(message)}\n${attachmentText}`;
   const bulletCount = (specification.match(/^\s*(?:[-*]|\d+[.)])\s+/gm) || []).length;
   const headingCount = (specification.match(/^\s*[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s/()-]{5,}$/gm) || []).length;
   const scopeScore = COMPLEX_SCOPE.reduce((score, pattern) => score + (pattern.test(specification) ? 1 : 0), 0);
@@ -125,7 +125,7 @@ export function shouldStageRefinement(
     .filter((attachment) => attachment.kind === "text")
     .map((attachment) => attachment.content)
     .join("\n");
-  const specification = `${message}\n${attachmentText}`;
+  const specification = `${sanitizeGenerationPrompt(message)}\n${attachmentText}`;
   const bulletCount = (specification.match(/^\s*(?:[-*]|\d+[.)])\s+/gm) || []).length;
   const headingCount = (specification.match(/^\s*[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s/()-]{5,}$/gm) || []).length;
   const scopeScore = COMPLEX_SCOPE.reduce((score, pattern) => score + (pattern.test(specification) ? 1 : 0), 0);
@@ -135,17 +135,48 @@ export function shouldStageRefinement(
     || (specification.length >= 900 && (scopeScore >= 2 || headingCount >= 4));
 }
 
+const OPERATIONAL_ERROR_MARKER = /\bOps\s*[—-]\s*(?:Não foi possível reservar sua geração|A geração passou do tempo limite|A geração real falhou|A edição não foi aplicada)/i;
+
+/**
+ * Remove mensagens operacionais que foram copiadas acidentalmente para o
+ * compositor. Em produção elas costumam vir seguidas pela repetição integral
+ * da solicitação; enviar esse conteúdo de volta ao modelo aumenta custo,
+ * confunde a saída e pode disparar a construção por etapas sem necessidade.
+ */
+export function sanitizeGenerationPrompt(input: string): string {
+  const normalized = input.replace(/\r\n?/g, "\n").trim();
+  const marker = normalized.search(OPERATIONAL_ERROR_MARKER);
+  const withoutOperationalError = marker >= 20
+    ? normalized.slice(0, marker).trim()
+    : normalized;
+
+  // Remove apenas uma duplicação grande e exata. A comparação normalizada
+  // preserva requisitos legítimos repetidos em frases curtas.
+  const halfway = Math.floor(withoutOperationalError.length / 2);
+  for (let offset = Math.max(300, halfway - 120); offset <= halfway + 120; offset += 1) {
+    const first = withoutOperationalError.slice(0, offset).trim();
+    const second = withoutOperationalError.slice(offset).trim();
+    if (first.length < 300 || second.length < 300) continue;
+    const compactFirst = first.replace(/\s+/g, " ");
+    const compactSecond = second.replace(/\s+/g, " ");
+    if (compactFirst === compactSecond) return first;
+  }
+
+  return withoutOperationalError;
+}
+
 /** Incorpora anexos de texto à especificação que acompanhará todas as etapas. */
 export function buildMasterPrompt(message: string, attachments: PromptAttachment[]): string {
   const textAttachments = attachments.filter((attachment) => attachment.kind === "text");
-  if (!textAttachments.length) return message.trim();
+  const cleanMessage = sanitizeGenerationPrompt(message);
+  if (!textAttachments.length) return cleanMessage;
   const blocks = textAttachments.map((attachment) =>
     `--- ANEXO: ${attachment.name} ---\n${attachment.content}\n--- FIM DO ANEXO ---`
   );
   // Reserva contexto para os arquivos que crescem a cada etapa e para o system
   // prompt. Especificações muito maiores continuam anexáveis, mas a orquestração
   // usa no máximo 80 mil caracteres para não estourar o contexto nos refinamentos.
-  return `${message.trim()}\n\n${blocks.join("\n\n")}`.slice(0, 80_000);
+  return `${cleanMessage}\n\n${blocks.join("\n\n")}`.slice(0, 80_000);
 }
 
 /** Etapas pequenas o bastante para cada resposta continuar válida e aplicável. */
@@ -155,7 +186,7 @@ export function stagedBuildStages(): StagedBuildStage[] {
       id: "foundation",
       label: "Fundação e navegação",
       instruction:
-        "Crie somente uma fundação mínima que abra no preview: App.jsx fino, layout principal responsivo e navegação entre no máximo 3 telas essenciais. Não implemente autenticação, CRUD, automações, mídia nem todos os fluxos agora; isso pertence às próximas etapas. Gere no máximo 5 arquivos pequenos e mantenha cada arquivo abaixo de 120 linhas.",
+        "Crie somente uma fundação mínima que abra no preview: App.jsx fino, um layout responsivo e uma única tela inicial utilizável. Não implemente autenticação, CRUD, automações, mídia, integrações nem todos os fluxos agora; isso pertence às próximas etapas. Gere no máximo 3 arquivos pequenos e mantenha cada arquivo abaixo de 120 linhas.",
     },
     {
       id: "core-data",
@@ -231,6 +262,7 @@ export function buildStagePrompt(
   total: number,
   kind: "initial" | "refinement" = "initial"
 ): string {
+  const cleanMasterPrompt = sanitizeGenerationPrompt(masterPrompt);
   return [
     `${kind === "refinement" ? "REFINAMENTO" : "CONSTRUÇÃO"} POR ETAPAS — ETAPA ${index + 1} DE ${total}: ${stage.label}.`,
     stage.instruction,
@@ -241,7 +273,7 @@ export function buildStagePrompt(
       : "O projeto atual já contém as etapas anteriores. Use obrigatoriamente ops e mude somente o necessário para esta etapa.",
     "A especificação completa é a referência do produto, mas NÃO deve ser implementada inteira nesta resposta:",
     "--- ESPECIFICAÇÃO MESTRA ---",
-    masterPrompt,
+    cleanMasterPrompt,
     "--- FIM DA ESPECIFICAÇÃO MESTRA ---",
   ].join("\n\n");
 }

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildMasterPrompt,
+  buildStagePrompt,
   isValidStagedBuildJob,
+  sanitizeGenerationPrompt,
+  shouldStageInitialBuild,
+  stagedBuildStages,
   stagedJobForCloud,
   STAGED_BUILD_VERSION,
   type StagedBuildJob,
@@ -45,6 +50,27 @@ const job: StagedBuildJob = {
 };
 
 describe("retomada da geração por etapas", () => {
+  it("remove erro operacional e a especificação duplicada do prompt", () => {
+    const request = `${"Crie uma esmalteria com agenda, notificações, paleta de cores e experiência elegante. ".repeat(4)}Inclua cadastro de clientes, horários disponíveis e confirmação pelo WhatsApp.`.trim();
+    const polluted = `${request} Ops — Não foi possível reservar sua geração. Tente novamente. ${request}`;
+    expect(sanitizeGenerationPrompt(polluted)).toBe(request);
+    expect(buildMasterPrompt(polluted, [])).not.toContain("Ops —");
+    expect(shouldStageInitialBuild(polluted, [], false)).toBe(false);
+  });
+
+  it("limpa também trabalhos já persistidos antes de montar a etapa", () => {
+    const request = "Crie uma esmalteria com agenda e notificações para clientes.";
+    const prompt = buildStagePrompt(
+      `${request} Ops — A geração passou do tempo limite. ${request}`,
+      stagedBuildStages()[0],
+      0,
+      7
+    );
+    expect(prompt).toContain(request);
+    expect(prompt).not.toContain("Ops —");
+    expect(prompt).toContain("no máximo 3 arquivos");
+  });
+
   it("aceita um trabalho compatível com o projeto e a conversa", () => {
     expect(isValidStagedBuildJob(job, "project-1", "thread-1")).toBe(true);
   });

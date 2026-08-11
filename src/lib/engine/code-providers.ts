@@ -31,6 +31,10 @@ interface Args {
   attachments?: PromptAttachment[];
   /** Arquivos confiáveis já enviados à Central de Mídia do projeto. */
   mediaAssets?: GenerationMediaAsset[];
+  /** Tentativa transacional da fila; usada apenas para diagnóstico e limites. */
+  backgroundAttempt?: number;
+  /** Na fila, uma resposta inválida vira retry em vez de duplicar a chamada no mesmo worker. */
+  skipQualityRepair?: boolean;
 }
 
 /** Normaliza e valida os arquivos devolvidos pelo modelo. */
@@ -64,22 +68,51 @@ function parse(
   current?: AppFile[] | null
 ): AppGenerationResult | null {
   try {
-    const operationBlocks = current?.length ? parseOperationBlocks(text) : null;
+    const operationBlocks = parseOperationBlocks(text);
     const cleaned = text.replace(/^```(?:json)?/m, "").replace(/```\s*$/m, "").trim();
-    // Interpretação ROBUSTA: tenta o texto direto; se falhar (o modelo às vezes
-    // manda uma frase antes/depois do JSON, ou cerca a mais), isola do primeiro
-    // "{" até o último "}" e tenta de novo. Assim uma resposta boa não é
-    // descartada só por causa de texto em volta.
-    let j: any = operationBlocks;
-    if (!j) {
-      try {
-        j = JSON.parse(cleaned);
-      } catch {
-        const first = cleaned.indexOf("{");
-        const last = cleaned.lastIndexOf("}");
-        if (first < 0 || last <= first) throw new Error("sem objeto JSON");
-        j = JSON.parse(cleaned.slice(first, last + 1));
+    // Alguns modelos devolvem arquivos como AD_FILE ou títulos Markdown seguidos
+    // de cercas de código. Na primeira etapa esses arquivos completos já são um
+    // projeto válido e devem ser aproveitados sem cobrar outra geração.
+    let blockEnvelope: any = null;
+    if (operationBlocks) {
+      if (current?.length) {
+        blockEnvelope = operationBlocks;
+      } else {
+        const blockFiles: Array<{ path: string; content: string }> = [];
+        let completeFilesOnly = true;
+        for (const operation of operationBlocks.ops) {
+          if (operation.op !== "create" && operation.op !== "update") {
+            completeFilesOnly = false;
+            break;
+          }
+          blockFiles.push({ path: operation.path, content: operation.content });
+        }
+        if (completeFilesOnly && blockFiles.length) {
+          blockEnvelope = { files: blockFiles, reply: operationBlocks.reply };
+        }
       }
+    }
+
+    // Interpretação robusta: tenta texto direto, cada cerca JSON e o maior
+    // objeto aparente. Não altera conteúdo nem tenta adivinhar JSON truncado.
+    let j: any = blockEnvelope;
+    if (!j) {
+      const candidates = [cleaned];
+      const fencedPattern = /```(?:json)?[^\S\r\n]*\r?\n([\s\S]*?)```/gi;
+      let fencedMatch: RegExpExecArray | null;
+      while ((fencedMatch = fencedPattern.exec(text)) !== null) {
+        candidates.push(fencedMatch[1].trim());
+      }
+      const first = cleaned.indexOf("{");
+      const last = cleaned.lastIndexOf("}");
+      if (first >= 0 && last > first) candidates.push(cleaned.slice(first, last + 1));
+      for (const candidate of candidates) {
+        try {
+          j = JSON.parse(candidate);
+          break;
+        } catch {}
+      }
+      if (!j) throw new Error("sem resposta estruturada aproveitável");
     }
 
     // Edição cirúrgica: aplica ops sobre os arquivos atuais (refinamento).
@@ -168,8 +201,8 @@ function systemPromptFor(a: Args): string {
 function maxOutputTokens(a: Args): number {
   const isRefinement = !!(a.currentFiles?.length || a.currentCode);
   const isStaged = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
-  if (isStaged && isRefinement) return 5_000;
-  if (isStaged) return 8_000;
+  if (isStaged && isRefinement) return 3_000;
+  if (isStaged) return 4_500;
   // Refinamentos comuns agora usam patches curtos. Reservar 8k tokens fazia o
   // OpenRouter recusar pedidos por saldo mesmo quando a resposta precisava de
   // poucas centenas de tokens.
@@ -309,7 +342,7 @@ function reasonFromException(provider: string, model: string, e: any): string {
 function providerTimeoutMs(a: Args, repair = false): number {
   const isRefinement = !!(a.currentFiles?.length || a.currentCode);
   const isStaged = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
-  if (isStaged) return repair ? 45_000 : 75_000;
+  if (isStaged) return repair ? 25_000 : 55_000;
   if (isRefinement) return repair ? 60_000 : 90_000;
   return 120_000;
 }
@@ -373,6 +406,10 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
     if (r) {
       const quality = assessCandidate(r, a);
       if (quality.valid) return r;
+      if (a.skipQualityRepair) {
+        diag.push(`Claude: ${model} falhou no quality gate; a fila fará uma nova tentativa curta.`);
+        return null;
+      }
       diag.push(`Claude: ${model} gerou código estruturalmente inválido; quality gate iniciou uma correção.`);
       const qualityRes = await send([
         ...initialMessages,
@@ -468,6 +505,10 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
     if (r) {
       const quality = assessCandidate(r, a);
       if (quality.valid) return r;
+      if (a.skipQualityRepair) {
+        diag.push(`OpenRouter: ${model} falhou no quality gate; a fila fará uma nova tentativa curta.`);
+        return null;
+      }
       diag.push(`OpenRouter: ${model} gerou código estruturalmente inválido; quality gate iniciou uma correção.`);
       const qualityRes = await send([
         ...initialMessages,

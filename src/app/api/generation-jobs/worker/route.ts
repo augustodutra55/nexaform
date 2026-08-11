@@ -12,7 +12,7 @@ import { buildStagePrompt, buildStageRetryPrompt, stagedStages } from "@/lib/eng
 import { classifyGenerationFailure, safeOperationalMessage } from "@/lib/engine/observability";
 
 export const maxDuration = 300;
-const WORKER_MAX_MS = Math.min(210_000, Number(process.env.GEN_MAX_MS) || 200_000);
+const WORKER_MAX_MS = Math.min(65_000, Number(process.env.GEN_MAX_MS) || 65_000);
 
 function authorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -146,6 +146,10 @@ export async function GET(req: NextRequest) {
         allowTemplate: false,
         attachments: [],
         mediaAssets: [],
+        backgroundAttempt: attempts,
+        // Cada execução faz uma única chamada limitada. Se o quality gate recusar,
+        // a própria fila tenta novamente sem deixar a interface presa por minutos.
+        skipQualityRepair: true,
       }),
       new Promise<typeof TIMEOUT>((resolve) => setTimeout(() => resolve(TIMEOUT), WORKER_MAX_MS)),
     ]);

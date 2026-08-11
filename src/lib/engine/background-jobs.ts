@@ -51,9 +51,9 @@ export function backgroundJobLabel(
 ): string {
   switch (status) {
     case "queued":
-      return "Na fila";
+      return "Na fila · aguardando execução";
     case "running":
-      return "Gerando em segundo plano";
+      return `Gerando · tentativa ${Math.max(1, attempts)}/${BACKGROUND_MAX_ATTEMPTS}`;
     case "retry":
       return `Nova tentativa${attempts > 0 ? ` ${attempts + 1}/${BACKGROUND_MAX_ATTEMPTS}` : ""}`;
     case "completed":
@@ -109,7 +109,7 @@ export function nextBackgroundJobStatus(input: {
 
 export function retryDelaySeconds(attempts: number): number {
   const safeAttempts = Math.max(1, Math.min(10, Math.floor(attempts)));
-  return Math.min(900, 30 * Math.pow(2, safeAttempts - 1));
+  return Math.min(120, 10 * Math.pow(2, safeAttempts - 1));
 }
 
 export function isBackgroundGenerationPayload(

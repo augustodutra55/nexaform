@@ -139,7 +139,9 @@ export async function GET(req: NextRequest) {
         name: payload.name,
         userKey: process.env.OPENROUTER_API_KEY,
         userProvider: "openrouter",
-        costMode: payload.costMode,
+        // Depois da primeira falha, priorize o modelo de código mais confiável.
+        // A redução de escopo do retry limita custo e tamanho da resposta.
+        costMode: attempts >= 2 ? "premium" : payload.costMode,
         forceReal: true,
         allowTemplate: false,
         attachments: [],

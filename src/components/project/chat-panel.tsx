@@ -923,7 +923,11 @@ export function ChatPanel({
       return true;
     } catch (err: any) {
       if (activeStagedJob) {
-        await storeStagedJob(activeStagedJob);
+        // A fila usa um payload próprio com reserva, tentativas e diagnóstico.
+        // Nunca o sobrescreva com o formato leve de retomada do navegador,
+        // pois isso apagaria last_error e tornaria o job inválido para o worker.
+        if (useBackgroundBuild) storeLocalStagedJob(activeStagedJob);
+        else await storeStagedJob(activeStagedJob);
         const current = Math.min(activeStagedJob.nextStage + 1, stagedStages(activeStagedJob.kind ?? "initial").length);
         const paused = err?.name === "AbortError"
           ? `⏸️ Construção pausada antes da etapa ${current}. Todo o progresso anterior foi salvo.`
@@ -1164,6 +1168,11 @@ export function ChatPanel({
                 <p className="mt-1 text-xs text-muted-foreground">
                   As etapas anteriores estão salvas. A próxima é {resumeJob.nextStage + 1} de {stagedStages(resumeJob.kind ?? "initial").length}.
                 </p>
+                {backgroundJob?.status === "failed" && backgroundJob.last_error && (
+                  <p className="mt-2 rounded-md bg-background/70 p-2 text-xs text-destructive">
+                    Motivo técnico: {backgroundJob.last_error}
+                  </p>
+                )}
               </div>
             </div>
             <Button

@@ -155,7 +155,7 @@ export function stagedBuildStages(): StagedBuildStage[] {
       id: "foundation",
       label: "Fundação e navegação",
       instruction:
-        "Crie a fundação funcional e navegável do produto. Implemente o sistema visual, App.jsx fino, navegação responsiva, autenticação via AD.auth se solicitada, dados de demonstração e somente os 3 a 5 fluxos mais importantes. Gere no máximo 10 arquivos pequenos. Não tente concluir toda a especificação nesta etapa.",
+        "Crie somente uma fundação mínima que abra no preview: App.jsx fino, layout principal responsivo e navegação entre no máximo 3 telas essenciais. Não implemente autenticação, CRUD, automações, mídia nem todos os fluxos agora; isso pertence às próximas etapas. Gere no máximo 5 arquivos pequenos e mantenha cada arquivo abaixo de 120 linhas.",
     },
     {
       id: "core-data",
@@ -257,6 +257,6 @@ export function buildStageRetryPrompt(
   return [
     buildStagePrompt(masterPrompt, stage, index, total, kind),
     "RECUPERAÇÃO AUTOMÁTICA: a tentativa anterior desta etapa não concluiu.",
-    "Reduza o escopo agora: implemente somente a parte mais importante desta etapa e altere/crie no máximo 2 arquivos curtos. Não reenvie arquivos inalterados, não reescreva o projeto e não tente compensar recursos de etapas futuras. Para arquivos existentes use AD_PATCH com AD_SEARCH literal e único; use AD_FILE apenas para arquivos novos. Nunca use JSON.",
+    "Reduza drasticamente o escopo agora. Se esta for a primeira etapa, entregue apenas uma aplicação mínima executável com App.jsx, um componente de layout e uma tela inicial — no máximo 3 arquivos, sem imagens, autenticação, backend, animações ou integrações. Nas demais etapas, implemente apenas uma mudança essencial em no máximo 2 arquivos curtos. Não reenvie arquivos inalterados, não tente concluir etapas futuras e nunca use JSON. Para arquivos existentes use AD_PATCH com AD_SEARCH literal e único; use AD_FILE apenas para arquivos novos.",
   ].join("\n\n");
 }

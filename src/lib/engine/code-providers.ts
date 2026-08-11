@@ -342,7 +342,7 @@ function reasonFromException(provider: string, model: string, e: any): string {
 function providerTimeoutMs(a: Args, repair = false): number {
   const isRefinement = !!(a.currentFiles?.length || a.currentCode);
   const isStaged = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
-  if (isStaged) return repair ? 25_000 : 55_000;
+  if (isStaged) return repair ? 18_000 : 38_000;
   if (isRefinement) return repair ? 60_000 : 90_000;
   return 120_000;
 }
@@ -370,11 +370,13 @@ function responseFormatSummary(text: string): string {
 /** Segunda passagem usada somente quando um refinamento veio com conteúdo útil,
  * mas fora do JSON ops exigido. Mantém a correção no mesmo modelo forte e evita
  * descartar uma edição por cerca Markdown, aspas ou quebras não escapadas. */
-function formatRepairInstruction(): string {
+function formatRepairInstruction(hasCurrentProject: boolean): string {
   return [
     "A resposta anterior não pôde ser aplicada no projeto.",
     "Reenvie a MESMA alteração, sem ampliar o escopo e sem usar JSON.",
-    "Para arquivo existente, use <AD_PATCH path=\"caminho.jsx\"><AD_SEARCH>trecho literal e único do arquivo atual</AD_SEARCH><AD_REPLACE>novo trecho bruto</AD_REPLACE></AD_PATCH>. Para arquivo novo use <AD_FILE path=\"caminho.jsx\" op=\"create\">conteúdo completo</AD_FILE>. Para remover use <AD_DELETE path=\"caminho.jsx\" />.",
+    hasCurrentProject
+      ? "Para arquivo existente, use <AD_PATCH path=\"caminho.jsx\"><AD_SEARCH>trecho literal e único do arquivo atual</AD_SEARCH><AD_REPLACE>novo trecho bruto</AD_REPLACE></AD_PATCH>. Para arquivo novo use <AD_FILE path=\"caminho.jsx\" op=\"create\">conteúdo completo</AD_FILE>. Para remover use <AD_DELETE path=\"caminho.jsx\" />."
+      : "O projeto ainda está vazio. Reenvie cada arquivo completo em <AD_FILE path=\"caminho.jsx\" op=\"create\">conteúdo bruto</AD_FILE>. Não use AD_PATCH.",
     "Finalize com <AD_REPLY>resumo curto em pt-BR</AD_REPLY>. Não use explicações fora desses blocos e não reenvie arquivos inalterados.",
   ].join("\n\n");
 }
@@ -430,7 +432,7 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
     }
 
     const isRefinement = !!(a.currentFiles?.length || a.currentCode);
-    const shouldRepair = isRefinement;
+    const shouldRepair = isRefinement || /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
     if (!shouldRepair) {
       diag.push(`Claude: resposta de ${model} não pôde ser interpretada como código (${responseFormatSummary(text)}).`);
       return null;
@@ -440,7 +442,7 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
     const repairRes = await send([
       ...initialMessages,
       { role: "assistant", content: text.slice(0, 60_000) },
-      { role: "user", content: formatRepairInstruction() },
+      { role: "user", content: formatRepairInstruction(isRefinement) },
     ], providerTimeoutMs(a, true));
     if (!repairRes.ok) {
       diag.push(`Claude: recuperação com ${model} → HTTP ${repairRes.status}. ${await errDetail(repairRes)}`);
@@ -531,7 +533,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
     }
 
     const isRefinement = !!(a.currentFiles?.length || a.currentCode);
-    const shouldRepair = isRefinement;
+    const shouldRepair = isRefinement || /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
     if (!shouldRepair) {
       diag.push(`OpenRouter: resposta de ${model} não pôde ser interpretada como código (${responseFormatSummary(text)}).`);
       return null;
@@ -541,7 +543,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
     const repairRes = await send([
       ...initialMessages,
       { role: "assistant", content: text.slice(0, 60_000) },
-      { role: "user", content: formatRepairInstruction() },
+      { role: "user", content: formatRepairInstruction(isRefinement) },
     ], providerTimeoutMs(a, true));
     if (!repairRes.ok) {
       const detail = await errDetail(repairRes);

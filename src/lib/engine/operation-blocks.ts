@@ -85,11 +85,41 @@ export function parseOperationBlocks(text: string): OperationBlockResult | null 
   }
 
   if (!ops.length) {
-    const markdownPattern = /(?:^|\n)(?:#{1,6}\s*)?(?:arquivo\s*:\s*)?`?([\w./-]+\.(?:jsx|tsx|js|ts))`?\s*\r?\n```(?:jsx|tsx|js|ts)?\s*\r?\n([\s\S]*?)```/gi;
-    let markdownMatch: RegExpExecArray | null;
-    while ((markdownMatch = markdownPattern.exec(text)) !== null) {
-      const content = markdownMatch[2].trim();
-      if (content) ops.push({ op: "update", path: markdownMatch[1], content });
+    // Rede de segurança para provedores que ignoram o contrato e devolvem
+    // Markdown. O caminho pode vir em título, negrito, backticks, "Arquivo:",
+    // "File 1:" ou nos metadados da própria cerca.
+    const fencedPattern = /```([^\r\n]*)\r?\n([\s\S]*?)```/g;
+    let fencedMatch: RegExpExecArray | null;
+    while ((fencedMatch = fencedPattern.exec(text)) !== null) {
+      const info = fencedMatch[1].trim();
+      const content = fencedMatch[2].trim();
+      if (!content) continue;
+
+      const infoPath = /(?:filename|file|path|title)\s*=\s*["']?([\w./-]+\.(?:jsx|tsx|js|ts))["']?/i.exec(info)?.[1];
+      const before = text.slice(Math.max(0, fencedMatch.index - 500), fencedMatch.index);
+      const lines = before.split(/\r?\n/).slice(-5).reverse();
+      let headingPath = "";
+      for (const line of lines) {
+        const match = /(?:arquivo|file)?\s*(?:\d+\s*)?(?::|[-–—])?\s*[*_`#>\s]*([\w./-]+\.(?:jsx|tsx|js|ts))[*_`:\s]*$/i.exec(line);
+        if (match?.[1]) {
+          headingPath = match[1];
+          break;
+        }
+      }
+      const path = (infoPath || headingPath || "").replace(/^\.?\//, "");
+      if (path) ops.push({ op: "update", path, content });
+    }
+  }
+
+  if (!ops.length) {
+    // Alguns modelos emitem um objeto "JSON-like" com o caminho como chave e
+    // o conteúdo numa cerca de código. Não tentamos consertar JSON arbitrário:
+    // extraímos apenas pares caminho+cerca, que são atômicos e verificáveis.
+    const jsonLikeFilePattern = /["']?([\w./-]+\.(?:jsx|tsx|js|ts))["']?\s*:\s*```[^\r\n]*\r?\n([\s\S]*?)```/gi;
+    let jsonLikeMatch: RegExpExecArray | null;
+    while ((jsonLikeMatch = jsonLikeFilePattern.exec(text)) !== null) {
+      const content = jsonLikeMatch[2].trim();
+      if (content) ops.push({ op: "update", path: jsonLikeMatch[1], content });
     }
   }
 

@@ -12,11 +12,19 @@ const acceptance = {
   },
 };
 
+const releaseVerification = {
+  version: 1 as const,
+  status: "verified" as const,
+  slug: "cliente-final",
+  checkedAt: "2026-07-23T00:05:00.000Z",
+  bundleBytes: 1200,
+};
+
 describe("entrega comercial", () => {
   it("só libera entrega quando os requisitos obrigatórios estão comprovados", () => {
     const blocked = buildDeliveryChecklist({ meta: {}, published: false, shareSlug: null, canExport: true });
     const ready = buildDeliveryChecklist({
-      meta: { client: "Cliente", acceptance },
+      meta: { client: "Cliente", acceptance, delivery: { releaseVerification } },
       published: true,
       shareSlug: "cliente-final",
       canExport: true,
@@ -34,6 +42,7 @@ describe("entrega comercial", () => {
           ...acceptance,
           runtime: { ...acceptance.runtime, issues: [{ code: "broken", severity: "error", message: "Falha" }] },
         },
+        delivery: { releaseVerification },
       },
       published: true,
       shareSlug: "cliente-final",
@@ -45,7 +54,7 @@ describe("entrega comercial", () => {
 
   it("gera documentação honesta sobre domínio e vínculo com o estúdio", () => {
     const checklist = buildDeliveryChecklist({
-      meta: { client: "Cliente", acceptance },
+      meta: { client: "Cliente", acceptance, delivery: { releaseVerification } },
       published: true,
       shareSlug: "cliente-final",
       canExport: true,
@@ -54,7 +63,7 @@ describe("entrega comercial", () => {
       projectName: "Portal Cliente",
       projectId: "project-id",
       publicUrl: "https://studio.example/p/cliente-final",
-      meta: { client: "Cliente", acceptance, delivery: { customDomain: "app.cliente.com" } },
+      meta: { client: "Cliente", acceptance, delivery: { customDomain: "app.cliente.com", releaseVerification } },
       checklist,
     });
     const readme = files.find((file) => file.path === "ENTREGA.md")?.content || "";
@@ -66,7 +75,12 @@ describe("entrega comercial", () => {
 
   it("permite a entrega de projetos do editor visual sem exigir auditoria de código", () => {
     const checklist = buildDeliveryChecklist({
-      meta: { client: "Cliente" },
+      meta: {
+        client: "Cliente",
+        delivery: {
+          releaseVerification: { ...releaseVerification, slug: "site-visual", bundleBytes: 0 },
+        },
+      },
       published: true,
       shareSlug: "site-visual",
       canExport: true,
@@ -75,5 +89,17 @@ describe("entrega comercial", () => {
 
     expect(deliveryIsReady(checklist)).toBe(true);
     expect(checklist.find((item) => item.id === "quality")?.label).toBe("Editor visual revisado");
+  });
+
+  it("não libera entrega quando o link existe, mas a versão pública não foi executada", () => {
+    const checklist = buildDeliveryChecklist({
+      meta: { client: "Cliente", acceptance },
+      published: true,
+      shareSlug: "cliente-final",
+      canExport: true,
+    });
+
+    expect(checklist.find((item) => item.id === "release-verified")?.complete).toBe(false);
+    expect(deliveryIsReady(checklist)).toBe(false);
   });
 });

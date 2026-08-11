@@ -23,6 +23,10 @@ export function buildDeliveryChecklist(input: DeliveryReadinessInput): DeliveryC
   const runtimeErrors = runtime?.issues.filter((entry) => entry.severity === "error").length ?? 0;
   const qualityRequired = input.qualityRequired !== false;
   const qualityComplete = qualityRequired ? !!structural?.valid && !!runtime && runtimeErrors === 0 : true;
+  const release = input.meta.delivery?.releaseVerification;
+  const releaseVerified = !!input.shareSlug
+    && release?.status === "verified"
+    && release.slug === input.shareSlug;
 
   return [
     {
@@ -46,6 +50,15 @@ export function buildDeliveryChecklist(input: DeliveryReadinessInput): DeliveryC
       label: "Versão publicada",
       detail: "Gere o link final e confirme a versão que o cliente receberá.",
       complete: input.published && !!input.shareSlug,
+      required: true,
+    },
+    {
+      id: "release-verified",
+      label: "Publicação executada e verificada",
+      detail: releaseVerified
+        ? `A versão pública montou corretamente em ${new Date(release!.checkedAt).toLocaleString("pt-BR")}.`
+        : "O AD Studio precisa abrir e validar a versão pública depois da publicação.",
+      complete: releaseVerified,
       required: true,
     },
     {
@@ -143,6 +156,7 @@ ${value(delivery.handoffNotes || input.meta.notes, "Nenhuma observação adicion
         customDomain: delivery.customDomain || null,
         publicUrl: input.publicUrl,
         deliveredAt: delivery.deliveredAt || null,
+        releaseVerification: delivery.releaseVerification || null,
       }, null, 2) + "\n",
     },
     {

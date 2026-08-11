@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AppSchema } from "@/lib/engine/types";
 import { AppFile } from "@/lib/engine/app-types";
 import { PreviewPane } from "@/components/preview/preview-pane";
 import { AppRunner } from "@/components/preview/app-runner";
 import { PrebuiltRunner } from "@/components/preview/prebuilt-runner";
+import { runtimeProbeMessage } from "@/lib/delivery/release-verification";
 
 export function PublicPreview({
   schema,
@@ -23,6 +24,20 @@ export function PublicPreview({
   bundle?: string | null;
 }) {
   const [pageId, setPageId] = useState<string | null>(schema?.pages[0]?.id ?? null);
+
+  useEffect(() => {
+    // Quando a publicação é aberta no verificador oculto do estúdio, repassa
+    // somente o sinal de montagem/erro emitido pelo runtime isolado. A página
+    // pública é same-origin; o iframe do app continua sandboxed e sem cookies.
+    function forwardRuntimeProbe(event: MessageEvent) {
+      if (window.parent === window || event.source === window) return;
+      const message = runtimeProbeMessage(event.data);
+      if (!message) return;
+      window.parent.postMessage(message, window.location.origin);
+    }
+    window.addEventListener("message", forwardRuntimeProbe);
+    return () => window.removeEventListener("message", forwardRuntimeProbe);
+  }, []);
 
   if ((appFiles && appFiles.length) || appCode) {
     return (

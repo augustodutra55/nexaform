@@ -8,7 +8,7 @@ export type BackgroundJobStatus =
   | "cancelled";
 
 export const BACKGROUND_GENERATION_VERSION = 1;
-export const BACKGROUND_MAX_ATTEMPTS = 3;
+export const BACKGROUND_MAX_ATTEMPTS = 2;
 
 export interface BackgroundGenerationPayload {
   version: number;
@@ -53,9 +53,9 @@ export function backgroundJobLabel(
     case "queued":
       return "Na fila · aguardando execução";
     case "running":
-      return `Gerando · tentativa ${Math.max(1, attempts)}/${BACKGROUND_MAX_ATTEMPTS}`;
+      return `Gerando etapa · tentativa ${Math.max(1, attempts)}/${BACKGROUND_MAX_ATTEMPTS}`;
     case "retry":
-      return `Nova tentativa${attempts > 0 ? ` ${attempts + 1}/${BACKGROUND_MAX_ATTEMPTS}` : ""}`;
+      return `Repetição controlada${attempts > 0 ? ` ${attempts + 1}/${BACKGROUND_MAX_ATTEMPTS}` : ""}`;
     case "completed":
       return "Aplicando resultado";
     case "failed":
@@ -101,10 +101,21 @@ export function nextBackgroundJobStatus(input: {
   succeeded: boolean;
   attempts: number;
   maxAttempts?: number;
+  retryable?: boolean;
 }): BackgroundJobStatus {
   if (isTerminalJobStatus(input.status)) return input.status;
   if (input.succeeded) return "completed";
-  return input.attempts >= (input.maxAttempts ?? 3) ? "failed" : "retry";
+  if (input.retryable === false) return "failed";
+  return input.attempts >= (input.maxAttempts ?? BACKGROUND_MAX_ATTEMPTS) ? "failed" : "retry";
+}
+
+/** Evita cobrar outra chamada quando a mesma entrada não pode funcionar. */
+export function isRetryableBackgroundFailure(message: string): boolean {
+  const normalized = message.toLowerCase();
+  if (/cancelad|n[aã]o autoriz|chave rejeitada|n[aã]o configurad|sem cr[eé]dito|sem saldo|http 401|http 402|http 403|http 404|invalid_payload|project_not_found|stage_not_found/.test(normalized)) {
+    return false;
+  }
+  return /tempo|timeout|aborted|rede|network|http 408|http 429|http 5\d\d|formato|interpretad|c[oó]digo v[aá]lido|quality gate/.test(normalized);
 }
 
 export function retryDelaySeconds(attempts: number): number {

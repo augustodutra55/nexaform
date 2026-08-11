@@ -374,7 +374,9 @@ function formatRepairInstruction(hasCurrentProject: boolean): string {
   return [
     "A resposta anterior não pôde ser aplicada no projeto.",
     "Reenvie a MESMA alteração, sem ampliar o escopo e sem usar JSON.",
-    hasCurrentProject\n      ? "Para arquivo existente, use <AD_PATCH path=\\\"caminho.jsx\\\"><AD_SEARCH>trecho literal e único do arquivo atual</AD_SEARCH><AD_REPLACE>novo trecho bruto</AD_REPLACE></AD_PATCH>. Para arquivo novo use <AD_FILE path=\\\"caminho.jsx\\\" op=\\\"create\\\">conteúdo completo</AD_FILE>. Para remover use <AD_DELETE path=\\\"caminho.jsx\\\" />."\n      : "O projeto ainda está vazio. Reenvie cada arquivo completo em <AD_FILE path=\\\"caminho.jsx\\\" op=\\\"create\\\">conteúdo bruto</AD_FILE>. Não use AD_PATCH.",
+    hasCurrentProject
+      ? "Para arquivo existente, use <AD_PATCH path=\"caminho.jsx\"><AD_SEARCH>trecho literal e único do arquivo atual</AD_SEARCH><AD_REPLACE>novo trecho bruto</AD_REPLACE></AD_PATCH>. Para arquivo novo use <AD_FILE path=\"caminho.jsx\" op=\"create\">conteúdo completo</AD_FILE>. Para remover use <AD_DELETE path=\"caminho.jsx\" />."
+      : "O projeto ainda está vazio. Reenvie cada arquivo completo em <AD_FILE path=\"caminho.jsx\" op=\"create\">conteúdo bruto</AD_FILE>. Não use AD_PATCH.",
     "Finalize com <AD_REPLY>resumo curto em pt-BR</AD_REPLY>. Não use explicações fora desses blocos e não reenvie arquivos inalterados.",
   ].join("\n\n");
 }

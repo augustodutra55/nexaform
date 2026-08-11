@@ -237,7 +237,7 @@ export function buildStagePrompt(
     kind === "refinement"
       ? "O projeto atual já existe. Use obrigatoriamente ops, não reenvie arquivos inalterados e não recrie a aplicação."
       : index === 0
-      ? "Esta é a primeira geração. Entregue uma base utilizável agora; as próximas etapas completarão o projeto."
+      ? "Esta é a primeira geração. Entregue uma base utilizável agora; as próximas etapas completarão o projeto. FORMATO OBRIGATÓRIO: devolva somente blocos <AD_FILE path=\"caminho.jsx\" op=\"create\">conteúdo completo</AD_FILE>, um por arquivo, seguidos opcionalmente de <AD_REPLY>resumo curto</AD_REPLY>. Não use JSON, Markdown nem cercas de código."
       : "O projeto atual já contém as etapas anteriores. Use obrigatoriamente ops e mude somente o necessário para esta etapa.",
     "A especificação completa é a referência do produto, mas NÃO deve ser implementada inteira nesta resposta:",
     "--- ESPECIFICAÇÃO MESTRA ---",
@@ -257,6 +257,6 @@ export function buildStageRetryPrompt(
   return [
     buildStagePrompt(masterPrompt, stage, index, total, kind),
     "RECUPERAÇÃO AUTOMÁTICA: a tentativa anterior desta etapa não concluiu.",
-    "Reduza drasticamente o escopo agora. Se esta for a primeira etapa, entregue apenas uma aplicação mínima executável com App.jsx, um componente de layout e uma tela inicial — no máximo 3 arquivos, sem imagens, autenticação, backend, animações ou integrações. Nas demais etapas, implemente apenas uma mudança essencial em no máximo 2 arquivos curtos. Não reenvie arquivos inalterados, não tente concluir etapas futuras e nunca use JSON. Para arquivos existentes use AD_PATCH com AD_SEARCH literal e único; use AD_FILE apenas para arquivos novos.",
+    "Reduza drasticamente o escopo agora. Se esta for a primeira etapa, entregue apenas uma aplicação mínima executável com App.jsx, um componente de layout e uma tela inicial — no máximo 3 arquivos, sem imagens, autenticação, backend, animações ou integrações. Na primeira etapa, devolva cada arquivo completo exclusivamente em <AD_FILE path=\\\"caminho.jsx\\\" op=\\\"create\\\">...</AD_FILE>. Nas demais etapas, implemente apenas uma mudança essencial em no máximo 2 arquivos curtos. Não reenvie arquivos inalterados, não tente concluir etapas futuras e nunca use JSON ou Markdown. Para arquivos existentes use AD_PATCH com AD_SEARCH literal e único; use AD_FILE apenas para arquivos novos.",
   ].join("\n\n");
 }

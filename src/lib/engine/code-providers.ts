@@ -168,8 +168,8 @@ function systemPromptFor(a: Args): string {
 function maxOutputTokens(a: Args): number {
   const isRefinement = !!(a.currentFiles?.length || a.currentCode);
   const isStaged = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
-  if (isStaged && isRefinement) return 6_000;
-  if (isStaged) return 12_000;
+  if (isStaged && isRefinement) return 5_000;
+  if (isStaged) return 8_000;
   // Refinamentos comuns agora usam patches curtos. Reservar 8k tokens fazia o
   // OpenRouter recusar pedidos por saldo mesmo quando a resposta precisava de
   // poucas centenas de tokens.
@@ -610,11 +610,13 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
   // e pode consumir todo o prazo antes de devolver um diagnóstico útil.
   const explicitProvider = !!a.userKey && (a.userProvider === "claude" || a.userProvider === "openrouter");
   const allowEnvironmentFallback = !explicitProvider || !isRefinement;
-  if (allowEnvironmentFallback && process.env.ANTHROPIC_API_KEY && a.userProvider !== "local") {
+  const repeatedAnthropicKey = a.userProvider === "claude" && a.userKey === process.env.ANTHROPIC_API_KEY;
+  const repeatedOpenRouterKey = a.userProvider === "openrouter" && a.userKey === process.env.OPENROUTER_API_KEY;
+  if (allowEnvironmentFallback && !repeatedAnthropicKey && process.env.ANTHROPIC_API_KEY && a.userProvider !== "local") {
     const r = await tryChain("claude", process.env.ANTHROPIC_API_KEY, callClaude);
     if (r) return r;
   }
-  if (allowEnvironmentFallback && process.env.OPENROUTER_API_KEY && a.userProvider !== "local") {
+  if (allowEnvironmentFallback && !repeatedOpenRouterKey && process.env.OPENROUTER_API_KEY && a.userProvider !== "local") {
     const r = await tryChain("openrouter", process.env.OPENROUTER_API_KEY, callOpenRouter);
     if (r) return r;
   }

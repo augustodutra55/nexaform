@@ -71,6 +71,14 @@ describe("retomada da geração por etapas", () => {
     expect(prompt).toContain("no máximo 3 arquivos");
   });
 
+  it("limita a etapa de dados a um fluxo vertical curto", () => {
+    const stage = stagedBuildStages()[1];
+    expect(stage.id).toBe("core-data");
+    expect(stage.instruction).toContain("no máximo 3 arquivos");
+    expect(stage.instruction).toContain("abaixo de 120 linhas");
+    expect(stage.instruction).toContain("entidade central");
+  });
+
   it("aceita um trabalho compatível com o projeto e a conversa", () => {
     expect(isValidStagedBuildJob(job, "project-1", "thread-1")).toBe(true);
   });

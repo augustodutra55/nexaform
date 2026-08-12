@@ -20,22 +20,19 @@ describe("background generation jobs", () => {
     })).toBe("completed");
   });
 
-  it("repete falhas transitórias e encerra no limite", () => {
+  it("pausa na primeira falha sem nova chamada paga automática", () => {
     expect(nextBackgroundJobStatus({
       status: "running",
       succeeded: false,
       attempts: 1,
-    })).toBe("retry");
-    expect(nextBackgroundJobStatus({
-      status: "running",
-      succeeded: false,
-      attempts: BACKGROUND_MAX_ATTEMPTS,
     })).toBe("failed");
+    expect(BACKGROUND_MAX_ATTEMPTS).toBe(1);
   });
 
-  it("não repete falhas permanentes e permite uma repetição transitória", () => {
+  it("não repete falhas permanentes nem transitórias", () => {
     expect(isRetryableBackgroundFailure("OpenRouter: HTTP 402 — sem saldo.")).toBe(false);
-    expect(isRetryableBackgroundFailure("O modelo não respondeu dentro do tempo limite.")).toBe(true);
+    expect(isRetryableBackgroundFailure("O modelo não respondeu dentro do tempo limite.")).toBe(false);
+    expect(isRetryableBackgroundFailure("O código falhou no quality gate.")).toBe(false);
     expect(nextBackgroundJobStatus({
       status: "running",
       succeeded: false,
@@ -102,8 +99,8 @@ describe("background generation jobs", () => {
 
   it("explica o estado da fila em linguagem de interface", () => {
     expect(backgroundJobLabel("queued")).toBe("Na fila · aguardando execução");
-    expect(backgroundJobLabel("running", 1)).toBe("Gerando etapa · tentativa 1/2");
-    expect(backgroundJobLabel("retry", 1)).toContain("2/2");
+    expect(backgroundJobLabel("running", 1)).toBe("Gerando etapa");
+    expect(backgroundJobLabel("retry", 1)).toBe("Etapa aguardando continuação");
     expect(backgroundJobLabel("completed")).toBe("Aplicando resultado");
   });
 });

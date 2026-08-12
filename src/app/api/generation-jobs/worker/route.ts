@@ -7,18 +7,17 @@ import {
   isBackgroundGenerationPayload,
   isRetryableBackgroundFailure,
   nextBackgroundJobStatus,
-  retryDelaySeconds,
 } from "@/lib/engine/background-jobs";
-import { buildStagePrompt, buildStageRetryPrompt, stagedStages } from "@/lib/engine/staged-generation";
+import { buildStagePrompt, stagedStages } from "@/lib/engine/staged-generation";
 import { classifyGenerationFailure, safeOperationalMessage } from "@/lib/engine/observability";
 
 export const maxDuration = 300;
 const configuredMaxMs = Number(process.env.GEN_MAX_MS);
 const WORKER_MAX_MS = Math.min(
-  245_000,
+  140_000,
   Number.isFinite(configuredMaxMs) && configuredMaxMs > 0
     ? Math.max(90_000, configuredMaxMs)
-    : 245_000
+    : 140_000
 );
 
 function authorized(req: NextRequest): boolean {
@@ -126,8 +125,7 @@ export async function GET(req: NextRequest) {
   const currentFiles = current && isMultiFile(current) ? current.files : null;
   const currentCode = current && !isMultiFile(current) ? current.code ?? null : null;
   const attempts = Number(row.attempts) || 1;
-  const promptBuilder = attempts > 1 ? buildStageRetryPrompt : buildStagePrompt;
-  const prompt = promptBuilder(
+  const prompt = buildStagePrompt(
     payload.stagedJob.masterPrompt,
     stage,
     payload.stageIndex,
@@ -146,17 +144,12 @@ export async function GET(req: NextRequest) {
         name: payload.name,
         userKey: process.env.OPENROUTER_API_KEY,
         userProvider: "openrouter",
-        // Depois da primeira falha, priorize o modelo de código mais confiável.
-        // A redução de escopo do retry limita custo e tamanho da resposta.
-        costMode: attempts >= 2 ? "premium" : payload.costMode,
+        costMode: payload.costMode,
         forceReal: true,
         allowTemplate: false,
         attachments: [],
         mediaAssets: [],
         backgroundAttempt: attempts,
-        // Cada execução faz uma única chamada limitada. Se o quality gate recusar,
-        // a própria fila tenta novamente sem deixar a interface presa por minutos.
-        skipQualityRepair: true,
       }),
       new Promise<typeof TIMEOUT>((resolve) => setTimeout(() => resolve(TIMEOUT), WORKER_MAX_MS)),
     ]);
@@ -174,13 +167,10 @@ export async function GET(req: NextRequest) {
       maxAttempts: BACKGROUND_MAX_ATTEMPTS,
       retryable: isRetryableBackgroundFailure(message),
     });
-    const delay = retryDelaySeconds(attempts);
     await admin.from("staged_generation_jobs").update({
       status,
       last_error: message.slice(0, 800),
-      next_attempt_at: status === "retry"
-        ? new Date(Date.now() + delay * 1000).toISOString()
-        : new Date().toISOString(),
+      next_attempt_at: new Date().toISOString(),
       locked_at: null,
       locked_by: null,
       completed_at: status === "failed" ? new Date().toISOString() : null,

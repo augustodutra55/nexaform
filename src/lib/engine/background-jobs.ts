@@ -8,7 +8,12 @@ export type BackgroundJobStatus =
   | "cancelled";
 
 export const BACKGROUND_GENERATION_VERSION = 1;
-export const BACKGROUND_MAX_ATTEMPTS = 2;
+/**
+ * Uma etapa pode consumir uma chamada paga longa. Por isso a fila nunca
+ * repete automaticamente a mesma etapa: uma falha pausa o trabalho e deixa a
+ * decisão de continuar com o usuário, preservando tudo que já foi salvo.
+ */
+export const BACKGROUND_MAX_ATTEMPTS = 1;
 
 export interface BackgroundGenerationPayload {
   version: number;
@@ -53,9 +58,9 @@ export function backgroundJobLabel(
     case "queued":
       return "Na fila · aguardando execução";
     case "running":
-      return `Gerando etapa · tentativa ${Math.max(1, attempts)}/${BACKGROUND_MAX_ATTEMPTS}`;
+      return "Gerando etapa";
     case "retry":
-      return `Repetição controlada${attempts > 0 ? ` ${attempts + 1}/${BACKGROUND_MAX_ATTEMPTS}` : ""}`;
+      return "Etapa aguardando continuação";
     case "completed":
       return "Aplicando resultado";
     case "failed":
@@ -109,13 +114,14 @@ export function nextBackgroundJobStatus(input: {
   return input.attempts >= (input.maxAttempts ?? BACKGROUND_MAX_ATTEMPTS) ? "failed" : "retry";
 }
 
-/** Evita cobrar outra chamada quando a mesma entrada não pode funcionar. */
+/**
+ * Mantido como contrato explícito: nenhuma falha autoriza uma nova chamada
+ * paga automática. Correções curtas acontecem dentro da execução atual; se
+ * ainda falhar, a etapa é pausada para continuação manual.
+ */
 export function isRetryableBackgroundFailure(message: string): boolean {
-  const normalized = message.toLowerCase();
-  if (/cancelad|n[aã]o autoriz|chave rejeitada|n[aã]o configurad|sem cr[eé]dito|sem saldo|http 401|http 402|http 403|http 404|invalid_payload|project_not_found|stage_not_found/.test(normalized)) {
-    return false;
-  }
-  return /tempo|timeout|aborted|rede|network|http 408|http 429|http 5\d\d|formato|interpretad|c[oó]digo v[aá]lido|quality gate/.test(normalized);
+  void message;
+  return false;
 }
 
 export function retryDelaySeconds(attempts: number): number {

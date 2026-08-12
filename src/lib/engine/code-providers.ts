@@ -33,8 +33,6 @@ interface Args {
   mediaAssets?: GenerationMediaAsset[];
   /** Tentativa transacional da fila; usada apenas para diagnóstico e limites. */
   backgroundAttempt?: number;
-  /** Na fila, uma resposta inválida vira retry em vez de duplicar a chamada no mesmo worker. */
-  skipQualityRepair?: boolean;
 }
 
 /** Normaliza e valida os arquivos devolvidos pelo modelo. */
@@ -277,11 +275,14 @@ function assessCandidate(result: AppGenerationResult, a: Args, repaired = false)
   return report;
 }
 
-function qualityRepairInstruction(a: Args, report: ProjectQualityReport): string {
+export function qualityRepairInstruction(a: Pick<Args, "message" | "currentFiles" | "currentCode">, report: ProjectQualityReport): string {
   const failures = report.errors.map((value) => `- ${value.path ? `${value.path}: ` : ""}${value.message}`).join("\n");
+  const isStaged = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
   const format = a.currentFiles?.length || a.currentCode
     ? "Reenvie somente AD_PATCH/AD_FILE/AD_DELETE válidos contra o projeto original, seguidos de AD_REPLY."
-    : "Reenvie o projeto completo no JSON files obrigatório, sem Markdown nem texto fora do JSON.";
+    : isStaged
+      ? "O projeto ainda está vazio. Reenvie cada arquivo completo em blocos AD_FILE com op=\"create\", seguidos de AD_REPLY. Não use JSON, Markdown nem AD_PATCH."
+      : "Reenvie o projeto completo no JSON files obrigatório, sem Markdown nem texto fora do JSON.";
   return [
     "QUALITY GATE: o código anterior foi recusado antes de ser salvo.",
     failures,
@@ -338,15 +339,13 @@ function reasonFromException(provider: string, model: string, e: any): string {
   return `${provider}: falha ao chamar ${model} — ${e?.message || "erro de rede"}.`;
 }
 
-/** Mantém espaço para a rota finalizar e para uma tentativa reduzida da etapa. */
+/** Limites curtos e previsíveis: uma resposta e, no máximo, um reparo dirigido. */
 function providerTimeoutMs(a: Args, repair = false): number {
   const isRefinement = !!(a.currentFiles?.length || a.currentCode);
   const isStaged = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
-  // O worker dispõe de até 245 s. O limite antigo de 38 s abortava o Sonnet
-  // antes que ele terminasse até a fundação mínima, causando três cobranças e
-  // nenhum preview. Reservamos tempo suficiente para uma resposta e, quando
-  // necessário, uma única normalização de formato no mesmo worker.
-  if (isStaged) return repair ? 60_000 : 135_000;
+  // As etapas são pequenas. O reparo recebe os erros exatos e não recria a
+  // etapa inteira. A soma fica abaixo do teto de 140 s do worker.
+  if (isStaged) return repair ? 35_000 : 95_000;
   if (isRefinement) return repair ? 60_000 : 90_000;
   // A primeira geração pode produzir um projeto completo. Com o teto da rota
   // em 280 s, 180 s ainda deixam margem para imagens, persistência e resposta.
@@ -414,10 +413,6 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
     if (r) {
       const quality = assessCandidate(r, a);
       if (quality.valid) return r;
-      if (a.skipQualityRepair) {
-        diag.push(`Claude: ${model} falhou no quality gate; a fila fará uma nova tentativa curta.`);
-        return null;
-      }
       diag.push(`Claude: ${model} gerou código estruturalmente inválido; quality gate iniciou uma correção.`);
       const qualityRes = await send([
         ...initialMessages,
@@ -513,10 +508,6 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
     if (r) {
       const quality = assessCandidate(r, a);
       if (quality.valid) return r;
-      if (a.skipQualityRepair) {
-        diag.push(`OpenRouter: ${model} falhou no quality gate; a fila fará uma nova tentativa curta.`);
-        return null;
-      }
       diag.push(`OpenRouter: ${model} gerou código estruturalmente inválido; quality gate iniciou uma correção.`);
       const qualityRes = await send([
         ...initialMessages,

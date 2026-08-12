@@ -192,7 +192,7 @@ export function stagedBuildStages(): StagedBuildStage[] {
       id: "core-data",
       label: "Cadastros e dados centrais",
       instruction:
-        "Implemente os cadastros, entidades e relacionamentos centrais da especificação usando window.AD. Priorize CRUD funcional, validações, carregamento, vazio e erro. Crie ou altere no máximo 5 arquivos curtos e preserve tudo que já funciona.",
+        "Implemente somente o primeiro fluxo vertical de cadastro indispensável da especificação usando window.AD: lista, criação e edição da entidade central. Inclua validações e estados de carregamento, vazio e erro. Deixe entidades secundárias para as próximas etapas. Crie ou altere no máximo 3 arquivos curtos, abaixo de 120 linhas cada, e preserve tudo que já funciona.",
     },
     {
       id: "core-workflows",

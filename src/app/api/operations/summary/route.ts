@@ -1,10 +1,17 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isOwner } from "@/lib/access";
 import { summarizeGenerationMetrics } from "@/lib/engine/observability";
 
-export async function GET() {
+const ALLOWED_PERIODS = new Set([1, 7, 30]);
+
+function periodFrom(request: NextRequest): number {
+  const raw = Number(request.nextUrl.searchParams.get("days") || 30);
+  return ALLOWED_PERIODS.has(raw) ? raw : 30;
+}
+
+export async function GET(request: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
@@ -15,7 +22,9 @@ export async function GET() {
 
   const admin = createAdminClient();
   if (!admin) return NextResponse.json({ error: "Service role não configurada." }, { status: 503 });
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60_000).toISOString();
+
+  const periodDays = periodFrom(request);
+  const since = new Date(Date.now() - periodDays * 24 * 60 * 60_000).toISOString();
   let migrationRequired = false;
 
   let generations: any[] = [];
@@ -72,9 +81,14 @@ export async function GET() {
     .slice(0, 8);
 
   return NextResponse.json({
-    periodDays: 30,
+    periodDays,
+    periodStartedAt: since,
     migrationRequired,
     metrics,
+    failureBreakdown: Object.entries(metrics.failures || {})
+      .map(([code, count]) => ({ code, count: Number(count) || 0 }))
+      .filter((row) => row.count > 0)
+      .sort((a, b) => b.count - a.count),
     projectsByCost,
     recentFailures: generations
       .filter((row) => row.status === "failed")

@@ -8,12 +8,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 interface Summary {
   periodDays: number;
+  periodStartedAt: string;
   migrationRequired: boolean;
   metrics: {
     total: number; completed: number; failed: number; pending: number;
     successRate: number; cost: number; averageDurationMs: number | null;
     p95DurationMs: number | null; failures: Record<string, number>;
   };
+  failureBreakdown: Array<{ code: string; count: number }>;
   projectsByCost: Array<{ projectId: string; name: string; cost: number; generations: number }>;
   recentFailures: Array<{
     id: string; project: string; provider: string; model: string; code: string;
@@ -26,20 +28,24 @@ interface Summary {
   generatedAt: string;
 }
 
+type Period = 1 | 7 | 30;
+
 const money = (value: number) => `$${value.toFixed(4)}`;
 const duration = (value: number | null) => value == null ? "—" : value >= 60_000
   ? `${(value / 60_000).toFixed(1)} min`
   : `${(value / 1000).toFixed(1)} s`;
+const periodLabel = (days: number) => days === 1 ? "24 horas" : `${days} dias`;
 
 export default function OperationsPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [period, setPeriod] = useState<Period>(1);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/operations/summary", { cache: "no-store" });
+      const response = await fetch(`/api/operations/summary?days=${period}`, { cache: "no-store" });
       const body = await response.json();
       if (!response.ok) throw new Error(body?.error || "Falha ao carregar a operação.");
       setSummary(body);
@@ -48,7 +54,7 @@ export default function OperationsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [period]);
   useEffect(() => { void load(); }, [load]);
 
   if (loading && !summary) {
@@ -66,7 +72,7 @@ export default function OperationsPage() {
     { label: "Taxa de sucesso", value: `${summary.metrics.successRate}%`, detail: `${summary.metrics.completed} concluídas`, icon: CheckCircle2 },
     { label: "Falhas", value: String(summary.metrics.failed), detail: `${summary.metrics.pending} em andamento`, icon: AlertTriangle },
     { label: "Latência p95", value: duration(summary.metrics.p95DurationMs), detail: `média ${duration(summary.metrics.averageDurationMs)}`, icon: Clock3 },
-    { label: "Custo em 30 dias", value: money(summary.metrics.cost), detail: `${summary.metrics.total} gerações`, icon: DollarSign },
+    { label: `Custo em ${periodLabel(summary.periodDays)}`, value: money(summary.metrics.cost), detail: `${summary.metrics.total} gerações`, icon: DollarSign },
   ];
 
   return (
@@ -74,9 +80,33 @@ export default function OperationsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight"><Activity className="h-6 w-6 text-primary" /> Operação</h1>
-          <p className="text-sm text-muted-foreground">Saúde, custo e falhas reais dos últimos {summary.periodDays} dias.</p>
+          <p className="text-sm text-muted-foreground">Saúde, custo e falhas reais da janela atual: {periodLabel(summary.periodDays)}.</p>
         </div>
-        <Button variant="outline" onClick={load} disabled={loading}><RefreshCw className={loading ? "animate-spin" : ""} /> Atualizar</Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-lg border p-1" aria-label="Janela das métricas">
+            {([1, 7, 30] as Period[]).map((days) => (
+              <Button
+                key={days}
+                type="button"
+                size="sm"
+                variant={period === days ? "secondary" : "ghost"}
+                className="h-8 px-3"
+                onClick={() => setPeriod(days)}
+                disabled={loading}
+              >
+                {days === 1 ? "24h" : `${days}d`}
+              </Button>
+            ))}
+          </div>
+          <Button variant="outline" onClick={load} disabled={loading}><RefreshCw className={loading ? "animate-spin" : ""} /> Atualizar</Button>
+        </div>
+      </div>
+
+      <div className="rounded-xl border bg-secondary/20 p-4 text-sm">
+        <p className="font-medium">Régua de paridade em produção</p>
+        <p className="mt-1 text-muted-foreground">
+          Use 24h após cada release para medir a versão atual sem contaminar a decisão com falhas históricas. Meta da fase #83: taxa de conclusão ≥ 90%.
+        </p>
       </div>
 
       {summary.migrationRequired && (
@@ -93,7 +123,18 @@ export default function OperationsPage() {
         </CardContent></Card>)}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-6 xl:grid-cols-3">
+        <Card>
+          <CardHeader><CardTitle>Categorias de falha</CardTitle><CardDescription>O que derrubou a taxa de sucesso nesta janela.</CardDescription></CardHeader>
+          <CardContent className="space-y-3">
+            {summary.failureBreakdown.length ? summary.failureBreakdown.slice(0, 8).map((row) => (
+              <div key={row.code} className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                <span className="truncate text-sm font-medium">{row.code}</span>
+                <Badge variant="destructive">{row.count}</Badge>
+              </div>
+            )) : <p className="text-sm text-muted-foreground">Nenhuma falha classificada nesta janela.</p>}
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader><CardTitle>Custo por projeto</CardTitle><CardDescription>Projetos que mais consumiram IA no período.</CardDescription></CardHeader>
           <CardContent className="space-y-3">

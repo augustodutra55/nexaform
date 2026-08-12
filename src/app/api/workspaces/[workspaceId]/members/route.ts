@@ -7,18 +7,18 @@ function bad(error: string, status = 400) { return NextResponse.json({ error }, 
 async function context(workspaceId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { response: bad("Não autenticado.", 401) };
+  if (!user) return { supabase, response: bad("Não autenticado.", 401) };
   const { data: role, error } = await supabase.rpc("workspace_access_role", { p_workspace_id: workspaceId });
-  if (error) return { response: bad(error.message, 500) };
-  if (role !== "owner" && role !== "admin") return { response: bad("Somente owner/admin gerencia membros.", 403) };
-  return { supabase, user };
+  if (error) return { supabase, response: bad(error.message, 500) };
+  if (role !== "owner" && role !== "admin") return { supabase, response: bad("Somente owner/admin gerencia membros.", 403) };
+  return { supabase, response: null };
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = await params;
   const ctx = await context(workspaceId);
   if (ctx.response) return ctx.response;
-  const { data, error } = await ctx.supabase!.from("workspace_members")
+  const { data, error } = await ctx.supabase.from("workspace_members")
     .select("id,user_id,invited_email,role,status,created_at,updated_at")
     .eq("workspace_id", workspaceId)
     .neq("status", "revoked")
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ wor
     const invitedEmail = normalizeInviteEmail(String(body?.email || ""));
     const role = normalizeMemberRole(String(body?.role || "viewer"));
     const now = new Date().toISOString();
-    const { data, error } = await ctx.supabase!.from("workspace_members").insert({
+    const { data, error } = await ctx.supabase.from("workspace_members").insert({
       workspace_id: workspaceId,
       invited_email: invitedEmail,
       role,
@@ -57,7 +57,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ w
   if (ctx.response) return ctx.response;
   const memberId = new URL(req.url).searchParams.get("memberId");
   if (!memberId) return bad("memberId é obrigatório.");
-  const { error } = await ctx.supabase!.from("workspace_members")
+  const { error } = await ctx.supabase.from("workspace_members")
     .update({ status: "revoked", updated_at: new Date().toISOString() })
     .eq("workspace_id", workspaceId)
     .eq("id", memberId);

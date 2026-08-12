@@ -1,0 +1,35 @@
+name: Produção operacional
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-smoke
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Smoke test da produção
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Aguardar propagação do deploy
+        run: sleep 25
+
+      - name: Validar superfície pública e proteções
+        env:
+          PRODUCTION_URL: https://nexaform-rho.vercel.app
+        run: node scripts/production-smoke.mjs

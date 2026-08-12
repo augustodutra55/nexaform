@@ -12,6 +12,8 @@ export interface VercelDomainConfig {
   teamId?: string;
 }
 
+type DomainEnv = Record<string, string | undefined>;
+
 const DOMAIN_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 export function normalizeCustomDomain(input: string): string {
@@ -25,7 +27,7 @@ export function normalizeCustomDomain(input: string): string {
   return value;
 }
 
-export function vercelDomainConfigFromEnv(env: NodeJS.ProcessEnv = process.env): VercelDomainConfig | null {
+export function vercelDomainConfigFromEnv(env: DomainEnv = process.env): VercelDomainConfig | null {
   const token = env.VERCEL_TOKEN?.trim();
   const projectId = (env.VERCEL_PROJECT_ID || env.VERCEL_PROJECT_NAME)?.trim();
   const teamId = env.VERCEL_TEAM_ID?.trim();

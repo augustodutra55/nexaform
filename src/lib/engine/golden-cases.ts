@@ -5,7 +5,7 @@ export interface GoldenCase {
   name: string;
   prompt: string;
   expectedKind: "site" | "app";
-  expectedProfile: "conversion-commerce" | "product-system" | "premium-brand";
+  expectedProfile: "conversion-commerce" | "product-system" | "premium-brand" | "editorial-luxury";
   requiredCapabilities: string[];
   mediaAssets?: GenerationMediaAsset[];
   expectedVideoMode?: "none" | "placeholder" | "uploaded";
@@ -65,7 +65,7 @@ export const GOLDEN_CASES: GoldenCase[] = [
     name: "Experiência com mídia",
     prompt: "Crie um site institucional premium para uma empresa de arquitetura usando a imagem enviada como referência e inclua uma área de vídeo responsiva com controles. Se não houver vídeo enviado, mostre o placeholder correto para mídia sem inventar URL.",
     expectedKind: "site",
-    expectedProfile: "premium-brand",
+    expectedProfile: "editorial-luxury",
     requiredCapabilities: ["mídia em vídeo responsiva, com controles e fallback"],
     mediaAssets: [
       {

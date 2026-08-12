@@ -24,8 +24,8 @@ describe("custom domain", () => {
   });
 
   it("só habilita Vercel com token e projeto", () => {
-    expect(vercelDomainConfigFromEnv({} as NodeJS.ProcessEnv)).toBeNull();
-    expect(vercelDomainConfigFromEnv({ VERCEL_TOKEN: "t", VERCEL_PROJECT_ID: "p" } as NodeJS.ProcessEnv)).toEqual({
+    expect(vercelDomainConfigFromEnv({})).toBeNull();
+    expect(vercelDomainConfigFromEnv({ VERCEL_TOKEN: "t", VERCEL_PROJECT_ID: "p" })).toEqual({
       token: "t",
       projectId: "p",
       teamId: undefined,

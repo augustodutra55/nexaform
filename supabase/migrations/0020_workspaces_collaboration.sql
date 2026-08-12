@@ -8,6 +8,7 @@ create table if not exists public.workspaces (
 );
 
 create table if not exists public.workspace_members (
+  id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references public.workspaces(id) on delete cascade,
   user_id uuid references auth.users(id) on delete cascade,
   invited_email text,
@@ -15,15 +16,16 @@ create table if not exists public.workspace_members (
   status text not null default 'active' check (status in ('invited','active','revoked')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  primary key (workspace_id, user_id),
   check (user_id is not null or invited_email is not null)
 );
 
 alter table public.projects add column if not exists workspace_id uuid references public.workspaces(id) on delete set null;
 create index if not exists projects_workspace_id_idx on public.projects(workspace_id);
 create index if not exists workspace_members_user_idx on public.workspace_members(user_id, status);
+create unique index if not exists workspace_members_active_user_idx
+  on public.workspace_members(workspace_id, user_id) where user_id is not null and status <> 'revoked';
 create unique index if not exists workspace_members_pending_email_idx
-  on public.workspace_members(workspace_id, lower(invited_email)) where user_id is null and invited_email is not null;
+  on public.workspace_members(workspace_id, lower(invited_email)) where user_id is null and invited_email is not null and status = 'invited';
 
 alter table public.workspaces enable row level security;
 alter table public.workspace_members enable row level security;

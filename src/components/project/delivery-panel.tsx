@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Check, Circle, Copy, ExternalLink, Loader2, PackageCheck, Rocket } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useParams } from "next/navigation";
+import { Check, Circle, Copy, ExternalLink, Globe2, Loader2, PackageCheck, RefreshCw, Rocket, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { ProjectMeta } from "@/lib/studio";
+import type { CustomDomainSnapshot } from "@/lib/delivery/custom-domain";
 import { buildDeliveryChecklist, deliveryIsReady } from "@/lib/delivery/commercial-handoff";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -25,10 +27,16 @@ interface DeliveryPanelProps {
 }
 
 export function DeliveryPanel(props: DeliveryPanelProps) {
+  const params = useParams<{ id: string }>();
+  const projectId = params.id;
   const [open, setOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [publishedSlug, setPublishedSlug] = useState<string | null>(props.shareSlug);
+  const [domainDraft, setDomainDraft] = useState(props.meta.delivery?.customDomain || "");
+  const [domainBusy, setDomainBusy] = useState(false);
+  const [domainStatus, setDomainStatus] = useState<CustomDomainSnapshot | null>(props.meta.delivery?.customDomainStatus || null);
+  const [domainIntegrationConfigured, setDomainIntegrationConfigured] = useState<boolean | null>(null);
   const effectiveSlug = publishedSlug || props.shareSlug;
   const effectivePublished = props.published || !!publishedSlug;
   const checklist = useMemo(() => buildDeliveryChecklist({
@@ -44,6 +52,21 @@ export function DeliveryPanel(props: DeliveryPanelProps) {
   function changeDelivery(patch: NonNullable<ProjectMeta["delivery"]>) {
     props.onMetaChange({ delivery: { ...(props.meta.delivery || {}), ...patch } });
   }
+
+  useEffect(() => {
+    if (!open || !projectId) return;
+    let cancelled = false;
+    void fetch(`/api/domains/${projectId}`, { cache: "no-store" })
+      .then(async (response) => ({ ok: response.ok, data: await response.json().catch(() => null) }))
+      .then(({ ok, data }) => {
+        if (cancelled || !ok || !data) return;
+        setDomainIntegrationConfigured(data.integrationConfigured === true);
+        if (typeof data.domain === "string" && data.domain) setDomainDraft(data.domain);
+        setDomainStatus(data.status || null);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [open, projectId]);
 
   async function publish() {
     setPublishing(true);
@@ -65,6 +88,51 @@ export function DeliveryPanel(props: DeliveryPanelProps) {
     setExporting(true);
     await props.onExport();
     setExporting(false);
+  }
+
+  async function manageDomain(action: "attach" | "verify" | "refresh") {
+    if (!projectId) return;
+    setDomainBusy(true);
+    try {
+      const response = await fetch(`/api/domains/${projectId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action, domain: domainDraft }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || "Não foi possível configurar o domínio.");
+      setDomainDraft(data.domain);
+      setDomainStatus(data.status || null);
+      setDomainIntegrationConfigured(true);
+      changeDelivery({ customDomain: data.domain, customDomainStatus: data.status });
+      toast.success(action === "attach" ? "Domínio conectado" : action === "verify" ? "Verificação solicitada" : "Status do domínio atualizado");
+    } catch (error: any) {
+      toast.error(error?.message || "Falha ao configurar domínio.");
+    } finally {
+      setDomainBusy(false);
+    }
+  }
+
+  async function removeDomain() {
+    if (!projectId || !domainDraft) return;
+    setDomainBusy(true);
+    try {
+      const response = await fetch(`/api/domains/${projectId}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ domain: domainDraft }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || "Não foi possível remover o domínio.");
+      setDomainDraft("");
+      setDomainStatus(null);
+      props.onMetaChange({ delivery: { ...(props.meta.delivery || {}), customDomain: undefined, customDomainStatus: undefined } });
+      toast.success("Domínio removido do projeto");
+    } catch (error: any) {
+      toast.error(error?.message || "Falha ao remover domínio.");
+    } finally {
+      setDomainBusy(false);
+    }
   }
 
   function markDelivered() {
@@ -90,7 +158,7 @@ export function DeliveryPanel(props: DeliveryPanelProps) {
         <DialogHeader>
           <DialogTitle>Central de entrega comercial</DialogTitle>
           <DialogDescription>
-            Configure a marca, publique a versão aprovada e gere o pacote comercial de {props.projectName}.
+            Configure a marca, publique a versão aprovada, conecte o domínio e gere o pacote comercial de {props.projectName}.
           </DialogDescription>
         </DialogHeader>
 
@@ -122,11 +190,46 @@ export function DeliveryPanel(props: DeliveryPanelProps) {
               </div>
               <Switch checked={!!props.meta.whitelabel} onCheckedChange={(checked) => props.onMetaChange({ whitelabel: checked })} />
             </div>
-            <div className="space-y-1.5">
-              <Label>Domínio desejado</Label>
-              <Input defaultValue={props.meta.delivery?.customDomain || ""} onBlur={(event) => changeDelivery({ customDomain: event.target.value.trim() })} placeholder="app.cliente.com.br" />
-              <p className="text-xs text-muted-foreground">Registrar aqui não altera o DNS. Conecte o domínio no provedor de hospedagem e depois configure os registros indicados por ele.</p>
+
+            <div className="space-y-2 rounded-lg border p-3">
+              <div className="flex items-center gap-2">
+                <Globe2 className="h-4 w-4" />
+                <Label>Domínio personalizado</Label>
+              </div>
+              <Input value={domainDraft} onChange={(event) => setDomainDraft(event.target.value)} placeholder="app.cliente.com.br" />
+              {!effectivePublished && <p className="text-xs text-amber-600">Publique a versão aprovada antes de conectar o domínio.</p>}
+              {domainIntegrationConfigured === false && <p className="text-xs text-muted-foreground">A integração Vercel ainda não está configurada no servidor.</p>}
+              {domainStatus && (
+                <div className="rounded-md bg-secondary/50 p-2 text-xs">
+                  <p className="font-medium">{domainStatus.name}</p>
+                  <p className={domainStatus.verified ? "text-emerald-600" : "text-amber-600"}>
+                    {domainStatus.verified ? "Domínio verificado" : "Aguardando verificação"} · {domainStatus.configured ? "configuração reconhecida" : "DNS ainda incorreto"}
+                  </p>
+                  {!!domainStatus.verification?.length && (
+                    <div className="mt-2 space-y-1 text-muted-foreground">
+                      {domainStatus.verification.map((item, index) => (
+                        <p key={`${item.type || "dns"}-${index}`}>{item.type || "DNS"}: {item.domain || domainStatus.name} {item.value ? `→ ${item.value}` : item.reason || "aguardando"}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" size="sm" onClick={() => manageDomain(domainStatus ? "refresh" : "attach")} disabled={domainBusy || !effectivePublished || !domainDraft.trim()}>
+                  {domainBusy ? <Loader2 className="animate-spin" /> : domainStatus ? <RefreshCw /> : <Globe2 />}
+                  {domainStatus ? "Atualizar status" : "Conectar domínio"}
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => manageDomain("verify")} disabled={domainBusy || !domainStatus || domainStatus.verified}>
+                  <Check /> Verificar
+                </Button>
+              </div>
+              {domainStatus && (
+                <Button variant="ghost" size="sm" className="w-full text-destructive" onClick={removeDomain} disabled={domainBusy}>
+                  <Trash2 /> Remover domínio
+                </Button>
+              )}
             </div>
+
             <div className="space-y-1.5">
               <Label>Notas de handoff</Label>
               <Textarea rows={3} defaultValue={props.meta.delivery?.handoffNotes || ""} onBlur={(event) => changeDelivery({ handoffNotes: event.target.value })} placeholder="Acessos, responsáveis, suporte e próximos passos…" />

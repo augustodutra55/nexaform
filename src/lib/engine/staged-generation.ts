@@ -83,14 +83,17 @@ export function stagedJobForCloud(job: StagedBuildJob): StagedBuildJob {
 
 const COMPLEX_SCOPE = [
   /\b(?:tipos?|n[ií]veis?) de (?:usu[aá]rio|acesso)\b/i,
-  /\b(?:painel|dashboard) (?:administrativo|do administrador|do consultor|gerencial)\b/i,
+  /\b(?:painel|dashboard)(?:\s+(?:administrativo|do administrador|do consultor|gerencial|operacional|de gest[aã]o))?\b/i,
   /\b(?:banco de dados|estrutura de dados|tabelas?)\b/i,
-  /\b(?:autentica[çc][aã]o|controle de acesso|permiss[oõ]es|lgpd)\b/i,
+  /\b(?:autentica[çc][aã]o|login|controle de acesso|permiss[oõ]es|lgpd)\b/i,
   /\b(?:whatsapp|e-mail|sms|push|pagamentos?|gateway|api|integra[çc][oõ]es?)\b/i,
   /\b(?:automa[çc][oõ]es?|lembretes? autom[aá]ticos?|notifica[çc][oõ]es?)\b/i,
-  /\b(?:relat[oó]rios?|gr[aá]ficos?|campanhas?|fidelidade)\b/i,
+  /\b(?:relat[oó]rios?|gr[aá]ficos?|kpis?|campanhas?|fidelidade)\b/i,
   /\b(?:hist[oó]rico|auditoria|logs? de atividade)\b/i,
   /\b(?:m[uú]ltiplas? unidades|multi.?tenant|m[uú]ltiplas? empresas)\b/i,
+  /\b(?:agenda|agendamento|reagendamento|cancelamento|hor[aá]rios?)\b/i,
+  /\b(?:cadastro|clientes?|tarefas?|funil|filtros?|busca|pesquisa)\b/i,
+  /\b(?:estados? de (?:vazio|carregando|erro)|loading|empty state)\b/i,
 ];
 
 /** Detecta especificações que não cabem com segurança em uma única resposta. */
@@ -109,8 +112,12 @@ export function shouldStageInitialBuild(
   const headingCount = (specification.match(/^\s*[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s/()-]{5,}$/gm) || []).length;
   const scopeScore = COMPLEX_SCOPE.reduce((score, pattern) => score + (pattern.test(specification) ? 1 : 0), 0);
 
+  // Um pedido curto pode descrever um produto inteiro. Apps com vários fluxos
+  // operacionais (agenda, autenticação, CRUD, dashboard, filtros, estados) não
+  // devem ser forçados a caber numa única resposta apenas porque o texto é curto.
   return specification.length >= 8_000
     || bulletCount >= 45
+    || (specification.length >= 260 && scopeScore >= 3)
     || (specification.length >= 3_500 && (scopeScore >= 5 || headingCount >= 10));
 }
 

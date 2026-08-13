@@ -28,7 +28,7 @@ jobs:
     env:
       PRODUCTION_URL: ${{ inputs.production_url }}
       AD_GOLDEN_PROJECT_ID: ${{ inputs.project_id }}
-      AD_GOLDEN_SESSION_COOKIE: ${{ secrets.AD_GOLDEN_SESSION_COOKIE }}
+      AD_GOLDEN_SERVICE_SECRET: ${{ secrets.AD_GOLDEN_SERVICE_SECRET }}
     steps:
       - name: Baixar o código
         uses: actions/checkout@v4
@@ -38,11 +38,11 @@ jobs:
         with:
           node-version: 22
 
-      - name: Verificar credencial de teste
+      - name: Verificar credencial de serviço
         shell: bash
         run: |
-          if [ -z "$AD_GOLDEN_SESSION_COOKIE" ]; then
-            echo "::error::Configure o secret AD_GOLDEN_SESSION_COOKIE com uma sessão temporária do owner antes de rodar a suíte real."
+          if [ -z "$AD_GOLDEN_SERVICE_SECRET" ]; then
+            echo "::error::Configure uma única vez o secret AD_GOLDEN_SERVICE_SECRET com o mesmo valor usado na Vercel."
             exit 1
           fi
 

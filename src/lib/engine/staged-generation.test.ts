@@ -55,7 +55,19 @@ describe("retomada da geração por etapas", () => {
     const polluted = `${request} Ops — Não foi possível reservar sua geração. Tente novamente. ${request}`;
     expect(sanitizeGenerationPrompt(polluted)).toBe(request);
     expect(buildMasterPrompt(polluted, [])).not.toContain("Ops —");
-    expect(shouldStageInitialBuild(polluted, [], false)).toBe(false);
+    expect(shouldStageInitialBuild(polluted, [], false)).toBe(true);
+  });
+
+  it("divide produto operacional curto mesmo sem superprompt longo", () => {
+    const agenda = "Crie um app SaaS de agendamento para uma clínica: login, cadastro, agenda por dia e horário, cadastro de clientes, confirmação, reagendamento, cancelamento e estados de vazio, carregando e erro. Precisa funcionar bem no celular.";
+    const dashboard = "Crie um dashboard de gestão B2B para equipe comercial com KPIs, clientes, funil, tarefas, filtros e navegação responsiva. Deve ser um sistema profissional, rápido, com estados operacionais claros e sem botões decorativos.";
+    expect(shouldStageInitialBuild(agenda, [], false)).toBe(true);
+    expect(shouldStageInitialBuild(dashboard, [], false)).toBe(true);
+  });
+
+  it("mantém landing simples em geração única", () => {
+    const landing = "Crie uma landing page profissional e vendável para uma consultoria empresarial, com hero forte, benefícios, prova social, formulário de contato, FAQ e CTA recorrente. Visual premium, moderno e responsivo.";
+    expect(shouldStageInitialBuild(landing, [], false)).toBe(false);
   });
 
   it("limpa também trabalhos já persistidos antes de montar a etapa", () => {

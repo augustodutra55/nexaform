@@ -35,38 +35,92 @@ async function assertAuthenticatedSession() {
 await assertAuthenticatedSession();
 
 const cases = [
-  ["landing", "Landing de serviço premium", "Crie uma landing page profissional e vendável para uma consultoria empresarial, com hero forte, benefícios, prova social, formulário de contato, FAQ e CTA recorrente. Visual premium, moderno e responsivo."],
-  ["agenda", "Agenda SaaS", "Crie um app SaaS de agendamento para uma clínica: login, cadastro, agenda por dia e horário, cadastro de clientes, confirmação, reagendamento, cancelamento e estados de vazio, carregando e erro. Precisa funcionar bem no celular."],
-  ["dashboard", "Dashboard operacional", "Crie um dashboard de gestão B2B para equipe comercial com KPIs, clientes, funil, tarefas, filtros e navegação responsiva. Deve ser um sistema profissional, rápido, com estados operacionais claros e sem botões decorativos."],
-  ["commerce", "E-commerce orientado à conversão", "Crie um site e-commerce para produtos de cuidado pessoal, com catálogo, cards de produto, busca, benefícios, preço, carrinho demonstrativo, jornada de checkout sem simular pagamento real, prova social e FAQ. Foco máximo em conversão e confiança."],
-  ["media", "Experiência com mídia", "Crie um site institucional premium para uma empresa de arquitetura e inclua uma área de vídeo responsiva com controles. Se não houver vídeo enviado, mostre o placeholder correto para mídia sem inventar URL."],
+  ["landing", "Landing de serviço premium", "Crie uma landing page profissional e vendável para uma consultoria empresarial, com hero forte, benefícios, prova social, formulário de contato, FAQ e CTA recorrente. Visual premium, moderno e responsivo.", false],
+  ["agenda", "Agenda SaaS", "Crie um app SaaS de agendamento para uma clínica: login, cadastro, agenda por dia e horário, cadastro de clientes, confirmação, reagendamento, cancelamento e estados de vazio, carregando e erro. Precisa funcionar bem no celular.", true],
+  ["dashboard", "Dashboard operacional", "Crie um dashboard de gestão B2B para equipe comercial com KPIs, clientes, funil, tarefas, filtros e navegação responsiva. Deve ser um sistema profissional, rápido, com estados operacionais claros e sem botões decorativos.", true],
+  ["commerce", "E-commerce orientado à conversão", "Crie um site e-commerce para produtos de cuidado pessoal, com catálogo, cards de produto, busca, benefícios, preço, carrinho demonstrativo, jornada de checkout sem simular pagamento real, prova social e FAQ. Foco máximo em conversão e confiança.", false],
+  ["media", "Experiência com mídia", "Crie um site institucional premium para uma empresa de arquitetura e inclua uma área de vídeo responsiva com controles. Se não houver vídeo enviado, mostre o placeholder correto para mídia sem inventar URL.", false],
 ];
 
+function hasGeneratedCode(data) {
+  const app = data?.app;
+  return !!app && ((Array.isArray(app.files) && app.files.length > 0) || (typeof app.code === "string" && app.code.trim().length > 0));
+}
+
+async function requestGeneration(payload, timeoutMs) {
+  const response = await fetch(`${baseUrl}/api/golden/generate`, {
+    method: "POST",
+    headers: signedHeaders(),
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const data = await response.json().catch(() => null);
+  return { response, data };
+}
+
+async function runSimpleCase(name, message) {
+  const { response, data } = await requestGeneration({ projectId, message, name: `Golden ${name}` }, 290_000);
+  return {
+    status: response.status,
+    data,
+    error: response.ok ? "" : String(data?.error || `HTTP ${response.status}`),
+  };
+}
+
+async function runStagedCase(id, name, message) {
+  let currentFiles = null;
+  let lastData = null;
+  let lastStatus = 0;
+  const totalStages = 7;
+  for (let stageIndex = 0; stageIndex < totalStages; stageIndex += 1) {
+    const stageStarted = Date.now();
+    try {
+      const { response, data } = await requestGeneration({
+        projectId,
+        message,
+        name: `Golden ${name}`,
+        currentFiles,
+        stageIndex,
+      }, 145_000);
+      lastStatus = response.status;
+      lastData = data;
+      const elapsed = ((Date.now() - stageStarted) / 1000).toFixed(1);
+      if (!response.ok || data?.engineMode !== "real" || !hasGeneratedCode(data)) {
+        const error = String(data?.error || `HTTP ${response.status}`);
+        console.log(`  STAGE FAIL ${id} ${stageIndex + 1}/${totalStages} HTTP ${response.status} ${elapsed}s — ${error}`);
+        return { status: response.status, data, error: `etapa ${stageIndex + 1}/${totalStages}: ${error}` };
+      }
+      currentFiles = Array.isArray(data?.app?.files) ? data.app.files : currentFiles;
+      console.log(`  STAGE PASS ${id} ${stageIndex + 1}/${totalStages} HTTP ${response.status} ${elapsed}s${data?.stage?.label ? ` — ${data.stage.label}` : ""}`);
+    } catch (reason) {
+      const error = reason instanceof Error ? reason.message : String(reason);
+      console.log(`  STAGE FAIL ${id} ${stageIndex + 1}/${totalStages} HTTP - ${((Date.now() - stageStarted) / 1000).toFixed(1)}s — ${error}`);
+      return { status: 0, data: lastData, error: `etapa ${stageIndex + 1}/${totalStages}: ${error}` };
+    }
+  }
+  return { status: lastStatus, data: lastData, error: "" };
+}
+
 const rows = [];
-for (const [id, name, message] of cases) {
+for (const [id, name, message, staged] of cases) {
   const started = Date.now();
   let status = 0;
   let data = null;
   let error = "";
   try {
-    const response = await fetch(`${baseUrl}/api/golden/generate`, {
-      method: "POST",
-      headers: signedHeaders(),
-      body: JSON.stringify({ projectId, message, name: `Golden ${name}` }),
-      signal: AbortSignal.timeout(290_000),
-    });
-    status = response.status;
-    data = await response.json().catch(() => null);
-    if (!response.ok) error = String(data?.error || `HTTP ${response.status}`);
+    const result = staged
+      ? await runStagedCase(id, name, message)
+      : await runSimpleCase(name, message);
+    status = result.status;
+    data = result.data;
+    error = result.error;
   } catch (reason) {
     error = reason instanceof Error ? reason.message : String(reason);
   }
   const durationMs = Date.now() - started;
-  const app = data?.app;
-  const hasCode = !!app && ((Array.isArray(app.files) && app.files.length > 0) || (typeof app.code === "string" && app.code.trim().length > 0));
-  const passed = status >= 200 && status < 300 && data?.engineMode === "real" && hasCode;
-  rows.push({ id, name, passed, status, durationMs, provider: data?.provider || null, model: data?.model || null, error: error || null });
-  console.log(`${passed ? "PASS" : "FAIL"} ${id} HTTP ${status || "-"} ${(durationMs / 1000).toFixed(1)}s${error ? ` — ${error}` : ""}`);
+  const passed = status >= 200 && status < 300 && data?.engineMode === "real" && hasGeneratedCode(data) && !error;
+  rows.push({ id, name, staged, passed, status, durationMs, provider: data?.provider || null, model: data?.model || null, error: error || null });
+  console.log(`${passed ? "PASS" : "FAIL"} ${id} HTTP ${status || "-"} ${(durationMs / 1000).toFixed(1)}s${staged ? " staged" : ""}${error ? ` — ${error}` : ""}`);
 }
 
 const passed = rows.filter((row) => row.passed).length;

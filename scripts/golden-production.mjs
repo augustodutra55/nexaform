@@ -3,49 +3,35 @@ import fs from "node:fs";
 
 const baseUrl = String(process.env.PRODUCTION_URL || "https://nexaform-rho.vercel.app").replace(/\/$/, "");
 const projectId = String(process.env.AD_GOLDEN_PROJECT_ID || "").trim();
-
-function normalizeCookie(raw) {
-  let value = String(raw || "").trim();
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-    value = value.slice(1, -1).trim();
-  }
-  if (!value) throw new Error("AD_GOLDEN_SESSION_COOKIE não configurado.");
-  if (/\r|\n/.test(value)) {
-    throw new Error("AD_GOLDEN_SESSION_COOKIE contém quebra de linha; salve apenas `nome-do-cookie=valor` em uma única linha.");
-  }
-  if (!value.includes("=")) {
-    throw new Error("AD_GOLDEN_SESSION_COOKIE está sem o nome do cookie. Use `sb-...-auth-token=VALOR`, não apenas o valor.");
-  }
-  return value;
-}
-
-const cookie = normalizeCookie(process.env.AD_GOLDEN_SESSION_COOKIE);
+const serviceSecret = String(process.env.AD_GOLDEN_SERVICE_SECRET || "").trim();
 
 if (!projectId) throw new Error("AD_GOLDEN_PROJECT_ID não configurado.");
+if (!serviceSecret) throw new Error("AD_GOLDEN_SERVICE_SECRET não configurado.");
+
+function signedHeaders() {
+  const timestamp = String(Date.now());
+  const signature = crypto.createHmac("sha256", serviceSecret).update(timestamp).digest("hex");
+  return {
+    "content-type": "application/json",
+    "x-ad-golden-timestamp": timestamp,
+    "x-ad-golden-signature": signature,
+  };
+}
 
 async function assertAuthenticatedSession() {
   const response = await fetch(`${baseUrl}/api/generate-app`, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      cookie,
-    },
+    headers: signedHeaders(),
     body: "{}",
     signal: AbortSignal.timeout(15_000),
   });
   const data = await response.json().catch(() => null);
-
-  if (response.status === 401) {
-    throw new Error(
-      "Sessão de teste recusada pela produção (HTTP 401). Renove o login do owner no AD Studio e atualize o secret AD_GOLDEN_SESSION_COOKIE com o cookie atual completo `sb-...-auth-token=valor`."
-    );
-  }
   if (response.status !== 400) {
     throw new Error(
-      `Preflight de autenticação retornou HTTP ${response.status}: ${String(data?.error || "resposta inesperada")}`
+      `Preflight de autenticação de serviço retornou HTTP ${response.status}: ${String(data?.error || "resposta inesperada")}`
     );
   }
-  console.log("AUTH preflight PASS — sessão reconhecida; nenhuma geração consumida.");
+  console.log("AUTH preflight PASS — autenticação de serviço reconhecida; nenhuma geração consumida.");
 }
 
 await assertAuthenticatedSession();
@@ -67,10 +53,7 @@ for (const [id, name, message] of cases) {
   try {
     const response = await fetch(`${baseUrl}/api/generate-app`, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        cookie,
-      },
+      headers: signedHeaders(),
       body: JSON.stringify({
         projectId,
         message,

@@ -58,9 +58,9 @@ describe("retomada da geração por etapas", () => {
     expect(shouldStageInitialBuild(polluted, [], false)).toBe(true);
   });
 
-  it("divide produto operacional curto mesmo sem superprompt longo", () => {
-    const agenda = "Crie um app SaaS de agendamento para uma clínica: login, cadastro, agenda por dia e horário, cadastro de clientes, confirmação, reagendamento, cancelamento e estados de vazio, carregando e erro. Precisa funcionar bem no celular.";
-    const dashboard = "Crie um dashboard de gestão B2B para equipe comercial com KPIs, clientes, funil, tarefas, filtros e navegação responsiva. Deve ser um sistema profissional, rápido, com estados operacionais claros e sem botões decorativos.";
+  it("divide produto operacional compacto com múltiplos fluxos", () => {
+    const agenda = "Crie um app SaaS de agendamento para uma clínica: login, cadastro, agenda por dia e horário, cadastro de clientes, confirmação, reagendamento, cancelamento e estados de vazio, carregando e erro. Precisa funcionar bem no celular. Inclua também visão operacional dos atendimentos e filtros para localizar clientes e horários rapidamente.";
+    const dashboard = "Crie um dashboard de gestão B2B para equipe comercial com KPIs, clientes, funil, tarefas, filtros e navegação responsiva. Deve ser um sistema profissional, rápido, com estados operacionais claros e sem botões decorativos. Inclua cadastro e busca de clientes, histórico das tarefas e visão gerencial do funil por etapa.";
     expect(shouldStageInitialBuild(agenda, [], false)).toBe(true);
     expect(shouldStageInitialBuild(dashboard, [], false)).toBe(true);
   });

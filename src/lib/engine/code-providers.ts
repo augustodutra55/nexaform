@@ -389,6 +389,63 @@ export function qualityRepairBaseFiles(
   return candidate.app.files?.length ? candidate.app.files : previousFiles ?? null;
 }
 
+/**
+ * Recuperação transacional para uma etapa que deixou imports relativos
+ * quebrados. Em vez de salvar um App.jsx que não executa, restaura somente os
+ * arquivos ofensores que já existiam e descarta ofensores recém-criados. As
+ * demais alterações válidas da etapa são preservadas.
+ */
+export function rollbackMissingImportFiles(
+  candidate: AppGenerationResult,
+  previousFiles: AppFile[],
+  report: ProjectQualityReport
+): AppGenerationResult | null {
+  if (!report.errors.length || report.errors.some((value) => value.code !== "missing_import" || !value.path)) {
+    return null;
+  }
+
+  const normalize = (path: string) => path.replace(/\\/g, "/").replace(/^\.\//, "");
+  const brokenPaths = new Set(report.errors.map((value) => normalize(value.path!)));
+  const previousByPath = new Map(previousFiles.map((file) => [normalize(file.path), file]));
+  let changed = false;
+  const files: AppFile[] = [];
+
+  for (const file of candidate.app.files ?? []) {
+    const path = normalize(file.path);
+    if (!brokenPaths.has(path)) {
+      files.push(file);
+      continue;
+    }
+    const previous = previousByPath.get(path);
+    if (previous) files.push({ ...previous });
+    changed = true;
+  }
+
+  if (!changed || !files.length) return null;
+  return {
+    ...candidate,
+    app: { ...candidate.app, files },
+  };
+}
+
+function recoverStagedMissingImports(candidate: AppGenerationResult, a: Args): AppGenerationResult | null {
+  if (!a.currentFiles?.length || !/(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message)) {
+    return null;
+  }
+
+  let recovered = candidate;
+  // Remover um arquivo novo quebrado pode expor um segundo import quebrado no
+  // arquivo que o consumia; poucas passagens resolvem a cascata sem adivinhação.
+  for (let pass = 0; pass < 4; pass++) {
+    const quality = assessCandidate(recovered, a, true);
+    if (quality.valid) return recovered;
+    const next = rollbackMissingImportFiles(recovered, a.currentFiles, quality);
+    if (!next) return null;
+    recovered = next;
+  }
+  return assessCandidate(recovered, a, true).valid ? recovered : null;
+}
+
 function claudeUserContent(a: Args): any {
   const images = (a.attachments ?? []).filter((attachment) => attachment.kind === "image");
   if (!images.length) return textPromptFor(a);
@@ -584,6 +641,11 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
       const corrected = qualityText ? parse(qualityText, "claude", cost + qualityCost, model, qualityRepairBaseFiles(r, a.currentFiles)) : null;
       const correctedQuality = corrected ? assessCandidate(corrected, a, true) : null;
       if (corrected && correctedQuality?.valid) return corrected;
+      const recovered = recoverStagedMissingImports(corrected ?? r, a);
+      if (recovered) {
+        diag.push(`Claude: ${model} teve apenas arquivos com imports quebrados revertidos; alterações válidas da etapa foram preservadas.`);
+        return recovered;
+      }
       diag.push(`Claude: ${model} não passou no quality gate após uma correção automática${correctedQuality ? ` [${qualityFailureSummary(correctedQuality)}]` : ""}.`);
       return null;
     }
@@ -684,6 +746,11 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
       const corrected = qualityText ? parse(qualityText, "openrouter", cost + qualityCost, model, qualityRepairBaseFiles(r, a.currentFiles)) : null;
       const correctedQuality = corrected ? assessCandidate(corrected, a, true) : null;
       if (corrected && correctedQuality?.valid) return corrected;
+      const recovered = recoverStagedMissingImports(corrected ?? r, a);
+      if (recovered) {
+        diag.push(`OpenRouter: ${model} teve apenas arquivos com imports quebrados revertidos; alterações válidas da etapa foram preservadas.`);
+        return recovered;
+      }
       diag.push(`OpenRouter: ${model} não passou no quality gate após uma correção automática${correctedQuality ? ` [${qualityFailureSummary(correctedQuality)}]` : ""}.`);
       return null;
     }

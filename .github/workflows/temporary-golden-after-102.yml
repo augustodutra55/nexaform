@@ -1,4 +1,4 @@
-name: Temporary Golden after progressive quality gate
+name: Temporary Golden after transactional import recovery
 
 on:
   push:

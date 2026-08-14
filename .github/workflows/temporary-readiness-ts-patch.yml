@@ -1,0 +1,167 @@
+name: Temporary readiness TS patch
+
+on:
+  push:
+    branches:
+      - fix/readiness-e2e-evidence
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply TypeScript evidence separation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          rp = Path('src/app/api/system/readiness/route.ts')
+          r = rp.read_text()
+          start = r.index('async function releaseCiProbe()')
+          end = r.index('\n\nasync function tableProbe', start)
+          replacement = '''interface ReleaseCiProbe {
+            core: { ok: boolean; detail: string };
+            e2e: { ok: boolean; detail: string };
+          }
+
+          async function releaseCiProbe(): Promise<ReleaseCiProbe> {
+            const sha = process.env.VERCEL_GIT_COMMIT_SHA;
+            if (!sha) {
+              const missing = { ok: false, detail: "O deployment não informa o commit Git que está em execução." };
+              return { core: missing, e2e: missing };
+            }
+            try {
+              const response = await fetch(
+                `https://api.github.com/repos/augustodutra55/nexaform/commits/${sha}/check-runs`,
+                {
+                  next: { revalidate: 300 },
+                  headers: {
+                    accept: "application/vnd.github+json",
+                    "user-agent": "ad-studio-readiness",
+                    "x-github-api-version": "2022-11-28",
+                  },
+                }
+              );
+              if (!response.ok) {
+                const missing = { ok: false, detail: `O GitHub não confirmou o CI deste commit (HTTP ${response.status}).` };
+                return { core: missing, e2e: missing };
+              }
+              const payload = await response.json() as {
+                check_runs?: Array<{ name?: string; conclusion?: string | null }>;
+              };
+              const runs = Array.isArray(payload.check_runs) ? payload.check_runs : [];
+              const core = runs.find((run) => run.name === "Build, contratos e componentes");
+              const e2e = runs.find((run) => run.name === "Interações reais no navegador");
+              return {
+                core: core?.conclusion === "success"
+                  ? { ok: true, detail: `Build, TypeScript e contratos aprovados para ${sha.slice(0, 7)}.` }
+                  : { ok: false, detail: "Build, TypeScript e contratos ainda não foram aprovados para este deployment." },
+                e2e: e2e?.conclusion === "success"
+                  ? { ok: true, detail: `Playwright aprovou os fluxos reais para ${sha.slice(0, 7)}.` }
+                  : { ok: false, detail: "Login, navegação, formulários, CRUD, mobile e editor visual ainda não foram aprovados pelo Playwright." },
+              };
+            } catch {
+              const missing = { ok: false, detail: "Não foi possível consultar a evidência do CI no GitHub." };
+              return { core: missing, e2e: missing };
+            }
+          }'''
+          r = r[:start] + replacement + r[end:]
+          old = '''    probeCheck({
+                id: "release-ci",
+                label: "Certificação do commit publicado",
+                ok: releaseCi.ok,
+                readyDetail: releaseCi.detail,
+                missingDetail: releaseCi.detail,
+                action: "Publique somente um commit cuja verificação Qualidade esteja verde no GitHub.",
+              }),'''
+          new = '''    probeCheck({
+                id: "release-core-ci",
+                label: "Build e contratos do commit publicado",
+                ok: releaseCi.core.ok,
+                readyDetail: releaseCi.core.detail,
+                missingDetail: releaseCi.core.detail,
+                action: "Publique somente um commit cujo job Build, contratos e componentes esteja verde no GitHub.",
+              }),
+              probeCheck({
+                id: "release-e2e-ci",
+                label: "Interações reais do commit publicado",
+                ok: releaseCi.e2e.ok,
+                readyDetail: releaseCi.e2e.detail,
+                missingDetail: releaseCi.e2e.detail,
+                action: "Publique somente um commit cujo job Interações reais no navegador esteja verde no GitHub.",
+              }),'''
+          if r.count(old) != 1:
+              raise SystemExit(f'readiness check block mismatch: {r.count(old)}')
+          rp.write_text(r.replace(old, new, 1))
+
+          sp = Path('src/lib/system/readiness.ts')
+          s = sp.read_text()
+          replacements = {
+            '{ number: 1, id: "architecture", label: "Arquitetura e código multi-arquivo", evidence: [': '{ number: 1, id: "architecture", label: "Arquitetura e código multi-arquivo", requiredIds: ["release-core-ci"], evidence: [',
+            '{ number: 2, id: "model-routing", label: "Roteamento de IA previsível", evidence: [': '{ number: 2, id: "model-routing", label: "Roteamento de IA previsível", requiredIds: ["release-core-ci"], evidence: [',
+            '{ number: 4, id: "quality-repair", label: "Qualidade e autorreparo", evidence: [': '{ number: 4, id: "quality-repair", label: "Qualidade e autorreparo", requiredIds: ["release-core-ci"], evidence: [',
+            '{ number: 5, id: "interaction-tests", label: "Testes reais de interação", evidence: [': '{ number: 5, id: "interaction-tests", label: "Testes reais de interação", requiredIds: ["release-core-ci", "release-e2e-ci"], evidence: [',
+            '{ number: 8, id: "visual-engine", label: "Motor visual premium", evidence: [': '{ number: 8, id: "visual-engine", label: "Motor visual premium", requiredIds: ["release-core-ci"], evidence: [',
+            '{ number: 9, id: "visual-editor", label: "Editor visual clicável", evidence: [': '{ number: 9, id: "visual-editor", label: "Editor visual clicável", requiredIds: ["release-core-ci", "release-e2e-ci"], evidence: [',
+            '{ number: 10, id: "versions-portability", label: "Versões e portabilidade", evidence: [': '{ number: 10, id: "versions-portability", label: "Versões e portabilidade", requiredIds: ["release-core-ci"], evidence: [',
+          }
+          for old, new in replacements.items():
+              if s.count(old) != 1:
+                  raise SystemExit(f'gate anchor mismatch: {old}')
+              s = s.replace(old, new, 1)
+          old_map = 'checkGate(item.number, item.id, item.label, checks, ["release-ci"], Array.from(item.evidence))'
+          new_map = 'checkGate(item.number, item.id, item.label, checks, Array.from(item.requiredIds), Array.from(item.evidence))'
+          if s.count(old_map) != 1:
+              raise SystemExit('capability map anchor mismatch')
+          sp.write_text(s.replace(old_map, new_map, 1))
+
+          tp = Path('src/lib/system/release-certification.test.ts')
+          t = tp.read_text()
+          if t.count('  "release-ci",') != 1:
+              raise SystemExit('release-ci test anchor mismatch')
+          t = t.replace('  "release-ci",', '  "release-core-ci",\n  "release-e2e-ci",', 1)
+          t = t.replace('required.filter((check) => check.id !== "release-ci")', 'required.filter((check) => check.id !== "release-core-ci")', 1)
+          marker = '\n  it("expõe o bloqueio real sem declarar 10/10", () => {'
+          insertion = '''
+
+            it("não aprova interações nem editor visual quando somente o build principal passou", () => {
+              const report = buildReleaseCertification(required.filter((check) => check.id !== "release-e2e-ci"));
+              expect(report.certified).toBe(false);
+              expect(report.ready).toBe(10);
+              expect(report.gates.find((gate) => gate.id === "interaction-tests")?.status).toBe("warning");
+              expect(report.gates.find((gate) => gate.id === "visual-editor")?.status).toBe("warning");
+            });
+          '''
+          if t.count(marker) != 1:
+              raise SystemExit('test insertion anchor mismatch')
+          tp.write_text(t.replace(marker, insertion + marker, 1))
+          PY
+          git diff --check
+          git diff --stat
+      - name: Commit TypeScript patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/api/system/readiness/route.ts src/lib/system/readiness.ts src/lib/system/release-certification.test.ts
+          git commit -m "fix: require independent E2E release evidence"
+          git push origin HEAD:fix/readiness-e2e-evidence
+      - name: Validate
+        shell: bash
+        run: |
+          npm ci
+          npm run typecheck
+          npm run test:unit
+          npm run build

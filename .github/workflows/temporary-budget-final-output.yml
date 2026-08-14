@@ -1,0 +1,154 @@
+name: Temporary budget final output patch
+
+on:
+  push:
+    branches:
+      - fix/openrouter-budget-final-output
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply final-output controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/lib/engine/code-providers.ts')
+          s = p.read_text()
+
+          anchor = '''function responseText(value: any): string | null {
+            if (typeof value === "string" && value.trim()) return value;
+            if (!Array.isArray(value)) return null;
+            const joined = value
+              .map((part) => typeof part?.text === "string" ? part.text : typeof part?.content === "string" ? part.content : "")
+              .filter(Boolean)
+              .join("\\n");
+            return joined.trim() ? joined : null;
+          }
+          '''
+          addition = anchor + '''
+          export function openRouterControlsForModel(model: string): Record<string, unknown> {
+            // MiMo V2.5 expõe reasoning opcional. Na geração de código o objetivo
+            // é reservar o teto de saída para o artefato final, não para thinking.
+            if (/^xiaomi\\/mimo-v2\\.5(?:$|-)/.test(model)) {
+              return { reasoning: { enabled: false }, temperature: 0.2 };
+            }
+            return {};
+          }
+
+          function openRouterEmptyResponseSummary(data: any): string {
+            const choice = data?.choices?.[0];
+            const message = choice?.message;
+            const usage = data?.usage ?? {};
+            const reasoningText = responseText(message?.reasoning);
+            const reasoningDetails = Array.isArray(message?.reasoning_details) ? message.reasoning_details : [];
+            const reasoningChars = reasoningText?.length ?? JSON.stringify(reasoningDetails).length;
+            const reasoningTokens = usage?.completion_tokens_details?.reasoning_tokens
+              ?? usage?.completionTokensDetails?.reasoningTokens
+              ?? "?";
+            return [
+              `finish=${choice?.finish_reason ?? "?"}`,
+              `completion_tokens=${usage?.completion_tokens ?? usage?.completionTokens ?? "?"}`,
+              `reasoning_tokens=${reasoningTokens}`,
+              `reasoning_chars=${reasoningChars}`,
+            ].join(", ");
+          }
+          '''
+          if s.count(anchor) != 1:
+              raise SystemExit(f'responseText anchor mismatch: {s.count(anchor)}')
+          s = s.replace(anchor, addition, 1)
+
+          old_body = '''      body: JSON.stringify({
+                model,
+                max_tokens: maxOutputTokens(a, model),
+                usage: { include: true },
+                messages,
+              }),'''
+          new_body = '''      body: JSON.stringify({
+                model,
+                max_tokens: maxOutputTokens(a, model),
+                usage: { include: true },
+                messages,
+                ...openRouterControlsForModel(model),
+              }),'''
+          if s.count(old_body) != 1:
+              raise SystemExit(f'OpenRouter body anchor mismatch: {s.count(old_body)}')
+          s = s.replace(old_body, new_body, 1)
+
+          old_empty = '''    const data = await res.json();
+              const text = responseText(data?.choices?.[0]?.message?.content);
+              // OpenRouter devolve usage.cost (USD) quando disponível.
+              const cost =
+                typeof data?.usage?.cost === "number"
+                  ? data.usage.cost
+                  : estimateCost(model, data?.usage?.prompt_tokens ?? 0, data?.usage?.completion_tokens ?? 0);
+              if (!text) { diag.push(`OpenRouter: ${model} respondeu vazio.`); return null; }'''
+          new_empty = '''    const data = await res.json();
+              const text = responseText(data?.choices?.[0]?.message?.content);
+              // OpenRouter devolve usage.cost (USD) quando disponível.
+              const cost =
+                typeof data?.usage?.cost === "number"
+                  ? data.usage.cost
+                  : estimateCost(model, data?.usage?.prompt_tokens ?? 0, data?.usage?.completion_tokens ?? 0);
+              if (!text) {
+                diag.push(`OpenRouter: ${model} respondeu vazio (${openRouterEmptyResponseSummary(data)}).`);
+                return null;
+              }'''
+          if s.count(old_empty) != 1:
+              raise SystemExit(f'OpenRouter empty-response anchor mismatch: {s.count(old_empty)}')
+          s = s.replace(old_empty, new_empty, 1)
+          p.write_text(s)
+
+          tp = Path('src/lib/engine/code-providers.test.ts')
+          t = tp.read_text()
+          old_import = 'import { modelOutputTokenBudget, providerSystemPrompt, qualityRepairInstruction } from "./code-providers";'
+          new_import = 'import { modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairInstruction } from "./code-providers";'
+          if t.count(old_import) != 1:
+              raise SystemExit('code-providers test import mismatch')
+          t = t.replace(old_import, new_import, 1)
+          t += '''
+
+          describe("controles de saída do fallback OpenRouter", () => {
+            it("desliga reasoning somente no MiMo para preservar tokens do código final", () => {
+              expect(openRouterControlsForModel("xiaomi/mimo-v2.5")).toEqual({
+                reasoning: { enabled: false },
+                temperature: 0.2,
+              });
+              expect(openRouterControlsForModel("anthropic/claude-sonnet-4.5")).toEqual({});
+              expect(openRouterControlsForModel("openrouter/free")).toEqual({});
+            });
+          });
+          '''
+          tp.write_text(t)
+          PY
+          git diff --check
+          git diff --stat
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/engine/code-providers.ts src/lib/engine/code-providers.test.ts
+          git commit -m "fix: reserve fallback tokens for final code output"
+          git push origin HEAD:fix/openrouter-budget-final-output
+      - name: Validate
+        shell: bash
+        run: |
+          npm ci
+          npm run typecheck
+          npm run test:unit
+          npm run build

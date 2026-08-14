@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { isOwner, resolvePlan } from "@/lib/access";
 import { authorizeProjectOwner, isUuid } from "@/lib/engine/data-guard";
 import { reserveGeneration, finalizeGeneration } from "@/lib/engine/generation-usage";
+import { isAppCode, type AppCode } from "@/lib/engine/app-types";
 import {
   BACKGROUND_GENERATION_VERSION,
   type BackgroundGenerationPayload,
@@ -58,7 +59,14 @@ export async function POST(req: NextRequest) {
   const { supabase, user, owner, plan } = await context();
   if (!user || !plan) return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
 
-  let body: { projectId?: string; threadId?: string; job?: StagedBuildJob; name?: string; costMode?: string };
+  let body: {
+    projectId?: string;
+    threadId?: string;
+    job?: StagedBuildJob;
+    name?: string;
+    costMode?: string;
+    currentApp?: AppCode;
+  };
   try {
     body = await req.json();
   } catch {
@@ -69,6 +77,9 @@ export async function POST(req: NextRequest) {
   }
   if (!isValidStagedBuildJob(body.job, body.projectId, body.threadId)) {
     return NextResponse.json({ error: "A etapa enviada não é válida." }, { status: 400 });
+  }
+  if (body.currentApp !== undefined && !isAppCode(body.currentApp)) {
+    return NextResponse.json({ error: "O snapshot de retomada não é válido." }, { status: 400 });
   }
   const access = await authorizeProjectOwner(supabase, body.projectId, user.id, owner);
   if (!access.allowed) return NextResponse.json({ error: access.error }, { status: access.status ?? 403 });
@@ -134,6 +145,7 @@ export async function POST(req: NextRequest) {
     name: String(body.name || "App").slice(0, 120),
     costMode,
     queuedAt: new Date().toISOString(),
+    ...(body.currentApp ? { currentApp: body.currentApp } : {}),
   };
   const { data, error } = await supabase
     .from("staged_generation_jobs")

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BACKGROUND_GENERATION_VERSION,
   BACKGROUND_MAX_ATTEMPTS,
+  advanceBackgroundGeneration,
   backgroundJobLabel,
   isBackgroundGenerationPayload,
   isBackgroundJobSnapshot,
@@ -80,6 +81,7 @@ describe("background generation jobs", () => {
       queuedAt: new Date().toISOString(),
     };
     expect(isBackgroundGenerationPayload(payload)).toBe(true);
+    expect(isBackgroundGenerationPayload({ ...payload, version: 1 })).toBe(true);
     expect(isBackgroundGenerationPayload({ ...payload, stageIndex: 1 })).toBe(false);
     expect(isBackgroundGenerationPayload({
       ...payload,
@@ -95,6 +97,115 @@ describe("background generation jobs", () => {
       updated_at: new Date().toISOString(),
       completed_at: new Date().toISOString(),
     })).toBe(true);
+  });
+
+  it("carrega o snapshot para a próxima etapa sem expor resultado parcial", () => {
+    const payload = {
+      version: BACKGROUND_GENERATION_VERSION,
+      projectId: "project-1",
+      threadId: "thread-1",
+      userId: "user-1",
+      stagedJob: {
+        version: 1,
+        projectId: "project-1",
+        threadId: "thread-1",
+        originalPrompt: "Crie um app",
+        masterPrompt: "Crie um app completo",
+        kind: "initial" as const,
+        nextStage: 0,
+        startedAt: "2026-01-01T00:00:00.000Z",
+      },
+      stageIndex: 0,
+      requestId: "request-1",
+      reservationId: "reservation-1",
+      name: "Meu app",
+      costMode: "premium" as const,
+      queuedAt: "2026-01-01T00:00:00.000Z",
+    };
+    const result = {
+      reply: "Etapa pronta",
+      plan: ["Base"],
+      app: {
+        kind: "app" as const,
+        name: "Meu app",
+        description: "",
+        code: "export default function App(){ return <main>Pronto</main> }",
+      },
+      provider: "openrouter" as const,
+      engineMode: "real" as const,
+      cost: 0.25,
+    };
+
+    const transition = advanceBackgroundGeneration(
+      payload,
+      result,
+      3,
+      1_500,
+      "2026-01-01T00:01:00.000Z"
+    );
+
+    expect(transition.completed).toBe(false);
+    expect(transition.payload.stageIndex).toBe(1);
+    expect(transition.payload.stagedJob.nextStage).toBe(1);
+    expect(transition.payload.currentApp).toEqual(result.app);
+    expect(transition.payload.result).toBeUndefined();
+    expect(transition.totalCost).toBe(0.25);
+    expect(transition.totalDurationMs).toBe(1_500);
+  });
+
+  it("só entrega o resultado depois da última etapa e soma custo e duração", () => {
+    const app = {
+      kind: "app" as const,
+      name: "Meu app",
+      description: "",
+      code: "export default function App(){ return <main>Final</main> }",
+    };
+    const payload = {
+      version: BACKGROUND_GENERATION_VERSION,
+      projectId: "project-1",
+      threadId: "thread-1",
+      userId: "user-1",
+      stagedJob: {
+        version: 1,
+        projectId: "project-1",
+        threadId: "thread-1",
+        originalPrompt: "Crie um app",
+        masterPrompt: "Crie um app completo",
+        kind: "initial" as const,
+        nextStage: 2,
+        startedAt: "2026-01-01T00:00:00.000Z",
+      },
+      stageIndex: 2,
+      requestId: "request-1",
+      reservationId: "reservation-1",
+      name: "Meu app",
+      costMode: "premium" as const,
+      queuedAt: "2026-01-01T00:02:00.000Z",
+      currentApp: app,
+      accumulatedCost: 0.4,
+      accumulatedDurationMs: 3_000,
+    };
+    const result = {
+      reply: "Projeto pronto",
+      plan: ["Entrega"],
+      app,
+      provider: "openrouter" as const,
+      engineMode: "real" as const,
+      cost: 0.1,
+    };
+
+    const transition = advanceBackgroundGeneration(
+      payload,
+      result,
+      3,
+      800,
+      "2026-01-01T00:03:00.000Z"
+    );
+
+    expect(transition.completed).toBe(true);
+    expect(transition.totalCost).toBeCloseTo(0.5);
+    expect(transition.totalDurationMs).toBe(3_800);
+    expect(transition.payload.result).toMatchObject({ app, cost: 0.5 });
   });
 
   it("explica o estado da fila em linguagem de interface", () => {

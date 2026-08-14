@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { ArrowDown, ArrowUp, Check, Copy, Loader2, Sparkles, Code2, Layout, Mic, Square, Cpu, FileCode2, AlertTriangle, Paperclip, X, Image as ImageIcon, MousePointer2, Save, Palette, Link2, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AppSchema, GenerationResult } from "@/lib/engine/types";
-import { AppFile, AppGenerationResult, CodeStats, EngineMode, MediaGenerationReport, looksLikeApp } from "@/lib/engine/app-types";
+import { AppCode, AppFile, AppGenerationResult, CodeStats, EngineMode, MediaGenerationReport, looksLikeApp } from "@/lib/engine/app-types";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -333,7 +333,10 @@ export function ChatPanel({
     setResumeJob(job);
   }
 
-  async function enqueueBackgroundStage(job: StagedBuildJob): Promise<void> {
+  async function enqueueBackgroundStage(
+    job: StagedBuildJob,
+    workingApp?: AppCode | null
+  ): Promise<void> {
     setBackgroundSubmitting(true);
     storeLocalStagedJob(job);
     try {
@@ -346,6 +349,9 @@ export function ChatPanel({
           job,
           name: projectName,
           costMode: localStorage.getItem("nexaform:cost-mode") || "auto",
+          // Em uma retomada manual, a última etapa concluída está preservada na
+          // fila mesmo que o preview ainda não a tenha salvo no projeto.
+          currentApp: workingApp ?? backgroundJob?.payload.currentApp,
         }),
       });
       const data = await response.json().catch(() => null);
@@ -385,6 +391,25 @@ export function ChatPanel({
         if (!disposed) setBackgroundJob(row);
         if (!isTerminalJobStatus(row.status) || row.status === "completed") nextDelay = 2500;
 
+        const queuedJob = row.payload.stagedJob as StagedBuildJob;
+        const queuedStages = stagedStages(queuedJob.kind ?? "initial");
+        if (!disposed && row.status !== "cancelled") {
+          setPlan(queuedStages.map((item, index) => `${index + 1}/${queuedStages.length} · ${item.label}`));
+          setPlanDone(Math.min(row.payload.stageIndex, queuedStages.length));
+          const activeStage = queuedStages[row.payload.stageIndex];
+          if (activeStage && row.status !== "completed") {
+            setStageStatus({
+              current: row.payload.stageIndex + 1,
+              total: queuedStages.length,
+              label: activeStage.label,
+            });
+          }
+        }
+        if (!disposed && row.status === "failed"
+          && isValidStagedBuildJob(queuedJob, projectId, threadId)) {
+          storeLocalStagedJob(queuedJob);
+        }
+
         if (row.status === "completed" && row.payload.result) {
           const processingKey = `${row.id}:${row.payload.stageIndex}:${row.updated_at}`;
           if (processingBackgroundRef.current !== processingKey) {
@@ -415,18 +440,23 @@ export function ChatPanel({
               const completedJob = row.payload.stagedJob as StagedBuildJob;
               const stages = stagedStages(completedJob.kind ?? "initial");
               const nextJob = { ...completedJob, nextStage: row.payload.stageIndex + 1 };
-              if (nextJob.nextStage < stages.length) {
+              // Compatibilidade com resultados antigos (v1), quando o navegador
+              // ainda era responsável por disparar cada etapa. No contrato v2,
+              // `completed` significa que TODAS as etapas já terminaram.
+              if (row.payload.version < 2 && nextJob.nextStage < stages.length) {
                 storeLocalStagedJob(nextJob);
                 setStageStatus({
                   current: nextJob.nextStage + 1,
                   total: stages.length,
                   label: stages[nextJob.nextStage].label,
                 });
-                await enqueueBackgroundStage(nextJob);
+                await enqueueBackgroundStage(nextJob, result.app);
               } else {
+                setPlanDone(stages.length);
+                setStageStatus(null);
                 const completion = completedJob.kind === "refinement"
-                  ? `✅ Refinamento concluído em ${stages.length} etapas, com salvamento após cada uma.`
-                  : `✅ Projeto construído em ${stages.length} etapas, com salvamento após cada uma.`;
+                  ? `✅ Refinamento concluído em ${stages.length} etapas pela fila durável. O resultado foi enviado ao Centro de Qualidade.`
+                  : `✅ Projeto construído em ${stages.length} etapas pela fila durável. O resultado foi enviado ao Centro de Qualidade.`;
                 setMessages((current) => [...current, {
                   id: crypto.randomUUID(),
                   role: "assistant",

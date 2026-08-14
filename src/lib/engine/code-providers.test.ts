@@ -79,7 +79,7 @@ describe("orçamento adaptativo por modelo", () => {
 describe("controles de saída do fallback OpenRouter", () => {
   it("desliga reasoning somente no MiMo para preservar tokens do código final", () => {
     expect(openRouterControlsForModel("xiaomi/mimo-v2.5")).toEqual({
-      reasoning: { enabled: false },
+      reasoning: { effort: "none" },
       temperature: 0.2,
     });
     expect(openRouterControlsForModel("anthropic/claude-sonnet-4.5")).toEqual({});

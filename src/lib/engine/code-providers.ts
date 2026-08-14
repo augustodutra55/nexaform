@@ -395,10 +395,10 @@ function responseText(value: any): string | null {
 }
 
 export function openRouterControlsForModel(model: string): Record<string, unknown> {
-  // MiMo V2.5 permite desligar reasoning. Para geração de código, o teto
-  // de saída deve ser preservado para o artefato final, não para thinking.
+  // O OpenRouter documenta `reasoning.effort = "none"` para desligar reasoning.
+  // Assim o teto de completion fica reservado para o código final, não para thinking.
   if (/^xiaomi\/mimo-v2\.5(?:$|-)/.test(model)) {
-    return { reasoning: { enabled: false }, temperature: 0.2 };
+    return { reasoning: { effort: "none" }, temperature: 0.2 };
   }
   return {};
 }

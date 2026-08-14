@@ -261,6 +261,37 @@ function generationPlanFor(a: Args) {
   return buildGenerationPlan(a.message, a.mediaAssets ?? []);
 }
 
+const STAGED_RUNTIME_BLOCKERS = new Set([
+  "single_file",
+  "unsafe_path",
+  "duplicate_path",
+  "missing_entry",
+  "css_import",
+  "node_import",
+  "missing_import",
+  "missing_default_export",
+]);
+
+/** Construções por etapas devem parar somente quando o candidato realmente não
+ * pode executar. Regras de arquitetura, tamanho, mídia e acabamento continuam
+ * visíveis como avisos e podem ser tratadas nas etapas seguintes. */
+export function stagedRuntimeQualityReport(
+  report: ProjectQualityReport,
+  isStagedBuild: boolean
+): ProjectQualityReport {
+  if (!isStagedBuild) return report;
+  const errors = report.errors.filter((value) => STAGED_RUNTIME_BLOCKERS.has(value.code));
+  const advisory = report.errors.filter((value) => !STAGED_RUNTIME_BLOCKERS.has(value.code));
+  const warnings = [...report.warnings, ...advisory];
+  return {
+    ...report,
+    valid: errors.length === 0,
+    score: Math.max(0, 100 - errors.length * 20 - warnings.length * 4),
+    errors,
+    warnings,
+  };
+}
+
 function mediaContextFor(a: Args): string {
   const assets = a.mediaAssets ?? [];
   const lines = assets.slice(0, 30).map((asset) =>
@@ -295,7 +326,7 @@ function textPromptFor(a: Args): string {
 
 function assessCandidate(result: AppGenerationResult, a: Args, repaired = false): ProjectQualityReport {
   const generationPlan = generationPlanFor(a);
-  const report = validateAppProject(result.app, generationPlan, repaired);
+  let report = validateAppProject(result.app, generationPlan, repaired);
 
   // Um refinamento não deve ser rejeitado por uma falha antiga que ele não
   // introduziu. Só erros novos bloqueiam a edição; os antigos permanecem
@@ -309,6 +340,11 @@ function assessCandidate(result: AppGenerationResult, a: Args, repaired = false)
     report.valid = newErrors.length === 0;
     report.score = Math.max(0, 100 - newErrors.length * 20 - report.warnings.length * 4);
   }
+
+  report = stagedRuntimeQualityReport(
+    report,
+    /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message)
+  );
 
   result.generationPlan = generationPlan;
   result.quality = report;
@@ -335,6 +371,13 @@ export function qualityRepairInstruction(a: Pick<Args, "message" | "currentFiles
     "Corrija somente essas falhas, preserve o escopo e confira todos os imports relativos.",
     format,
   ].join("\n\n");
+}
+
+function qualityFailureSummary(report: ProjectQualityReport): string {
+  return report.errors
+    .slice(0, 6)
+    .map((value) => `${value.code}${value.path ? ` (${value.path})` : ""}`)
+    .join(", ") || "erro estrutural não classificado";
 }
 
 /** O segundo turno do quality gate parte do candidato que acabou de ser
@@ -522,7 +565,7 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
     if (r) {
       const quality = assessCandidate(r, a);
       if (quality.valid) return r;
-      diag.push(`Claude: ${model} gerou código estruturalmente inválido; quality gate iniciou uma correção.`);
+      diag.push(`Claude: ${model} gerou código estruturalmente inválido [${qualityFailureSummary(quality)}]; quality gate iniciou uma correção.`);
       const qualityRes = await send([
         ...initialMessages,
         { role: "assistant", content: text.slice(0, 100_000) },
@@ -539,8 +582,9 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
       // esses patches sobre o snapshot original descartava arquivos recém-
       // criados na etapa e fazia o mesmo quality gate falhar novamente.
       const corrected = qualityText ? parse(qualityText, "claude", cost + qualityCost, model, qualityRepairBaseFiles(r, a.currentFiles)) : null;
-      if (corrected && assessCandidate(corrected, a, true).valid) return corrected;
-      diag.push(`Claude: ${model} não passou no quality gate após uma correção automática.`);
+      const correctedQuality = corrected ? assessCandidate(corrected, a, true) : null;
+      if (corrected && correctedQuality?.valid) return corrected;
+      diag.push(`Claude: ${model} não passou no quality gate após uma correção automática${correctedQuality ? ` [${qualityFailureSummary(correctedQuality)}]` : ""}.`);
       return null;
     }
 
@@ -620,7 +664,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
     if (r) {
       const quality = assessCandidate(r, a);
       if (quality.valid) return r;
-      diag.push(`OpenRouter: ${model} gerou código estruturalmente inválido; quality gate iniciou uma correção.`);
+      diag.push(`OpenRouter: ${model} gerou código estruturalmente inválido [${qualityFailureSummary(quality)}]; quality gate iniciou uma correção.`);
       const qualityRes = await send([
         ...initialMessages,
         { role: "assistant", content: text.slice(0, 100_000) },
@@ -638,8 +682,9 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
       // O reparo é incremental sobre o candidato, não sobre o snapshot anterior
       // à geração. Assim um patch pode corrigir também um arquivo criado agora.
       const corrected = qualityText ? parse(qualityText, "openrouter", cost + qualityCost, model, qualityRepairBaseFiles(r, a.currentFiles)) : null;
-      if (corrected && assessCandidate(corrected, a, true).valid) return corrected;
-      diag.push(`OpenRouter: ${model} não passou no quality gate após uma correção automática.`);
+      const correctedQuality = corrected ? assessCandidate(corrected, a, true) : null;
+      if (corrected && correctedQuality?.valid) return corrected;
+      diag.push(`OpenRouter: ${model} não passou no quality gate após uma correção automática${correctedQuality ? ` [${qualityFailureSummary(correctedQuality)}]` : ""}.`);
       return null;
     }
 

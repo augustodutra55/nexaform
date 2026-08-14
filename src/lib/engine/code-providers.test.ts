@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compactProviderSystemPrompt, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairBaseFiles, qualityRepairInstruction, shouldTryFreeModelsAfterPaidDiagnostics } from "./code-providers";
+import { compactProviderSystemPrompt, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairBaseFiles, qualityRepairInstruction, shouldTryFreeModelsAfterPaidDiagnostics, stagedRuntimeQualityReport } from "./code-providers";
 import type { AppGenerationResult, ProjectQualityReport } from "./app-types";
 
 const report: ProjectQualityReport = {
@@ -56,6 +56,39 @@ describe("reparo dirigido do quality gate", () => {
     } as AppGenerationResult;
 
     expect(qualityRepairBaseFiles(candidate, previous)).toBe(candidateFiles);
+  });
+});
+
+describe("quality gate progressivo das etapas", () => {
+  it("mantém bloqueios que quebram o runtime e rebaixa acabamento para aviso", () => {
+    const staged = stagedRuntimeQualityReport({
+      valid: false,
+      score: 40,
+      repaired: false,
+      errors: [
+        { code: "missing_import", message: "Import ausente", path: "App.jsx" },
+        { code: "file_too_large", message: "Arquivo grande", path: "components/Cadastro.jsx" },
+        { code: "dependency_budget", message: "Pacotes demais" },
+      ],
+      warnings: [],
+    }, true);
+
+    expect(staged.valid).toBe(false);
+    expect(staged.errors.map((value) => value.code)).toEqual(["missing_import"]);
+    expect(staged.warnings.map((value) => value.code)).toEqual(["file_too_large", "dependency_budget"]);
+  });
+
+  it("aprova a etapa quando restam somente alertas tratáveis depois", () => {
+    const staged = stagedRuntimeQualityReport({
+      valid: false,
+      score: 80,
+      repaired: false,
+      errors: [{ code: "file_too_large", message: "Arquivo grande" }],
+      warnings: [],
+    }, true);
+    expect(staged.valid).toBe(true);
+    expect(staged.errors).toEqual([]);
+    expect(staged.warnings[0].code).toBe("file_too_large");
   });
 });
 

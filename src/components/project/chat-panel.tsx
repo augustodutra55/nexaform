@@ -452,6 +452,8 @@ export function ChatPanel({
                 });
                 await enqueueBackgroundStage(nextJob, result.app);
               } else {
+                setPlanDone(stages.length);
+                setStageStatus(null);
                 const completion = completedJob.kind === "refinement"
                   ? `✅ Refinamento concluído em ${stages.length} etapas pela fila durável. O resultado foi enviado ao Centro de Qualidade.`
                   : `✅ Projeto construído em ${stages.length} etapas pela fila durável. O resultado foi enviado ao Centro de Qualidade.`;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { providerSystemPrompt, qualityRepairInstruction } from "./code-providers";
+import { modelOutputTokenBudget, providerSystemPrompt, qualityRepairInstruction } from "./code-providers";
 import type { ProjectQualityReport } from "./app-types";
 
 const report: ProjectQualityReport = {
@@ -58,5 +58,19 @@ describe("contrato determinístico de saída", () => {
     expect(transportOverride).toBeGreaterThan(jsonInstruction);
     expect(prompt.slice(transportOverride)).toContain('<AD_FILE path="App.jsx" op="create">');
     expect(prompt.slice(transportOverride)).toContain("SUBSTITUI qualquer instrução anterior");
+  });
+});
+
+
+describe("orçamento adaptativo por modelo", () => {
+  it("não repassa 24k para o fallback barato", () => {
+    expect(modelOutputTokenBudget("Crie uma landing premium", false, "xiaomi/mimo-v2.5")).toBe(7000);
+    expect(modelOutputTokenBudget("CONSTRUÇÃO POR ETAPAS — ETAPA 1/7", false, "xiaomi/mimo-v2.5")).toBe(3200);
+    expect(modelOutputTokenBudget("CONSTRUÇÃO POR ETAPAS — ETAPA 2/7", true, "xiaomi/mimo-v2.5")).toBe(2200);
+  });
+
+  it("mantém o orçamento amplo do Sonnet e limita a rota free", () => {
+    expect(modelOutputTokenBudget("Crie uma landing premium", false, "anthropic/claude-sonnet-4.5")).toBe(24000);
+    expect(modelOutputTokenBudget("Crie uma landing premium", false, "openrouter/free")).toBe(4500);
   });
 });

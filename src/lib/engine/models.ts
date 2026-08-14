@@ -35,9 +35,6 @@ export const FREE_MODEL_OPENROUTER = "openrouter/free";
 export const ECON_MODEL_ANTHROPIC = "claude-3-5-haiku-latest";
 export const PREMIUM_MODEL_ANTHROPIC = "claude-sonnet-4-5";
 
-export function isFunctionalRefinementLegacy(message: string): boolean {
-  return isFunctionalRefinement(message);
-}
 
 export function pickTier(
   mode: CostMode,

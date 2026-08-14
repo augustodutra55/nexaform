@@ -1,4 +1,4 @@
-name: Temporary Golden after PR 102
+name: Temporary Golden after progressive quality gate
 
 on:
   push:
@@ -46,7 +46,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: golden-production-report-pr-102
+          name: golden-production-report-progressive-quality
           path: artifacts/golden-production.json
           if-no-files-found: warn
           retention-days: 14

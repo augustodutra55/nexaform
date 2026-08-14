@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compactProviderSystemPrompt, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairBaseFiles, qualityRepairInstruction, shouldTryFreeModelsAfterPaidDiagnostics, stagedRuntimeQualityReport } from "./code-providers";
+import { compactProviderSystemPrompt, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairBaseFiles, qualityRepairInstruction, rollbackMissingImportFiles, shouldTryFreeModelsAfterPaidDiagnostics, stagedRuntimeQualityReport } from "./code-providers";
 import type { AppGenerationResult, ProjectQualityReport } from "./app-types";
 
 const report: ProjectQualityReport = {
@@ -56,6 +56,61 @@ describe("reparo dirigido do quality gate", () => {
     } as AppGenerationResult;
 
     expect(qualityRepairBaseFiles(candidate, previous)).toBe(candidateFiles);
+  });
+
+  it("restaura somente o arquivo existente que introduziu import quebrado", () => {
+    const previous = [{ path: "App.jsx", content: "export default function App(){ return <main /> }" }];
+    const candidate = {
+      provider: "openrouter",
+      engineMode: "real",
+      stats: { lines: 3, components: 2, hooks: 0, handlers: 0, files: 2 },
+      reply: "feito",
+      plan: [],
+      app: {
+        kind: "app",
+        name: "Teste",
+        description: "",
+        files: [
+          { path: "App.jsx", content: 'import Agenda from "./components/Agenda"; export default function App(){ return <Agenda /> }' },
+          { path: "components/Filtro.jsx", content: "export default function Filtro(){ return <button /> }" },
+        ],
+        entry: "App.jsx",
+      },
+      cost: 0,
+      model: "teste",
+    } as AppGenerationResult;
+
+    const recovered = rollbackMissingImportFiles(candidate, previous, report);
+    expect(recovered?.app.files).toEqual([
+      previous[0],
+      candidate.app.files![1],
+    ]);
+  });
+
+  it("descarta um arquivo novo quando ele próprio contém import quebrado", () => {
+    const previous = [{ path: "App.jsx", content: "export default function App(){ return <main /> }" }];
+    const candidate = {
+      provider: "openrouter",
+      engineMode: "real",
+      stats: { lines: 2, components: 2, hooks: 0, handlers: 0, files: 2 },
+      reply: "feito",
+      plan: [],
+      app: {
+        kind: "app",
+        name: "Teste",
+        description: "",
+        files: [...previous, { path: "components/Agenda.jsx", content: 'import X from "./X"; export default X' }],
+        entry: "App.jsx",
+      },
+      cost: 0,
+      model: "teste",
+    } as AppGenerationResult;
+    const missingInNewFile: ProjectQualityReport = {
+      ...report,
+      errors: [{ ...report.errors[0], path: "components/Agenda.jsx" }],
+    };
+
+    expect(rollbackMissingImportFiles(candidate, previous, missingInNewFile)?.app.files).toEqual(previous);
   });
 });
 

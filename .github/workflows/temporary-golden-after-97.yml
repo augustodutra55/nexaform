@@ -1,0 +1,47 @@
+name: Temporary Golden after PR 97
+
+on:
+  push:
+    branches:
+      - test/golden-after-97
+
+permissions:
+  contents: read
+
+concurrency:
+  group: golden-after-pr-97
+  cancel-in-progress: false
+
+jobs:
+  golden:
+    name: 5 fluxos reais pós-PR 97
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PRODUCTION_URL: https://nexaform-rho.vercel.app
+      AD_GOLDEN_PROJECT_ID: 726260de-8056-4ad2-841d-b235bcaf7021
+      AD_GOLDEN_SERVICE_SECRET: ${{ secrets.AD_GOLDEN_SERVICE_SECRET }}
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v4
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verificar credencial de serviço
+        shell: bash
+        run: |
+          if [ -z "$AD_GOLDEN_SERVICE_SECRET" ]; then
+            echo "::error::AD_GOLDEN_SERVICE_SECRET ausente."
+            exit 1
+          fi
+      - name: Executar golden suite real
+        run: node scripts/golden-production.mjs
+      - name: Publicar relatório
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-production-report-after-97
+          path: artifacts/golden-production.json
+          if-no-files-found: warn
+          retention-days: 14

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { buildReleaseCertification, type ReadinessCheck } from "./readiness";
 
 const required: ReadinessCheck[] = [
-  "release-ci",
+  "release-core-ci",
+  "release-e2e-ci",
   "background-worker",
   "migration-0014",
   "migration-0015",
@@ -28,11 +29,20 @@ describe("certificação 12/12", () => {
 
 
   it("não certifica capacidades estáticas sem CI comprovado para o commit", () => {
-    const report = buildReleaseCertification(required.filter((check) => check.id !== "release-ci"));
+    const report = buildReleaseCertification(required.filter((check) => check.id !== "release-core-ci"));
     expect(report.certified).toBe(false);
     expect(report.ready).toBe(5);
     expect(report.gates.find((gate) => gate.id === "architecture")?.status).toBe("warning");
     expect(report.gates.find((gate) => gate.id === "interaction-tests")?.status).toBe("warning");
+  });
+
+
+  it("não aprova interações nem editor visual quando somente o build principal passou", () => {
+    const report = buildReleaseCertification(required.filter((check) => check.id !== "release-e2e-ci"));
+    expect(report.certified).toBe(false);
+    expect(report.ready).toBe(10);
+    expect(report.gates.find((gate) => gate.id === "interaction-tests")?.status).toBe("warning");
+    expect(report.gates.find((gate) => gate.id === "visual-editor")?.status).toBe("warning");
   });
 
   it("expõe o bloqueio real sem declarar 10/10", () => {

@@ -61,31 +61,31 @@ export function summarizeReadiness(
 }
 
 const capabilityGates = [
-  { number: 1, id: "architecture", label: "Arquitetura e código multi-arquivo", evidence: [
+  { number: 1, id: "architecture", label: "Arquitetura e código multi-arquivo", requiredIds: ["release-core-ci"], evidence: [
     "Planejamento determinístico antes da geração",
     "App.jsx fino e componentes pequenos por seção",
   ] },
-  { number: 2, id: "model-routing", label: "Roteamento de IA previsível", evidence: [
+  { number: 2, id: "model-routing", label: "Roteamento de IA previsível", requiredIds: ["release-core-ci"], evidence: [
     "Modos econômico, automático e premium",
     "Sem rebaixamento silencioso de modelo",
   ] },
-  { number: 4, id: "quality-repair", label: "Qualidade e autorreparo", evidence: [
+  { number: 4, id: "quality-repair", label: "Qualidade e autorreparo", requiredIds: ["release-core-ci"], evidence: [
     "Quality gate estrutural antes de salvar",
     "Auditoria de runtime e correção cirúrgica",
   ] },
-  { number: 5, id: "interaction-tests", label: "Testes reais de interação", evidence: [
+  { number: 5, id: "interaction-tests", label: "Testes reais de interação", requiredIds: ["release-core-ci", "release-e2e-ci"], evidence: [
     "Playwright cobre login, menus, formulário, CRUD e mobile",
     "TypeScript, unitários, build e E2E executados no CI",
   ] },
-  { number: 8, id: "visual-engine", label: "Motor visual premium", evidence: [
+  { number: 8, id: "visual-engine", label: "Motor visual premium", requiredIds: ["release-core-ci"], evidence: [
     "Blueprint visual por segmento",
     "Movimento, mídia e 3D com orçamento de performance",
   ] },
-  { number: 9, id: "visual-editor", label: "Editor visual clicável", evidence: [
+  { number: 9, id: "visual-editor", label: "Editor visual clicável", requiredIds: ["release-core-ci", "release-e2e-ci"], evidence: [
     "Seleção de elemento diretamente no preview",
     "Refinamento preserva e verifica o alvo visual",
   ] },
-  { number: 10, id: "versions-portability", label: "Versões e portabilidade", evidence: [
+  { number: 10, id: "versions-portability", label: "Versões e portabilidade", requiredIds: ["release-core-ci"], evidence: [
     "Histórico, desfazer e retomada por etapas",
     "Importação e exportação React + Vite",
   ] },
@@ -128,7 +128,7 @@ function checkGate(
 
 export function buildReleaseCertification(checks: ReadinessCheck[]): ReleaseCertification {
   const verifiedCapabilityGates = capabilityGates.map((item) =>
-    checkGate(item.number, item.id, item.label, checks, ["release-ci"], Array.from(item.evidence))
+    checkGate(item.number, item.id, item.label, checks, Array.from(item.requiredIds), Array.from(item.evidence))
   );
   const dynamicGates = [
     checkGate(3, "durable-generation", "Fila durável de geração", checks,

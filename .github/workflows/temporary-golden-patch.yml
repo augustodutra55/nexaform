@@ -1,0 +1,243 @@
+name: Temporary Golden deterministic patch
+
+on:
+  push:
+    branches:
+      - fix-golden-deterministic-output
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply root-cause patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/lib/engine/code-providers.ts')
+          text = path.read_text()
+
+          def replace_once(old: str, new: str, label: str):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 occurrence, found {count}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+          '''function systemPromptFor(a: Args): string {
+            return a.currentFiles?.length || a.currentCode ? CODE_REFINE_SYSTEM_PROMPT : CODE_SYSTEM_PROMPT;
+          }''',
+          '''const INITIAL_BLOCK_TRANSPORT = `=== FORMATO FINAL DE TRANSPORTE — TEM PRIORIDADE SOBRE QUALQUER FORMATO ANTERIOR ===
+          Na PRIMEIRA geração, NÃO retorne JSON e NÃO coloque código em cercas Markdown. Entregue cada arquivo como texto bruto em um bloco AD_FILE:
+          <AD_FILE path="App.jsx" op="create">
+          conteúdo completo do arquivo
+          </AD_FILE>
+          <AD_FILE path="components/Exemplo.jsx" op="create">
+          conteúdo completo do arquivo
+          </AD_FILE>
+          Finalize opcionalmente com <AD_REPLY>resumo curto em pt-BR</AD_REPLY>.
+          Todos os arquivos necessários devem ser completos e autoconsistentes. App.jsx continua sendo a entrada inferida automaticamente.
+          ESTA REGRA SUBSTITUI qualquer instrução anterior que peça JSON para a resposta final.`;
+
+          export function providerSystemPrompt(hasCurrentProject: boolean): string {
+            if (hasCurrentProject) return CODE_REFINE_SYSTEM_PROMPT;
+            return `${CODE_SYSTEM_PROMPT}\n\n${INITIAL_BLOCK_TRANSPORT}`;
+          }
+
+          function systemPromptFor(a: Args): string {
+            return providerSystemPrompt(!!(a.currentFiles?.length || a.currentCode));
+          }''',
+          'system prompt transport')
+
+          old_quality = '''export function qualityRepairInstruction(a: Pick<Args, "message" | "currentFiles" | "currentCode">, report: ProjectQualityReport): string {
+            const failures = report.errors.map((value) => `- ${value.path ? `${value.path}: ` : ""}${value.message}`).join("\\n");
+            const isStaged = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
+            const format = a.currentFiles?.length || a.currentCode
+              ? "Reenvie somente AD_PATCH/AD_FILE/AD_DELETE válidos contra o projeto original, seguidos de AD_REPLY."
+              : isStaged
+                ? "O projeto ainda está vazio. Reenvie cada arquivo completo em blocos AD_FILE com op=\\\"create\\\", seguidos de AD_REPLY. Não use JSON, Markdown nem AD_PATCH."
+                : "Reenvie o projeto completo no JSON files obrigatório, sem Markdown nem texto fora do JSON.";
+            return [
+              "QUALITY GATE: o código anterior foi recusado antes de ser salvo.",
+              failures,
+              "Corrija somente essas falhas, preserve o escopo e confira todos os imports relativos.",
+              format,
+            ].join("\\n\\n");
+          }'''
+          new_quality = '''export function qualityRepairInstruction(a: Pick<Args, "message" | "currentFiles" | "currentCode">, report: ProjectQualityReport): string {
+            const failures = report.errors.map((value) => `- ${value.path ? `${value.path}: ` : ""}${value.message}`).join("\\n");
+            const format = a.currentFiles?.length || a.currentCode
+              ? "Reenvie somente AD_PATCH/AD_FILE/AD_DELETE válidos contra o projeto original, seguidos de AD_REPLY. Faça a menor correção possível e não reenvie arquivos inalterados."
+              : "O projeto ainda está vazio. Reenvie cada arquivo completo em blocos AD_FILE com op=\\\"create\\\", seguidos de AD_REPLY. Não use JSON, Markdown nem AD_PATCH.";
+            return [
+              "QUALITY GATE: o código anterior foi recusado antes de ser salvo.",
+              failures,
+              "Corrija somente essas falhas, preserve o escopo e confira todos os imports relativos.",
+              format,
+            ].join("\\n\\n");
+          }'''
+          replace_once(old_quality, new_quality, 'quality repair format')
+
+          replace_once(
+          '''  // As etapas são pequenas. O reparo recebe os erros exatos e não recria a
+            // etapa inteira. A soma fica abaixo do teto de 140 s do worker.
+            if (isStaged) return repair ? 35_000 : 95_000;
+            if (isRefinement) return repair ? 60_000 : 90_000;
+            // A primeira geração pode produzir um projeto completo. Com o teto da rota
+            // em 280 s, 180 s ainda deixam margem para imagens, persistência e resposta.
+            return 180_000;''',
+          '''  // Etapas pequenas têm um orçamento total de 130 s: a primeira passagem
+            // recebe 80 s e o reparo dirigido 50 s. Isso preserva 10 s de margem no
+            // worker de 140 s e evita o padrão observado de 95 s + reparo abortado em 35 s.
+            if (isStaged) return repair ? 50_000 : 80_000;
+            if (isRefinement) return repair ? 60_000 : 90_000;
+            // Primeira geração simples: uma resposta completa e, se o transporte vier
+            // inválido, um reparo curto ainda cabem confortavelmente na rota de 280 s.
+            if (repair) return 70_000;
+            return 180_000;''',
+          'provider timeout budget')
+
+          replace_once(
+          '''    const shouldRepair = isRefinement || /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
+            if (!shouldRepair) {
+              diag.push(`Claude: resposta de ${model} não pôde ser interpretada como código (${responseFormatSummary(text)}).`);
+              return null;
+            }
+
+          ''',
+          '''    // Toda resposta não vazia que contenha conteúdo útil recebe UMA correção
+            // de transporte antes de desistirmos; repetir uma geração inteira é mais caro
+            // e foi a causa do estouro da Golden para landings.
+          ''',
+          'claude format repair')
+
+          replace_once(
+          '''    const shouldRepair = isRefinement || /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
+            if (!shouldRepair) {
+              diag.push(`OpenRouter: resposta de ${model} não pôde ser interpretada como código (${responseFormatSummary(text)}).`);
+              return null;
+            }
+
+          ''',
+          '''    // Toda resposta não vazia que contenha conteúdo útil recebe UMA correção
+            // de transporte antes de desistirmos; repetir uma geração inteira é mais caro
+            // e foi a causa do estouro da Golden para landings.
+          ''',
+          'openrouter format repair')
+
+          replace_once(
+          '''      // Refinamento: 1 tentativa no principal (rápido, cabe nos 60s do Hobby).
+                // Primeira geração: 2 tentativas (mais robusto, vale a espera).
+                const attempts = premiumOnly ? 1 : !isRefinement ? 2 : 1;''',
+          '''      // Cada chamada ao provedor já contém no máximo uma segunda passagem
+                // dirigida de quality/format repair. Repetir a geração inteira duplicava
+                // custo e latência sem atacar a causa do formato inválido.
+                const attempts = 1;''',
+          'provider attempt policy')
+
+          path.write_text(text)
+
+          test_path = Path('src/lib/engine/code-providers.test.ts')
+          test = test_path.read_text()
+          test = test.replace(
+              'import { qualityRepairInstruction } from "./code-providers";',
+              'import { providerSystemPrompt, qualityRepairInstruction } from "./code-providers";',
+              1,
+          )
+          marker = '''  it("usa patches curtos quando o projeto já existe", () => {
+            const instruction = qualityRepairInstruction({
+              message: "CONSTRUÇÃO POR ETAPAS — ETAPA 2/7",
+              currentFiles: [{ path: "App.jsx", content: "export default function App(){}" }],
+              currentCode: null,
+            }, report);
+            expect(instruction).toContain("AD_PATCH/AD_FILE/AD_DELETE");
+            expect(instruction).toContain("App.jsx: Import relativo ausente");
+          });
+          '''
+          addition = marker + '''
+            it("usa AD_FILE também no reparo de uma primeira geração simples", () => {
+              const instruction = qualityRepairInstruction({
+                message: "Crie uma landing premium para consultoria",
+                currentFiles: null,
+                currentCode: null,
+              }, report);
+              expect(instruction).toContain("AD_FILE");
+              expect(instruction).toContain("Não use JSON");
+              expect(instruction).not.toContain("JSON files obrigatório");
+            });
+
+            it("faz o formato AD_FILE prevalecer no system prompt da primeira geração", () => {
+              const prompt = providerSystemPrompt(false);
+              const jsonInstruction = prompt.indexOf("Responda APENAS com JSON válido");
+              const transportOverride = prompt.indexOf("FORMATO FINAL DE TRANSPORTE");
+              expect(jsonInstruction).toBeGreaterThanOrEqual(0);
+              expect(transportOverride).toBeGreaterThan(jsonInstruction);
+              expect(prompt.slice(transportOverride)).toContain('<AD_FILE path="App.jsx" op="create">');
+              expect(prompt.slice(transportOverride)).toContain("SUBSTITUI qualquer instrução anterior");
+            });
+          '''
+          if test.count(marker) != 1:
+              raise SystemExit('test insertion marker not found exactly once')
+          test = test.replace(marker, addition, 1)
+          test_path.write_text(test)
+          PY
+
+          git diff --check
+          git diff -- src/lib/engine/code-providers.ts src/lib/engine/code-providers.test.ts
+
+      - name: Commit root-cause patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/engine/code-providers.ts src/lib/engine/code-providers.test.ts
+          git commit -m "fix: make generation output deterministic"
+          git push origin HEAD:fix-golden-deterministic-output
+
+      - name: Validate patch
+        id: validate
+        shell: bash
+        run: |
+          set +e
+          mkdir -p artifacts
+          : > artifacts/golden-patch-validation.txt
+          overall=0
+          run_cmd() {
+            label="$1"
+            shift
+            echo "===== $label =====" | tee -a artifacts/golden-patch-validation.txt
+            "$@" >> artifacts/golden-patch-validation.txt 2>&1
+            status=$?
+            echo "EXIT=$status" | tee -a artifacts/golden-patch-validation.txt
+            if [ "$status" -ne 0 ]; then overall=1; fi
+          }
+          run_cmd "npm ci" npm ci
+          run_cmd "npm run typecheck" npm run typecheck
+          run_cmd "npm run test:unit" npm run test:unit
+          run_cmd "npm run build" npm run build
+          exit "$overall"
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-deterministic-patch-validation
+          path: artifacts/golden-patch-validation.txt
+          if-no-files-found: warn

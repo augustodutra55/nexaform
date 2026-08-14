@@ -26,6 +26,7 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
+          import re
 
           p = Path('src/lib/engine/code-providers.ts')
           s = p.read_text()
@@ -64,22 +65,26 @@ jobs:
           start = s.index('async function callOpenRouter')
           end = s.index('\nfunction demoFallback', start)
           block = s[start:end]
-          body_anchor = '''        usage: { include: true },
-                messages,
-              }),'''
-          if block.count(body_anchor) != 1:
-              raise SystemExit(f'OpenRouter body anchor mismatch: {block.count(body_anchor)}')
-          block = block.replace(body_anchor, '''        usage: { include: true },
-                messages,
-                ...openRouterControlsForModel(model),
-              }),''', 1)
-          empty_anchor = 'if (!text) { diag.push(`OpenRouter: ${model} respondeu vazio.`); return null; }'
-          if block.count(empty_anchor) != 1:
-              raise SystemExit(f'OpenRouter empty anchor mismatch: {block.count(empty_anchor)}')
-          block = block.replace(empty_anchor, '''if (!text) {
+          body_pattern = re.compile(r'(usage:\s*\{\s*include:\s*true\s*\},\s*\n\s*messages,\s*\n)(\s*\}\),)')
+          block, n = body_pattern.subn(
+              lambda m: m.group(1) + '      ...openRouterControlsForModel(model),\n' + m.group(2),
+              block,
+              count=1,
+          )
+          if n != 1:
+              raise SystemExit(f'OpenRouter body structural patch mismatch: {n}')
+
+          empty_pattern = re.compile(r'if \(!text\) \{\s*diag\.push\(`OpenRouter: \$\{model\} respondeu vazio\.`\);\s*return null;\s*\}')
+          block, n = empty_pattern.subn(
+              '''if (!text) {
                 diag.push(`OpenRouter: ${model} respondeu vazio (${openRouterEmptyResponseSummary(data)}).`);
                 return null;
-              }''', 1)
+              }''',
+              block,
+              count=1,
+          )
+          if n != 1:
+              raise SystemExit(f'OpenRouter empty structural patch mismatch: {n}')
           s = s[:start] + block + s[end:]
           p.write_text(s)
 

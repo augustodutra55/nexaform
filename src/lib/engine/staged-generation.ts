@@ -94,6 +94,9 @@ const COMPLEX_SCOPE = [
   /\b(?:agenda|agendamento|reagendamento|cancelamento|hor[aá]rios?)\b/i,
   /\b(?:cadastro|clientes?|tarefas?|funil|filtros?|busca|pesquisa)\b/i,
   /\b(?:estados? de (?:vazio|carregando|erro)|loading|empty state)\b/i,
+  /\b(?:e-?commerce|loja|cat[aá]logo|vitrine|produtos?)\b/i,
+  /\b(?:carrinho|checkout|pedidos?)\b/i,
+  /\b(?:pre[çc]o|benef[ií]cios?|prova social|faq)\b/i,
 ];
 
 /** Detecta especificações que não cabem com segurança em uma única resposta. */
@@ -111,12 +114,15 @@ export function shouldStageInitialBuild(
   const bulletCount = (specification.match(/^\s*(?:[-*]|\d+[.)])\s+/gm) || []).length;
   const headingCount = (specification.match(/^\s*[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s/()-]{5,}$/gm) || []).length;
   const scopeScore = COMPLEX_SCOPE.reduce((score, pattern) => score + (pattern.test(specification) ? 1 : 0), 0);
+  const commerceWorkflow = /\b(?:e-?commerce|loja|cat[aá]logo|vitrine|produtos?)\b/i.test(specification)
+    && /\b(?:carrinho|checkout|pedidos?)\b/i.test(specification);
 
   // Um pedido curto pode descrever um produto inteiro. Apps com vários fluxos
   // operacionais (agenda, autenticação, CRUD, dashboard, filtros, estados) não
   // devem ser forçados a caber numa única resposta apenas porque o texto é curto.
   return specification.length >= 8_000
     || bulletCount >= 45
+    || commerceWorkflow
     || (specification.length >= 260 && scopeScore >= 3)
     || (specification.length >= 3_500 && (scopeScore >= 5 || headingCount >= 10));
 }
@@ -296,6 +302,6 @@ export function buildStageRetryPrompt(
   return [
     buildStagePrompt(masterPrompt, stage, index, total, kind),
     "RECUPERAÇÃO AUTOMÁTICA: a tentativa anterior desta etapa não concluiu.",
-    "Reduza drasticamente o escopo agora. Se esta for a primeira etapa, entregue apenas uma aplicação mínima executável com App.jsx, um componente de layout e uma tela inicial — no máximo 3 arquivos, sem imagens, autenticação, backend, animações ou integrações. Na primeira etapa, devolva cada arquivo completo exclusivamente em <AD_FILE path=\"caminho.jsx\" op=\"create\">...</AD_FILE>. Nas demais etapas, implemente apenas uma mudança essencial em no máximo 2 arquivos curtos. Não reenvie arquivos inalterados, não tente concluir etapas futuras e nunca use JSON ou Markdown. Para arquivos existentes use AD_PATCH com AD_SEARCH literal e único; use AD_FILE apenas para arquivos novos.",
+    "Reduza drasticamente o escopo agora. Se esta for a primeira etapa, entregue apenas uma aplicação mínima executável com App.jsx, um componente de layout e uma tela inicial — no máximo 3 arquivos, sem imagens, autenticação, backend, animações ou integrações. Na primeira etapa, devolva cada arquivo completo exclusivamente em <AD_FILE path=\"caminho.jsx\" op=\"create\">...</AD_FILE>. Nas demais etapas, implemente apenas uma mudança essencial em no máximo 2 arquivos curtos. Não reenvie arquivos inalterados, não tente concluir etapas futuras e nunca use JSON ou Markdown. Para arquivos existentes, preserve o conteúdo atual e foque somente no requisito essencial desta etapa; o worker poderá usar uma recuperação de snapshot completo se a edição incremental falhar novamente.",
   ].join("\n\n");
 }

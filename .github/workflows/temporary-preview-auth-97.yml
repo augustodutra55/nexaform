@@ -22,8 +22,8 @@ jobs:
       - name: Verify signed Golden preflight
         shell: bash
         run: |
-          node <<'NODE'
-          const crypto = require('node:crypto');
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
           const baseUrl = process.env.PREVIEW_URL.replace(/\/$/, '');
           const secret = String(process.env.AD_GOLDEN_SERVICE_SECRET || '').trim();
           if (!secret) throw new Error('AD_GOLDEN_SERVICE_SECRET ausente');

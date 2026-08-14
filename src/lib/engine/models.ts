@@ -25,6 +25,14 @@ export function isFunctionalRefinement(message: string): boolean {
 export const ECON_MODEL_OPENROUTER = process.env.NEXT_PUBLIC_ECON_MODEL || "anthropic/claude-haiku-4.5";
 /** Modelo OpenRouter forte — apps, lógica, refinos técnicos. */
 export const PREMIUM_MODEL_OPENROUTER = process.env.NEXT_PUBLIC_PREMIUM_MODEL || "anthropic/claude-sonnet-4.5";
+/**
+ * Fallbacks de orçamento do OpenRouter. Mantemos o Claude escolhido como primeira
+ * opção; estes modelos só entram se a chamada anterior falhar (incluindo HTTP 402).
+ * Step 3.7 Flash preserva boa capacidade de coding com custo muito menor e o
+ * roteador free garante uma última tentativa sem depender de saldo pago.
+ */
+export const BUDGET_MODEL_OPENROUTER = process.env.NEXT_PUBLIC_BUDGET_MODEL || "stepfun/step-3.7-flash";
+export const FREE_MODEL_OPENROUTER = "openrouter/free";
 
 /** Equivalentes para a API direta da Anthropic. */
 export const ECON_MODEL_ANTHROPIC = "claude-3-5-haiku-latest";
@@ -64,19 +72,30 @@ export function modelFor(tier: Tier, provider: "openrouter" | "claude"): string 
   return tier === "premium" ? PREMIUM_MODEL_ANTHROPIC : ECON_MODEL_ANTHROPIC;
 }
 
+function uniqueModels(models: string[]): string[] {
+  return [...new Set(models.filter(Boolean))];
+}
+
 /**
  * Plano de execução previsível para uma geração.
  *
- * O modelo escolhido pelo modo de custo é uma decisão do usuário. Uma falha
- * pode ser repetida no mesmo modelo ou encaminhada a outro provedor, mas nunca
- * deve trocar silenciosamente Premium por Econômico (perda de qualidade) nem
- * Econômico por Premium (aumento inesperado de custo).
+ * A escolha de tier continua sendo respeitada na PRIMEIRA tentativa. No
+ * OpenRouter, falhas de disponibilidade/saldo podem cair para uma rota de
+ * orçamento menor e, por último, para inferência gratuita. Isso evita que um
+ * teto de max_tokens transforme saldo baixo em indisponibilidade total do AD
+ * Studio. Na Anthropic direta não fazemos troca de família/provedor.
  */
 export function modelExecutionPlan(
   tier: Tier,
   provider: "openrouter" | "claude"
 ): string[] {
-  return [modelFor(tier, provider)];
+  const selected = modelFor(tier, provider);
+  if (provider === "claude") return [selected];
+  return uniqueModels([
+    selected,
+    BUDGET_MODEL_OPENROUTER,
+    FREE_MODEL_OPENROUTER,
+  ]);
 }
 
 /** Preços de referência (USD por 1M tokens) para estimar custo quando o
@@ -85,6 +104,8 @@ const PRICE: Record<string, { in: number; out: number }> = {
   "anthropic/claude-haiku-4.5": { in: 1, out: 5 },
   "anthropic/claude-3.5-haiku": { in: 0.8, out: 4 },
   "anthropic/claude-sonnet-4.5": { in: 3, out: 15 },
+  "stepfun/step-3.7-flash": { in: 0.2, out: 1.15 },
+  "openrouter/free": { in: 0, out: 0 },
   "claude-3-5-haiku-latest": { in: 0.8, out: 4 },
   "claude-sonnet-4-5": { in: 3, out: 15 },
 };

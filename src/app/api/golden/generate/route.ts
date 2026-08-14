@@ -4,7 +4,7 @@ import { generateAppWithProviders } from "@/lib/engine/code-providers";
 import { verifyGoldenServiceAuth } from "@/lib/golden-auth";
 import { isOwner } from "@/lib/access";
 import { isUuid } from "@/lib/engine/data-guard";
-import { buildStagePrompt, stagedBuildStages } from "@/lib/engine/staged-generation";
+import { buildStagePrompt, buildStageRetryPrompt, stagedBuildStages } from "@/lib/engine/staged-generation";
 import type { AppFile } from "@/lib/engine/app-types";
 
 export const maxDuration = 300;
@@ -16,6 +16,18 @@ function safeCurrentFiles(value: unknown): AppFile[] | null {
     .filter((file) => file && typeof file.path === "string" && typeof file.content === "string")
     .map((file) => ({ path: String(file.path).slice(0, 300), content: String(file.content).slice(0, 300_000) }));
   return files.length ? files : null;
+}
+
+function snapshotRecoveryPrompt(prompt: string, files: AppFile[]): string {
+  const snapshot = files.map((file) => `--- ARQUIVO ATUAL: ${file.path} ---\n${file.content}`).join("\n\n");
+  return [
+    prompt,
+    "RECUPERAÇÃO POR SNAPSHOT COMPLETO: a edição incremental anterior falhou no quality gate.",
+    "Recrie o snapshot completo já corrigido, preservando tudo que funciona e aplicando SOMENTE o requisito essencial desta etapa. Não implemente etapas futuras. O retorno deve ser um projeto completo e estruturalmente válido, com todos os imports relativos resolvidos.",
+    "SNAPSHOT ATUAL DO PROJETO:",
+    snapshot,
+    "FIM DO SNAPSHOT ATUAL.",
+  ].join("\n\n");
 }
 
 export async function POST(req: NextRequest) {
@@ -41,20 +53,26 @@ export async function POST(req: NextRequest) {
 
   const currentFiles = safeCurrentFiles(body?.currentFiles);
   const requestedStage = Number(body?.stageIndex);
+  const snapshotRecovery = body?.snapshotRecovery === true && !!currentFiles?.length;
   let generationMessage = message;
-  let stage: { index: number; total: number; label: string } | null = null;
+  let stage: { index: number; total: number; label: string; snapshotRecovery: boolean } | null = null;
   if (Number.isInteger(requestedStage) && requestedStage >= 0) {
     const stages = stagedBuildStages();
     if (requestedStage >= stages.length) {
       return NextResponse.json({ error: "Etapa Golden inválida." }, { status: 400 });
     }
-    generationMessage = buildStagePrompt(message, stages[requestedStage], requestedStage, stages.length, "initial");
-    stage = { index: requestedStage, total: stages.length, label: stages[requestedStage].label };
+    const basePrompt = snapshotRecovery
+      ? buildStageRetryPrompt(message, stages[requestedStage], requestedStage, stages.length, "initial")
+      : buildStagePrompt(message, stages[requestedStage], requestedStage, stages.length, "initial");
+    generationMessage = snapshotRecovery && currentFiles
+      ? snapshotRecoveryPrompt(basePrompt, currentFiles)
+      : basePrompt;
+    stage = { index: requestedStage, total: stages.length, label: stages[requestedStage].label, snapshotRecovery };
   }
 
   const result = await generateAppWithProviders({
     message: generationMessage,
-    currentFiles,
+    currentFiles: snapshotRecovery ? null : currentFiles,
     name: typeof body?.name === "string" ? body.name : "Golden Production",
     costMode: "auto",
     forceReal: true,

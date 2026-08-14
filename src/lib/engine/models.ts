@@ -30,6 +30,26 @@ export const PREMIUM_MODEL_OPENROUTER = process.env.NEXT_PUBLIC_PREMIUM_MODEL ||
  */
 export const BUDGET_MODEL_OPENROUTER = process.env.NEXT_PUBLIC_BUDGET_MODEL || "xiaomi/mimo-v2.5";
 export const FREE_MODEL_OPENROUTER = "openrouter/free";
+/** Modelos gratuitos concretos, ordenados por capacidade atual de programação.
+ * A lista pode ser atualizada na Vercel sem alterar código quando a oferta do
+ * OpenRouter mudar. O roteador aleatório continua como último recurso. */
+const DEFAULT_FREE_CODING_MODELS_OPENROUTER = [
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "google/gemma-4-31b-it:free",
+  "cohere/north-mini-code:free",
+];
+
+export const FREE_CODING_MODELS_OPENROUTER = uniqueModels(
+  String(process.env.OPENROUTER_FREE_MODELS || "")
+    .split(",")
+    .map((model) => model.trim())
+    .filter(Boolean)
+    .concat(DEFAULT_FREE_CODING_MODELS_OPENROUTER)
+);
+
+export function isFreeOpenRouterModel(model: string): boolean {
+  return model === FREE_MODEL_OPENROUTER || /:free$/.test(model);
+}
 
 /** Equivalentes para a API direta da Anthropic. */
 export const ECON_MODEL_ANTHROPIC = "claude-3-5-haiku-latest";
@@ -79,6 +99,7 @@ export function modelExecutionPlan(
   return uniqueModels([
     selected,
     BUDGET_MODEL_OPENROUTER,
+    ...FREE_CODING_MODELS_OPENROUTER,
     FREE_MODEL_OPENROUTER,
   ]);
 }
@@ -94,6 +115,7 @@ const PRICE: Record<string, { in: number; out: number }> = {
 };
 
 export function estimateCost(model: string, inTokens: number, outTokens: number): number {
+  if (isFreeOpenRouterModel(model)) return 0;
   const p = PRICE[model] ?? { in: 3, out: 15 };
   return (inTokens / 1_000_000) * p.in + (outTokens / 1_000_000) * p.out;
 }

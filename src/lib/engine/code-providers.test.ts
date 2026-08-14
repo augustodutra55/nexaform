@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairInstruction } from "./code-providers";
+import { compactProviderSystemPrompt, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairInstruction } from "./code-providers";
 import type { ProjectQualityReport } from "./app-types";
 
 const report: ProjectQualityReport = {
@@ -71,7 +71,21 @@ describe("orçamento adaptativo por modelo", () => {
 
   it("mantém o orçamento amplo do Sonnet e limita a rota free", () => {
     expect(modelOutputTokenBudget("Crie uma landing premium", false, "anthropic/claude-sonnet-4.5")).toBe(24000);
-    expect(modelOutputTokenBudget("Crie uma landing premium", false, "openrouter/free")).toBe(4500);
+    expect(modelOutputTokenBudget("Crie uma landing premium", false, "openrouter/free")).toBe(7000);
+    expect(modelOutputTokenBudget("CONSTRUÇÃO POR ETAPAS — ETAPA 1/7", false, "nvidia/nemotron-3-ultra-550b-a55b:free")).toBe(3600);
+    expect(modelOutputTokenBudget("CONSTRUÇÃO POR ETAPAS — ETAPA 2/7", true, "nvidia/nemotron-3-ultra-550b-a55b:free")).toBe(2600);
+  });
+
+  it("usa um contrato compacto e único nos modelos gratuitos", () => {
+    const initial = compactProviderSystemPrompt(false);
+    expect(initial).toContain('<AD_FILE path="App.jsx" op="create">');
+    expect(initial).toContain("window.AD");
+    expect(initial).toContain("ADIMG");
+    expect(initial).not.toContain("Responda APENAS com JSON válido");
+
+    const refinement = compactProviderSystemPrompt(true);
+    expect(refinement).toContain("AD_PATCH");
+    expect(refinement).toContain("AD_SEARCH");
   });
 });
 
@@ -84,5 +98,9 @@ describe("controles de saída do fallback OpenRouter", () => {
     });
     expect(openRouterControlsForModel("anthropic/claude-sonnet-4.5")).toEqual({});
     expect(openRouterControlsForModel("openrouter/free")).toEqual({});
+    expect(openRouterControlsForModel("nvidia/nemotron-3-ultra-550b-a55b:free")).toEqual({
+      reasoning: { enabled: false },
+      temperature: 0.2,
+    });
   });
 });

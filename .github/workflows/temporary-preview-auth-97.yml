@@ -1,0 +1,46 @@
+name: Temporary preview auth PR 97
+
+on:
+  push:
+    branches:
+      - test/preview-auth-97
+
+permissions:
+  contents: read
+
+jobs:
+  auth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PREVIEW_URL: https://nexaform-git-fix-openrouter-6d9838-augusto-s-projects-a0ee1a5a.vercel.app
+      AD_GOLDEN_SERVICE_SECRET: ${{ secrets.AD_GOLDEN_SERVICE_SECRET }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify signed Golden preflight
+        shell: bash
+        run: |
+          node <<'NODE'
+          const crypto = require('node:crypto');
+          const baseUrl = process.env.PREVIEW_URL.replace(/\/$/, '');
+          const secret = String(process.env.AD_GOLDEN_SERVICE_SECRET || '').trim();
+          if (!secret) throw new Error('AD_GOLDEN_SERVICE_SECRET ausente');
+          const timestamp = String(Date.now());
+          const signature = crypto.createHmac('sha256', secret).update(timestamp).digest('hex');
+          const res = await fetch(`${baseUrl}/api/golden/generate`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-ad-golden-timestamp': timestamp,
+              'x-ad-golden-signature': signature,
+            },
+            body: '{}',
+            signal: AbortSignal.timeout(15000),
+          });
+          const text = await res.text();
+          console.log(`PREVIEW_AUTH_HTTP=${res.status}`);
+          console.log(`PREVIEW_AUTH_BODY=${text.slice(0, 500)}`);
+          if (res.status !== 400) process.exit(1);
+          NODE

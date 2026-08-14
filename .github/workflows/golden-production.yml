@@ -24,7 +24,7 @@ jobs:
   golden:
     name: 5 fluxos reais de geração
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
     env:
       PRODUCTION_URL: ${{ inputs.production_url }}
       AD_GOLDEN_PROJECT_ID: ${{ inputs.project_id }}

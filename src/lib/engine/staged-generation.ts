@@ -114,12 +114,15 @@ export function shouldStageInitialBuild(
   const bulletCount = (specification.match(/^\s*(?:[-*]|\d+[.)])\s+/gm) || []).length;
   const headingCount = (specification.match(/^\s*[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s/()-]{5,}$/gm) || []).length;
   const scopeScore = COMPLEX_SCOPE.reduce((score, pattern) => score + (pattern.test(specification) ? 1 : 0), 0);
+  const commerceWorkflow = /\b(?:e-?commerce|loja|cat[aá]logo|vitrine|produtos?)\b/i.test(specification)
+    && /\b(?:carrinho|checkout|pedidos?)\b/i.test(specification);
 
   // Um pedido curto pode descrever um produto inteiro. Apps com vários fluxos
   // operacionais (agenda, autenticação, CRUD, dashboard, filtros, estados) não
   // devem ser forçados a caber numa única resposta apenas porque o texto é curto.
   return specification.length >= 8_000
     || bulletCount >= 45
+    || commerceWorkflow
     || (specification.length >= 260 && scopeScore >= 3)
     || (specification.length >= 3_500 && (scopeScore >= 5 || headingCount >= 10));
 }

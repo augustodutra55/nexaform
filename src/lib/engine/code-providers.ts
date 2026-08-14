@@ -427,6 +427,24 @@ export function openRouterControlsForModel(model: string): Record<string, unknow
   return {};
 }
 
+/**
+ * Em construções por etapas, uma falha estrutural ou timeout dos modelos pagos
+ * indica que insistir em toda a fila gratuita só consumirá o restante da
+ * requisição. Os gratuitos continuam disponíveis quando os modelos pagos estão
+ * indisponíveis por HTTP (por exemplo, conta sem saldo), preservando o modo sem
+ * custo sem transformar uma resposta ruim em um timeout de cinco minutos.
+ */
+export function shouldTryFreeModelsAfterPaidDiagnostics(
+  isStagedBuild: boolean,
+  diagnostics: string[]
+): boolean {
+  if (!isStagedBuild) return true;
+  const summary = diagnostics.join(" | ");
+  const paidAnsweredButFailed = /n[aã]o respondeu dentro|quality gate|gerou c[oó]digo estruturalmente inv[aá]lido|n[aã]o passou|resposta inicial .* n[aã]o p[oô]de ser aplicada|continuou inv[aá]lida/i.test(summary);
+  if (paidAnsweredButFailed) return false;
+  return /HTTP (?:401|402|404|408|429|5\d\d)\b/i.test(summary);
+}
+
 function openRouterEmptyResponseSummary(data: any): string {
   const choice = data?.choices?.[0];
   const message = choice?.message;
@@ -703,7 +721,19 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
     call: (k: string, args: Args, model: string, d: string[]) => Promise<AppGenerationResult | null>
   ): Promise<AppGenerationResult | null> {
     const chain = modelExecutionPlan(tier, provider);
+    const chainDiagnosticsStart = diag.length;
     for (let i = 0; i < chain.length; i++) {
+      if (
+        provider === "openrouter"
+        && isFreeOpenRouterModel(chain[i])
+        && !shouldTryFreeModelsAfterPaidDiagnostics(
+          isStagedBuild,
+          diag.slice(chainDiagnosticsStart)
+        )
+      ) {
+        diag.push("OpenRouter: fallbacks gratuitos lentos foram ignorados nesta etapa para preservar o prazo da requisição.");
+        break;
+      }
       // Cada chamada já inclui no máximo uma passagem dirigida de quality/format repair.
       // Repetir toda a geração mascarava a causa e duplicava custo/latência.
       const attempts = 1;

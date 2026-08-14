@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compactProviderSystemPrompt, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairInstruction } from "./code-providers";
+import { compactProviderSystemPrompt, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairInstruction, shouldTryFreeModelsAfterPaidDiagnostics } from "./code-providers";
 import type { ProjectQualityReport } from "./app-types";
 
 const report: ProjectQualityReport = {
@@ -102,5 +102,29 @@ describe("controles de saída do fallback OpenRouter", () => {
       reasoning: { enabled: false },
       temperature: 0.2,
     });
+  });
+});
+
+describe("orçamento de tempo dos fallbacks gratuitos", () => {
+  it("mantém o fallback gratuito quando os pagos estão indisponíveis por HTTP", () => {
+    expect(shouldTryFreeModelsAfterPaidDiagnostics(true, [
+      "OpenRouter: modelo anthropic/claude-sonnet-4.5 → HTTP 402 — sem crédito/saldo.",
+      "OpenRouter: modelo xiaomi/mimo-v2.5 → HTTP 402 — sem crédito/saldo.",
+    ])).toBe(true);
+  });
+
+  it("interrompe a fila gratuita após timeout ou falha estrutural dos pagos", () => {
+    expect(shouldTryFreeModelsAfterPaidDiagnostics(true, [
+      "OpenRouter: modelo anthropic/claude-sonnet-4.5 não respondeu dentro do limite desta etapa.",
+    ])).toBe(false);
+    expect(shouldTryFreeModelsAfterPaidDiagnostics(true, [
+      "OpenRouter: xiaomi/mimo-v2.5 não passou no quality gate após uma correção automática.",
+    ])).toBe(false);
+  });
+
+  it("não limita gerações simples", () => {
+    expect(shouldTryFreeModelsAfterPaidDiagnostics(false, [
+      "OpenRouter: modelo anthropic/claude-sonnet-4.5 não respondeu dentro do limite desta etapa.",
+    ])).toBe(true);
   });
 });

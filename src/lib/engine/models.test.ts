@@ -42,8 +42,8 @@ describe("modelExecutionPlan", () => {
     ]);
   });
 
-  it("trata a rota free como custo zero na estimativa", () => {
+  it("estima custo baixo para o fallback e zero para a rota free", () => {
     expect(estimateCost(FREE_MODEL_OPENROUTER, 100_000, 100_000)).toBe(0);
-    expect(estimateCost(BUDGET_MODEL_OPENROUTER, 1_000_000, 1_000_000)).toBeCloseTo(1.35, 5);
+    expect(estimateCost(BUDGET_MODEL_OPENROUTER, 1_000_000, 1_000_000)).toBeCloseTo(0.42, 5);
   });
 });

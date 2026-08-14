@@ -21,19 +21,20 @@ describe("background generation jobs", () => {
     })).toBe("completed");
   });
 
-  it("pausa na primeira falha sem nova chamada paga automática", () => {
+  it("permite uma única recuperação estrutural antes de pausar", () => {
     expect(nextBackgroundJobStatus({
       status: "running",
       succeeded: false,
       attempts: 1,
-    })).toBe("failed");
-    expect(BACKGROUND_MAX_ATTEMPTS).toBe(1);
+      retryable: true,
+    })).toBe("retry");
+    expect(BACKGROUND_MAX_ATTEMPTS).toBe(2);
   });
 
-  it("não repete falhas permanentes nem transitórias", () => {
+  it("repete somente falha estrutural e não repete saldo ou timeout", () => {
     expect(isRetryableBackgroundFailure("OpenRouter: HTTP 402 — sem saldo.")).toBe(false);
     expect(isRetryableBackgroundFailure("O modelo não respondeu dentro do tempo limite.")).toBe(false);
-    expect(isRetryableBackgroundFailure("O código falhou no quality gate.")).toBe(false);
+    expect(isRetryableBackgroundFailure("O código falhou no quality gate.")).toBe(true);
     expect(nextBackgroundJobStatus({
       status: "running",
       succeeded: false,

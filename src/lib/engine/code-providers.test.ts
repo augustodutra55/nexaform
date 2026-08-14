@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { compactProviderSystemPrompt, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairInstruction, shouldTryFreeModelsAfterPaidDiagnostics } from "./code-providers";
-import type { ProjectQualityReport } from "./app-types";
+import { compactProviderSystemPrompt, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairBaseFiles, qualityRepairInstruction, shouldTryFreeModelsAfterPaidDiagnostics } from "./code-providers";
+import type { AppGenerationResult, ProjectQualityReport } from "./app-types";
 
 const report: ProjectQualityReport = {
   valid: false,
@@ -33,7 +33,29 @@ describe("reparo dirigido do quality gate", () => {
       currentCode: null,
     }, report);
     expect(instruction).toContain("AD_PATCH/AD_FILE/AD_DELETE");
+    expect(instruction).toContain("PROJETO CANDIDATO");
+    expect(instruction).not.toContain("projeto original");
     expect(instruction).toContain("App.jsx: Import relativo ausente");
+  });
+
+  it("aplica a correção sobre o candidato que contém os arquivos novos da etapa", () => {
+    const previous = [{ path: "App.jsx", content: "export default function App(){}" }];
+    const candidateFiles = [
+      ...previous,
+      { path: "components/Cadastro.jsx", content: "export default function Cadastro(){}" },
+    ];
+    const candidate = {
+      provider: "openrouter",
+      engineMode: "real",
+      stats: { lines: 2, components: 2, hooks: 0, handlers: 0, files: 2 },
+      reply: "feito",
+      plan: [],
+      app: { kind: "app", name: "Teste", description: "", files: candidateFiles, entry: "App.jsx" },
+      cost: 0,
+      model: "teste",
+    } as AppGenerationResult;
+
+    expect(qualityRepairBaseFiles(candidate, previous)).toBe(candidateFiles);
   });
 });
 
@@ -93,7 +115,7 @@ describe("orçamento adaptativo por modelo", () => {
 describe("controles de saída do fallback OpenRouter", () => {
   it("desliga reasoning somente no MiMo para preservar tokens do código final", () => {
     expect(openRouterControlsForModel("xiaomi/mimo-v2.5")).toEqual({
-      reasoning: { effort: "none" },
+      reasoning: { enabled: false },
       temperature: 0.2,
     });
     expect(openRouterControlsForModel("anthropic/claude-sonnet-4.5")).toEqual({});
@@ -113,7 +135,7 @@ describe("orçamento de tempo dos fallbacks gratuitos", () => {
     ])).toBe(true);
   });
 
-  it("interrompe a fila gratuita após timeout ou falha estrutural dos pagos", () => {
+  it("interrompe a fila de fallback após timeout ou falha estrutural do modelo principal", () => {
     expect(shouldTryFreeModelsAfterPaidDiagnostics(true, [
       "OpenRouter: modelo anthropic/claude-sonnet-4.5 não respondeu dentro do limite desta etapa.",
     ])).toBe(false);

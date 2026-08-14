@@ -9,7 +9,7 @@ import {
   isRetryableBackgroundFailure,
   nextBackgroundJobStatus,
 } from "@/lib/engine/background-jobs";
-import { buildStagePrompt, stagedStages } from "@/lib/engine/staged-generation";
+import { buildStagePrompt, buildStageRetryPrompt, stagedStages } from "@/lib/engine/staged-generation";
 import { classifyGenerationFailure, safeOperationalMessage } from "@/lib/engine/observability";
 
 export const maxDuration = 300;
@@ -129,13 +129,9 @@ export async function GET(req: NextRequest) {
   const currentFiles = current && isMultiFile(current) ? current.files : null;
   const currentCode = current && !isMultiFile(current) ? current.code ?? null : null;
   const executionCount = Number(row.attempts) || 1;
-  const prompt = buildStagePrompt(
-    payload.stagedJob.masterPrompt,
-    stage,
-    payload.stageIndex,
-    stages.length,
-    kind
-  );
+  const prompt = executionCount > 1
+    ? buildStageRetryPrompt(payload.stagedJob.masterPrompt, stage, payload.stageIndex, stages.length, kind)
+    : buildStagePrompt(payload.stagedJob.masterPrompt, stage, payload.stageIndex, stages.length, kind);
   const started = Date.now();
   let result: Awaited<ReturnType<typeof generateAppWithProviders>>;
   try {

@@ -327,7 +327,7 @@ function assessCandidate(result: AppGenerationResult, a: Args, repaired = false)
 export function qualityRepairInstruction(a: Pick<Args, "message" | "currentFiles" | "currentCode">, report: ProjectQualityReport): string {
   const failures = report.errors.map((value) => `- ${value.path ? `${value.path}: ` : ""}${value.message}`).join("\n");
   const format = a.currentFiles?.length || a.currentCode
-    ? "Reenvie somente AD_PATCH/AD_FILE/AD_DELETE válidos contra o projeto original, seguidos de AD_REPLY. Faça a menor correção possível e não reenvie arquivos inalterados."
+    ? "Aplique a correção sobre o PROJETO CANDIDATO produzido pela sua resposta anterior. Reenvie somente AD_PATCH/AD_FILE/AD_DELETE necessários para corrigir os erros, seguidos de AD_REPLY. Não repita operações que já estão no candidato nem reenvie arquivos inalterados."
     : "O projeto ainda está vazio. Reenvie cada arquivo completo em blocos AD_FILE com op=\"create\", seguidos de AD_REPLY. Não use JSON, Markdown nem AD_PATCH.";
   return [
     "QUALITY GATE: o código anterior foi recusado antes de ser salvo.",
@@ -335,6 +335,15 @@ export function qualityRepairInstruction(a: Pick<Args, "message" | "currentFiles
     "Corrija somente essas falhas, preserve o escopo e confira todos os imports relativos.",
     format,
   ].join("\n\n");
+}
+
+/** O segundo turno do quality gate parte do candidato que acabou de ser
+ * avaliado. Voltar ao snapshot anterior perde as operações válidas da etapa. */
+export function qualityRepairBaseFiles(
+  candidate: AppGenerationResult,
+  previousFiles?: AppFile[] | null
+): AppFile[] | null {
+  return candidate.app.files?.length ? candidate.app.files : previousFiles ?? null;
 }
 
 function claudeUserContent(a: Args): any {
@@ -416,10 +425,10 @@ function responseText(value: any): string | null {
 }
 
 export function openRouterControlsForModel(model: string): Record<string, unknown> {
-  // O OpenRouter documenta `reasoning.effort = "none"` para desligar reasoning.
-  // Assim o teto de completion fica reservado para o código final, não para thinking.
+  // MiMo expõe um toggle híbrido; `enabled: false` reserva o teto de completion
+  // para o código final em vez de deixar o modelo consumir tudo em thinking.
   if (/^xiaomi\/mimo-v2\.5(?:$|-)/.test(model)) {
-    return { reasoning: { effort: "none" }, temperature: 0.2 };
+    return { reasoning: { enabled: false }, temperature: 0.2 };
   }
   if (/:free$/.test(model)) {
     return { reasoning: { enabled: false }, temperature: 0.2 };
@@ -428,11 +437,10 @@ export function openRouterControlsForModel(model: string): Record<string, unknow
 }
 
 /**
- * Em construções por etapas, uma falha estrutural ou timeout dos modelos pagos
- * indica que insistir em toda a fila gratuita só consumirá o restante da
- * requisição. Os gratuitos continuam disponíveis quando os modelos pagos estão
- * indisponíveis por HTTP (por exemplo, conta sem saldo), preservando o modo sem
- * custo sem transformar uma resposta ruim em um timeout de cinco minutos.
+ * Em construções por etapas, uma falha estrutural ou timeout do primeiro modelo
+ * indica que insistir na fila inteira só consumirá o restante da requisição.
+ * Os fallbacks continuam disponíveis quando o modelo está indisponível por HTTP
+ * (por exemplo, conta sem saldo), preservando a recuperação de infraestrutura.
  */
 export function shouldTryFreeModelsAfterPaidDiagnostics(
   isStagedBuild: boolean,
@@ -527,7 +535,10 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
       const qualityData = await qualityRes.json();
       const qualityText = responseText(qualityData?.content?.[0]?.text ?? qualityData?.content);
       const qualityCost = estimateCost(model, qualityData?.usage?.input_tokens ?? 0, qualityData?.usage?.output_tokens ?? 0);
-      const corrected = qualityText ? parse(qualityText, "claude", cost + qualityCost, model, a.currentFiles ?? null) : null;
+      // A segunda resposta corrige o candidato imediatamente anterior. Aplicar
+      // esses patches sobre o snapshot original descartava arquivos recém-
+      // criados na etapa e fazia o mesmo quality gate falhar novamente.
+      const corrected = qualityText ? parse(qualityText, "claude", cost + qualityCost, model, qualityRepairBaseFiles(r, a.currentFiles)) : null;
       if (corrected && assessCandidate(corrected, a, true).valid) return corrected;
       diag.push(`Claude: ${model} não passou no quality gate após uma correção automática.`);
       return null;
@@ -624,7 +635,9 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
       const qualityCost = typeof qualityData?.usage?.cost === "number"
         ? qualityData.usage.cost
         : estimateCost(model, qualityData?.usage?.prompt_tokens ?? 0, qualityData?.usage?.completion_tokens ?? 0);
-      const corrected = qualityText ? parse(qualityText, "openrouter", cost + qualityCost, model, a.currentFiles ?? null) : null;
+      // O reparo é incremental sobre o candidato, não sobre o snapshot anterior
+      // à geração. Assim um patch pode corrigir também um arquivo criado agora.
+      const corrected = qualityText ? parse(qualityText, "openrouter", cost + qualityCost, model, qualityRepairBaseFiles(r, a.currentFiles)) : null;
       if (corrected && assessCandidate(corrected, a, true).valid) return corrected;
       diag.push(`OpenRouter: ${model} não passou no quality gate após uma correção automática.`);
       return null;
@@ -723,15 +736,11 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
     const chain = modelExecutionPlan(tier, provider);
     const chainDiagnosticsStart = diag.length;
     for (let i = 0; i < chain.length; i++) {
-      if (
-        provider === "openrouter"
-        && isFreeOpenRouterModel(chain[i])
-        && !shouldTryFreeModelsAfterPaidDiagnostics(
-          isStagedBuild,
-          diag.slice(chainDiagnosticsStart)
-        )
-      ) {
-        diag.push("OpenRouter: fallbacks gratuitos lentos foram ignorados nesta etapa para preservar o prazo da requisição.");
+      if (provider === "openrouter" && i > 0 && !shouldTryFreeModelsAfterPaidDiagnostics(
+        isStagedBuild,
+        diag.slice(chainDiagnosticsStart)
+      )) {
+        diag.push("OpenRouter: fallbacks adicionais foram ignorados nesta etapa para preservar o prazo da requisição.");
         break;
       }
       // Cada chamada já inclui no máximo uma passagem dirigida de quality/format repair.

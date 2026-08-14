@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { modelOutputTokenBudget, providerSystemPrompt, qualityRepairInstruction } from "./code-providers";
+import { modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairInstruction } from "./code-providers";
 import type { ProjectQualityReport } from "./app-types";
 
 const report: ProjectQualityReport = {
@@ -72,5 +72,17 @@ describe("orçamento adaptativo por modelo", () => {
   it("mantém o orçamento amplo do Sonnet e limita a rota free", () => {
     expect(modelOutputTokenBudget("Crie uma landing premium", false, "anthropic/claude-sonnet-4.5")).toBe(24000);
     expect(modelOutputTokenBudget("Crie uma landing premium", false, "openrouter/free")).toBe(4500);
+  });
+});
+
+
+describe("controles de saída do fallback OpenRouter", () => {
+  it("desliga reasoning somente no MiMo para preservar tokens do código final", () => {
+    expect(openRouterControlsForModel("xiaomi/mimo-v2.5")).toEqual({
+      reasoning: { enabled: false },
+      temperature: 0.2,
+    });
+    expect(openRouterControlsForModel("anthropic/claude-sonnet-4.5")).toEqual({});
+    expect(openRouterControlsForModel("openrouter/free")).toEqual({});
   });
 });

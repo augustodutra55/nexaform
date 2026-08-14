@@ -394,6 +394,33 @@ function responseText(value: any): string | null {
   return joined.trim() ? joined : null;
 }
 
+export function openRouterControlsForModel(model: string): Record<string, unknown> {
+  // MiMo V2.5 permite desligar reasoning. Para geração de código, o teto
+  // de saída deve ser preservado para o artefato final, não para thinking.
+  if (/^xiaomi\/mimo-v2\.5(?:$|-)/.test(model)) {
+    return { reasoning: { enabled: false }, temperature: 0.2 };
+  }
+  return {};
+}
+
+function openRouterEmptyResponseSummary(data: any): string {
+  const choice = data?.choices?.[0];
+  const message = choice?.message;
+  const usage = data?.usage ?? {};
+  const reasoningText = responseText(message?.reasoning);
+  const reasoningDetails = Array.isArray(message?.reasoning_details) ? message.reasoning_details : [];
+  const reasoningChars = reasoningText?.length ?? JSON.stringify(reasoningDetails).length;
+  const reasoningTokens = usage?.completion_tokens_details?.reasoning_tokens
+    ?? usage?.completionTokensDetails?.reasoningTokens
+    ?? "?";
+  return [
+    `finish=${choice?.finish_reason ?? "?"}`,
+    `completion_tokens=${usage?.completion_tokens ?? usage?.completionTokens ?? "?"}`,
+    `reasoning_tokens=${reasoningTokens}`,
+    `reasoning_chars=${reasoningChars}`,
+  ].join(", ");
+}
+
 function responseFormatSummary(text: string): string {
   const markers = [
     /<AD_PATCH\b/i.test(text) ? "AD_PATCH" : "",
@@ -511,6 +538,7 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
         max_tokens: maxOutputTokens(a, model),
         usage: { include: true },
         messages,
+      ...openRouterControlsForModel(model),
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -531,7 +559,10 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
       typeof data?.usage?.cost === "number"
         ? data.usage.cost
         : estimateCost(model, data?.usage?.prompt_tokens ?? 0, data?.usage?.completion_tokens ?? 0);
-    if (!text) { diag.push(`OpenRouter: ${model} respondeu vazio.`); return null; }
+    if (!text) {
+      diag.push(`OpenRouter: ${model} respondeu vazio (${openRouterEmptyResponseSummary(data)}).`);
+      return null;
+    }
     const r = parse(text, "openrouter", cost, model, a.currentFiles ?? null);
     if (r) {
       const quality = assessCandidate(r, a);

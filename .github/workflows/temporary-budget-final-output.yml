@@ -30,20 +30,10 @@ jobs:
           p = Path('src/lib/engine/code-providers.ts')
           s = p.read_text()
 
-          anchor = '''function responseText(value: any): string | null {
-            if (typeof value === "string" && value.trim()) return value;
-            if (!Array.isArray(value)) return null;
-            const joined = value
-              .map((part) => typeof part?.text === "string" ? part.text : typeof part?.content === "string" ? part.content : "")
-              .filter(Boolean)
-              .join("\\n");
-            return joined.trim() ? joined : null;
-          }
-          '''
-          addition = anchor + '''
-          export function openRouterControlsForModel(model: string): Record<string, unknown> {
-            // MiMo V2.5 expõe reasoning opcional. Na geração de código o objetivo
-            // é reservar o teto de saída para o artefato final, não para thinking.
+          insert_at = s.index('function responseFormatSummary')
+          controls = '''export function openRouterControlsForModel(model: string): Record<string, unknown> {
+            // MiMo V2.5 permite desligar reasoning. Para geração de código, o teto
+            // de saída deve ser preservado para o artefato final, não para thinking.
             if (/^xiaomi\\/mimo-v2\\.5(?:$|-)/.test(model)) {
               return { reasoning: { enabled: false }, temperature: 0.2 };
             }
@@ -67,50 +57,30 @@ jobs:
               `reasoning_chars=${reasoningChars}`,
             ].join(", ");
           }
-          '''
-          if s.count(anchor) != 1:
-              raise SystemExit(f'responseText anchor mismatch: {s.count(anchor)}')
-          s = s.replace(anchor, addition, 1)
 
-          old_body = '''      body: JSON.stringify({
-                model,
-                max_tokens: maxOutputTokens(a, model),
-                usage: { include: true },
+          '''
+          s = s[:insert_at] + controls + s[insert_at:]
+
+          start = s.index('async function callOpenRouter')
+          end = s.index('\nfunction demoFallback', start)
+          block = s[start:end]
+          body_anchor = '''        usage: { include: true },
                 messages,
               }),'''
-          new_body = '''      body: JSON.stringify({
-                model,
-                max_tokens: maxOutputTokens(a, model),
-                usage: { include: true },
+          if block.count(body_anchor) != 1:
+              raise SystemExit(f'OpenRouter body anchor mismatch: {block.count(body_anchor)}')
+          block = block.replace(body_anchor, '''        usage: { include: true },
                 messages,
                 ...openRouterControlsForModel(model),
-              }),'''
-          if s.count(old_body) != 1:
-              raise SystemExit(f'OpenRouter body anchor mismatch: {s.count(old_body)}')
-          s = s.replace(old_body, new_body, 1)
-
-          old_empty = '''    const data = await res.json();
-              const text = responseText(data?.choices?.[0]?.message?.content);
-              // OpenRouter devolve usage.cost (USD) quando disponível.
-              const cost =
-                typeof data?.usage?.cost === "number"
-                  ? data.usage.cost
-                  : estimateCost(model, data?.usage?.prompt_tokens ?? 0, data?.usage?.completion_tokens ?? 0);
-              if (!text) { diag.push(`OpenRouter: ${model} respondeu vazio.`); return null; }'''
-          new_empty = '''    const data = await res.json();
-              const text = responseText(data?.choices?.[0]?.message?.content);
-              // OpenRouter devolve usage.cost (USD) quando disponível.
-              const cost =
-                typeof data?.usage?.cost === "number"
-                  ? data.usage.cost
-                  : estimateCost(model, data?.usage?.prompt_tokens ?? 0, data?.usage?.completion_tokens ?? 0);
-              if (!text) {
+              }),''', 1)
+          empty_anchor = 'if (!text) { diag.push(`OpenRouter: ${model} respondeu vazio.`); return null; }'
+          if block.count(empty_anchor) != 1:
+              raise SystemExit(f'OpenRouter empty anchor mismatch: {block.count(empty_anchor)}')
+          block = block.replace(empty_anchor, '''if (!text) {
                 diag.push(`OpenRouter: ${model} respondeu vazio (${openRouterEmptyResponseSummary(data)}).`);
                 return null;
-              }'''
-          if s.count(old_empty) != 1:
-              raise SystemExit(f'OpenRouter empty-response anchor mismatch: {s.count(old_empty)}')
-          s = s.replace(old_empty, new_empty, 1)
+              }''', 1)
+          s = s[:start] + block + s[end:]
           p.write_text(s)
 
           tp = Path('src/lib/engine/code-providers.test.ts')
@@ -118,7 +88,7 @@ jobs:
           old_import = 'import { modelOutputTokenBudget, providerSystemPrompt, qualityRepairInstruction } from "./code-providers";'
           new_import = 'import { modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairInstruction } from "./code-providers";'
           if t.count(old_import) != 1:
-              raise SystemExit('code-providers test import mismatch')
+              raise SystemExit(f'test import mismatch: {t.count(old_import)}')
           t = t.replace(old_import, new_import, 1)
           t += '''
 

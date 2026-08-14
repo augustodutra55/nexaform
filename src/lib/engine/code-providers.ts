@@ -189,8 +189,25 @@ function currentOf(a: Args): AppFile[] | string | null {
  * Em REFINAMENTO usa o system prompt ENXUTO (só ops → poucos tokens de saída →
  * geração rápida); na primeira geração usa o completo (design premium etc.).
  */
+const INITIAL_BLOCK_TRANSPORT = `=== FORMATO FINAL DE TRANSPORTE — TEM PRIORIDADE SOBRE QUALQUER FORMATO ANTERIOR ===
+Na PRIMEIRA geração, NÃO retorne JSON e NÃO coloque código em cercas Markdown. Entregue cada arquivo como texto bruto em um bloco AD_FILE:
+<AD_FILE path="App.jsx" op="create">
+conteúdo completo do arquivo
+</AD_FILE>
+<AD_FILE path="components/Exemplo.jsx" op="create">
+conteúdo completo do arquivo
+</AD_FILE>
+Finalize opcionalmente com <AD_REPLY>resumo curto em pt-BR</AD_REPLY>.
+Todos os arquivos necessários devem ser completos e autoconsistentes. App.jsx continua sendo a entrada inferida automaticamente.
+ESTA REGRA SUBSTITUI qualquer instrução anterior que peça JSON para a resposta final.`;
+
+export function providerSystemPrompt(hasCurrentProject: boolean): string {
+  if (hasCurrentProject) return CODE_REFINE_SYSTEM_PROMPT;
+  return `${CODE_SYSTEM_PROMPT}\n\n${INITIAL_BLOCK_TRANSPORT}`;
+}
+
 function systemPromptFor(a: Args): string {
-  return a.currentFiles?.length || a.currentCode ? CODE_REFINE_SYSTEM_PROMPT : CODE_SYSTEM_PROMPT;
+  return providerSystemPrompt(!!(a.currentFiles?.length || a.currentCode));
 }
 
 /** Não reserva 24k tokens no OpenRouter para uma etapa que foi deliberadamente
@@ -277,12 +294,9 @@ function assessCandidate(result: AppGenerationResult, a: Args, repaired = false)
 
 export function qualityRepairInstruction(a: Pick<Args, "message" | "currentFiles" | "currentCode">, report: ProjectQualityReport): string {
   const failures = report.errors.map((value) => `- ${value.path ? `${value.path}: ` : ""}${value.message}`).join("\n");
-  const isStaged = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
   const format = a.currentFiles?.length || a.currentCode
-    ? "Reenvie somente AD_PATCH/AD_FILE/AD_DELETE válidos contra o projeto original, seguidos de AD_REPLY."
-    : isStaged
-      ? "O projeto ainda está vazio. Reenvie cada arquivo completo em blocos AD_FILE com op=\"create\", seguidos de AD_REPLY. Não use JSON, Markdown nem AD_PATCH."
-      : "Reenvie o projeto completo no JSON files obrigatório, sem Markdown nem texto fora do JSON.";
+    ? "Reenvie somente AD_PATCH/AD_FILE/AD_DELETE válidos contra o projeto original, seguidos de AD_REPLY. Faça a menor correção possível e não reenvie arquivos inalterados."
+    : "O projeto ainda está vazio. Reenvie cada arquivo completo em blocos AD_FILE com op=\"create\", seguidos de AD_REPLY. Não use JSON, Markdown nem AD_PATCH.";
   return [
     "QUALITY GATE: o código anterior foi recusado antes de ser salvo.",
     failures,
@@ -343,12 +357,14 @@ function reasonFromException(provider: string, model: string, e: any): string {
 function providerTimeoutMs(a: Args, repair = false): number {
   const isRefinement = !!(a.currentFiles?.length || a.currentCode);
   const isStaged = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
-  // As etapas são pequenas. O reparo recebe os erros exatos e não recria a
-  // etapa inteira. A soma fica abaixo do teto de 140 s do worker.
-  if (isStaged) return repair ? 35_000 : 95_000;
+  // Etapas pequenas têm orçamento total de 130 s: 80 s para a primeira
+  // passagem e 50 s para o reparo dirigido. Isso preserva margem real
+  // dentro do worker de 140 s em vez de abortar o reparo aos 35 s.
+  if (isStaged) return repair ? 50_000 : 80_000;
   if (isRefinement) return repair ? 60_000 : 90_000;
-  // A primeira geração pode produzir um projeto completo. Com o teto da rota
-  // em 280 s, 180 s ainda deixam margem para imagens, persistência e resposta.
+  // Primeira geração simples: se o transporte vier inválido, um reparo
+  // de 70 s ainda cabe na rota de 280 s sem repetir toda a geração.
+  if (repair) return 70_000;
   return 180_000;
 }
 
@@ -433,12 +449,8 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
     }
 
     const isRefinement = !!(a.currentFiles?.length || a.currentCode);
-    const shouldRepair = isRefinement || /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
-    if (!shouldRepair) {
-      diag.push(`Claude: resposta de ${model} não pôde ser interpretada como código (${responseFormatSummary(text)}).`);
-      return null;
-    }
-
+    // Toda resposta não vazia recebe UMA correção de transporte antes de desistirmos;
+    // repetir a geração inteira duplica custo e latência sem atacar a causa.
     diag.push(`Claude: resposta inicial de ${model} não pôde ser aplicada; recuperação de formato iniciada.`);
     const repairRes = await send([
       ...initialMessages,
@@ -530,12 +542,8 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
     }
 
     const isRefinement = !!(a.currentFiles?.length || a.currentCode);
-    const shouldRepair = isRefinement || /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
-    if (!shouldRepair) {
-      diag.push(`OpenRouter: resposta de ${model} não pôde ser interpretada como código (${responseFormatSummary(text)}).`);
-      return null;
-    }
-
+    // Toda resposta não vazia recebe UMA correção de transporte antes de desistirmos;
+    // repetir a geração inteira duplica custo e latência sem atacar a causa.
     diag.push(`OpenRouter: resposta inicial de ${model} não pôde ser aplicada; recuperação de formato iniciada.`);
     const repairRes = await send([
       ...initialMessages,
@@ -625,9 +633,9 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
   ): Promise<AppGenerationResult | null> {
     const chain = modelExecutionPlan(tier, provider);
     for (let i = 0; i < chain.length; i++) {
-      // Refinamento: 1 tentativa no principal (rápido, cabe nos 60s do Hobby).
-      // Primeira geração: 2 tentativas (mais robusto, vale a espera).
-      const attempts = premiumOnly ? 1 : !isRefinement ? 2 : 1;
+      // Cada chamada já inclui no máximo uma passagem dirigida de quality/format repair.
+      // Repetir toda a geração mascarava a causa e duplicava custo/latência.
+      const attempts = 1;
       for (let t = 0; t < attempts; t++) {
         const r = await call(key, a, chain[i], diag);
         if (r) return r;

@@ -1,3 +1,5 @@
+import { isAppCode, type AppCode, type AppGenerationResult } from "./app-types";
+
 export type BackgroundJobStatus =
   | "active"
   | "queued"
@@ -7,7 +9,8 @@ export type BackgroundJobStatus =
   | "failed"
   | "cancelled";
 
-export const BACKGROUND_GENERATION_VERSION = 1;
+export const BACKGROUND_GENERATION_VERSION = 2;
+const SUPPORTED_BACKGROUND_GENERATION_VERSIONS = [1, BACKGROUND_GENERATION_VERSION];
 /**
  * Uma etapa pode consumir uma chamada paga longa. Por isso a fila nunca
  * repete automaticamente a mesma etapa: uma falha pausa o trabalho e deixa a
@@ -36,7 +39,19 @@ export interface BackgroundGenerationPayload {
   name: string;
   costMode: "auto" | "economy" | "premium";
   queuedAt: string;
+  /** Snapshot aprovado pelo motor na última etapa. Ele viaja dentro da fila para
+   * que a etapa seguinte não dependa do navegador nem de um salvamento do preview. */
+  currentApp?: AppCode;
+  accumulatedCost?: number;
+  accumulatedDurationMs?: number;
   result?: unknown;
+}
+
+export interface BackgroundStageTransition {
+  completed: boolean;
+  payload: BackgroundGenerationPayload;
+  totalCost: number;
+  totalDurationMs: number;
 }
 
 export interface BackgroundJobSnapshot {
@@ -135,7 +150,8 @@ export function isBackgroundGenerationPayload(
   if (!value || typeof value !== "object") return false;
   const payload = value as Partial<BackgroundGenerationPayload>;
   const job = payload.stagedJob;
-  return payload.version === BACKGROUND_GENERATION_VERSION
+  return typeof payload.version === "number"
+    && SUPPORTED_BACKGROUND_GENERATION_VERSIONS.includes(payload.version)
     && typeof payload.projectId === "string"
     && typeof payload.threadId === "string"
     && typeof payload.userId === "string"
@@ -153,5 +169,67 @@ export function isBackgroundGenerationPayload(
     && (payload.reservationId === null || typeof payload.reservationId === "string")
     && typeof payload.name === "string"
     && (payload.costMode === "auto" || payload.costMode === "economy" || payload.costMode === "premium")
-    && typeof payload.queuedAt === "string";
+    && typeof payload.queuedAt === "string"
+    && (payload.currentApp === undefined || isAppCode(payload.currentApp))
+    && isOptionalNonNegativeNumber(payload.accumulatedCost)
+    && isOptionalNonNegativeNumber(payload.accumulatedDurationMs);
+}
+
+function isOptionalNonNegativeNumber(value: unknown): boolean {
+  return value === undefined
+    || (typeof value === "number" && Number.isFinite(value) && value >= 0);
+}
+
+/**
+ * Incorpora o resultado de uma etapa à própria fila. Se ainda houver trabalho,
+ * devolve um payload pronto para ser novamente enfileirado; somente a última
+ * etapa expõe `result` ao navegador.
+ */
+export function advanceBackgroundGeneration(
+  payload: BackgroundGenerationPayload,
+  result: AppGenerationResult,
+  totalStages: number,
+  durationMs: number,
+  queuedAt: string
+): BackgroundStageTransition {
+  const totalCost = Math.max(0, payload.accumulatedCost ?? 0)
+    + Math.max(0, result.cost ?? 0);
+  const totalDurationMs = Math.max(0, payload.accumulatedDurationMs ?? 0)
+    + Math.max(0, durationMs);
+  const nextStage = payload.stageIndex + 1;
+  const { result: _previousResult, ...basePayload } = payload;
+  void _previousResult;
+
+  if (nextStage < totalStages) {
+    return {
+      completed: false,
+      totalCost,
+      totalDurationMs,
+      payload: {
+        ...basePayload,
+        version: BACKGROUND_GENERATION_VERSION,
+        stagedJob: { ...payload.stagedJob, nextStage },
+        stageIndex: nextStage,
+        queuedAt,
+        currentApp: result.app,
+        accumulatedCost: totalCost,
+        accumulatedDurationMs: totalDurationMs,
+      },
+    };
+  }
+
+  const finalResult: AppGenerationResult = { ...result, cost: totalCost };
+  return {
+    completed: true,
+    totalCost,
+    totalDurationMs,
+    payload: {
+      ...basePayload,
+      version: BACKGROUND_GENERATION_VERSION,
+      currentApp: result.app,
+      accumulatedCost: totalCost,
+      accumulatedDurationMs: totalDurationMs,
+      result: finalResult,
+    },
+  };
 }

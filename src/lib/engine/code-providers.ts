@@ -8,7 +8,7 @@
 import { AppFile, AppGenerationResult, GenerationMediaAsset, ProjectQualityReport, codeStats, projectStats } from "./app-types";
 import { CODE_SYSTEM_PROMPT, CODE_REFINE_SYSTEM_PROMPT, buildCodeUserPrompt } from "./code-prompts";
 import { matchTemplate } from "./code-templates";
-import { BUDGET_MODEL_OPENROUTER, FREE_MODEL_OPENROUTER, CostMode, pickTier, modelExecutionPlan, estimateCost, isFunctionalRefinement } from "./models";
+import { BUDGET_MODEL_OPENROUTER, CostMode, pickTier, modelExecutionPlan, estimateCost, isFunctionalRefinement, isFreeOpenRouterModel } from "./models";
 import type { PromptAttachment } from "./prompt-attachments";
 import { applyFileOperations, parseOperationBlocks } from "./operation-blocks";
 import { buildGenerationPlan, renderGenerationPlan } from "./generation-plan";
@@ -206,7 +206,28 @@ export function providerSystemPrompt(hasCurrentProject: boolean): string {
   return `${CODE_SYSTEM_PROMPT}\n\n${INITIAL_BLOCK_TRANSPORT}`;
 }
 
-function systemPromptFor(a: Args): string {
+/** Contrato curto e sem instruções contraditórias para modelos gratuitos.
+ * Modelos menores obedecem melhor a um único formato de transporte, enquanto
+ * o plano visual e a especificação completa continuam no prompt do usuário. */
+export function compactProviderSystemPrompt(hasCurrentProject: boolean): string {
+  if (hasCurrentProject) return `Você é o motor de edição do AD Studio. Preserve todo o projeto atual e aplique somente o pedido recebido.
+Responda APENAS com operações de texto bruto, sem JSON e sem cercas Markdown:
+<AD_PATCH path="components/Arquivo.jsx"><AD_SEARCH>trecho literal, existente e único</AD_SEARCH><AD_REPLACE>trecho final</AD_REPLACE></AD_PATCH>
+Use <AD_FILE path="components/Novo.jsx" op="create">arquivo completo</AD_FILE> apenas para arquivo novo, <AD_DELETE path="caminho" /> para remover e finalize com <AD_REPLY>resumo curto em pt-BR</AD_REPLY>.
+Mantenha imports relativos resolvidos, React importado de 'react', Tailwind, navegação por estado e o runtime existente. Persistência é somente window.AD; atualize // AD_BACKEND ao mudar coleções. Imagens novas usam ADIMG contextual. Não invente APIs, pagamentos, vídeos ou integrações externas.`;
+
+  return `Você é o motor de geração do AD Studio. Crie um projeto React profissional, funcional, responsivo e em pt-BR.
+Responda APENAS com arquivos completos em texto bruto, sem JSON, sem explicações e sem cercas Markdown:
+<AD_FILE path="App.jsx" op="create">conteúdo completo</AD_FILE>
+<AD_FILE path="components/Exemplo.jsx" op="create">conteúdo completo</AD_FILE>
+Finalize com <AD_REPLY>resumo curto em pt-BR</AD_REPLY>.
+Regras obrigatórias: use múltiplos arquivos com imports relativos resolvidos; App.jsx fino com export default; importe React e hooks de 'react'; use Tailwind e ícones válidos; navegação por estado, sem react-router e sem window.location. Para persistência use somente window.AD e declare // AD_BACKEND em App.jsx. Imagens de conteúdo usam src="ADIMG: descrição específica em inglês". Não invente APIs, pagamentos, vídeos ou integrações externas. Entregue estados de carregamento, vazio, erro e feedback nos fluxos solicitados.`;
+}
+
+function systemPromptFor(a: Args, model = ""): string {
+  if (isFreeOpenRouterModel(model)) {
+    return compactProviderSystemPrompt(!!(a.currentFiles?.length || a.currentCode));
+  }
   return providerSystemPrompt(!!(a.currentFiles?.length || a.currentCode));
 }
 
@@ -220,11 +241,11 @@ export function modelOutputTokenBudget(message: string, hasCurrentProject: boole
     if (hasCurrentProject) return 2_500;
     return 7_000;
   }
-  if (model === FREE_MODEL_OPENROUTER) {
-    if (isStaged && hasCurrentProject) return 1_800;
-    if (isStaged) return 2_400;
-    if (hasCurrentProject) return 2_000;
-    return 4_500;
+  if (isFreeOpenRouterModel(model)) {
+    if (isStaged && hasCurrentProject) return 2_600;
+    if (isStaged) return 3_600;
+    if (hasCurrentProject) return 2_800;
+    return 7_000;
   }
   if (isStaged && hasCurrentProject) return 3_000;
   if (isStaged) return 4_500;
@@ -368,10 +389,10 @@ function reasonFromException(provider: string, model: string, e: any): string {
 function providerTimeoutMs(a: Args, repair = false, model = ""): number {
   const isRefinement = !!(a.currentFiles?.length || a.currentCode);
   const isStaged = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
-  if (model === FREE_MODEL_OPENROUTER) {
-    if (isStaged) return repair ? 25_000 : 40_000;
-    if (isRefinement) return repair ? 30_000 : 45_000;
-    return repair ? 35_000 : 60_000;
+  if (isFreeOpenRouterModel(model)) {
+    if (isStaged) return repair ? 45_000 : 75_000;
+    if (isRefinement) return repair ? 50_000 : 80_000;
+    return repair ? 60_000 : 120_000;
   }
   if (model === BUDGET_MODEL_OPENROUTER) {
     if (isStaged) return repair ? 50_000 : 90_000;
@@ -399,6 +420,9 @@ export function openRouterControlsForModel(model: string): Record<string, unknow
   // Assim o teto de completion fica reservado para o código final, não para thinking.
   if (/^xiaomi\/mimo-v2\.5(?:$|-)/.test(model)) {
     return { reasoning: { effort: "none" }, temperature: 0.2 };
+  }
+  if (/:free$/.test(model)) {
+    return { reasoning: { enabled: false }, temperature: 0.2 };
   }
   return {};
 }
@@ -527,7 +551,7 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
 async function callOpenRouter(apiKey: string, a: Args, model: string, diag: string[]): Promise<AppGenerationResult | null> {
   try {
     const initialMessages = [
-      { role: "system", content: systemPromptFor(a) },
+      { role: "system", content: systemPromptFor(a, model) },
       { role: "user", content: openRouterUserContent(a) },
     ];
     const send = (messages: any[], timeoutMs = providerTimeoutMs(a, false, model)) => fetch("https://openrouter.ai/api/v1/chat/completions", {

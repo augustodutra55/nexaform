@@ -3,6 +3,7 @@ import {
   BUDGET_MODEL_OPENROUTER,
   ECON_MODEL_ANTHROPIC,
   ECON_MODEL_OPENROUTER,
+  FREE_CODING_MODELS_OPENROUTER,
   FREE_MODEL_OPENROUTER,
   PREMIUM_MODEL_ANTHROPIC,
   PREMIUM_MODEL_OPENROUTER,
@@ -15,6 +16,7 @@ describe("modelExecutionPlan", () => {
     expect(modelExecutionPlan("premium", "openrouter")).toEqual([
       PREMIUM_MODEL_OPENROUTER,
       BUDGET_MODEL_OPENROUTER,
+      ...FREE_CODING_MODELS_OPENROUTER,
       FREE_MODEL_OPENROUTER,
     ]);
     expect(modelExecutionPlan("premium", "openrouter")).not.toContain(
@@ -26,6 +28,7 @@ describe("modelExecutionPlan", () => {
     expect(modelExecutionPlan("economy", "openrouter")).toEqual([
       ECON_MODEL_OPENROUTER,
       BUDGET_MODEL_OPENROUTER,
+      ...FREE_CODING_MODELS_OPENROUTER,
       FREE_MODEL_OPENROUTER,
     ]);
     expect(modelExecutionPlan("economy", "openrouter")).not.toContain(
@@ -44,6 +47,16 @@ describe("modelExecutionPlan", () => {
 
   it("estima custo baixo para o fallback e zero para a rota free", () => {
     expect(estimateCost(FREE_MODEL_OPENROUTER, 100_000, 100_000)).toBe(0);
+    expect(estimateCost(FREE_CODING_MODELS_OPENROUTER[0], 100_000, 100_000)).toBe(0);
     expect(estimateCost(BUDGET_MODEL_OPENROUTER, 1_000_000, 1_000_000)).toBeCloseTo(0.42, 5);
+  });
+
+  it("tenta modelos gratuitos de coding concretos antes do roteador aleatório", () => {
+    const plan = modelExecutionPlan("premium", "openrouter");
+    expect(FREE_CODING_MODELS_OPENROUTER.length).toBeGreaterThanOrEqual(3);
+    expect(plan.indexOf(FREE_CODING_MODELS_OPENROUTER[0])).toBeLessThan(
+      plan.indexOf(FREE_MODEL_OPENROUTER)
+    );
+    expect(FREE_CODING_MODELS_OPENROUTER.every((model) => model.endsWith(":free"))).toBe(true);
   });
 });

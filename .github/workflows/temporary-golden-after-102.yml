@@ -1,4 +1,4 @@
-name: Temporary Golden after transactional import recovery
+name: Temporary Golden after simple timeout recovery
 
 on:
   push:
@@ -46,7 +46,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: golden-production-report-progressive-quality
+          name: golden-production-report-simple-retry
           path: artifacts/golden-production.json
           if-no-files-found: warn
           retention-days: 14

@@ -1,17 +1,10 @@
-name: Golden production acceptance
+name: Temporary Golden 2.0 acceptance
 
 on:
-  workflow_dispatch:
-    inputs:
-      project_id:
-        description: "UUID de um projeto descartável do AD Studio"
-        required: true
-        type: string
-      production_url:
-        description: "URL de produção"
-        required: false
-        default: "https://nexaform-rho.vercel.app"
-        type: string
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/temporary-golden-v2.yml"
 
 permissions:
   contents: read
@@ -22,12 +15,12 @@ concurrency:
 
 jobs:
   golden:
-    name: 5 fluxos reais de geração
+    name: 5 apps reais · semântica e runtime
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      PRODUCTION_URL: ${{ inputs.production_url }}
-      AD_GOLDEN_PROJECT_ID: ${{ inputs.project_id }}
+      PRODUCTION_URL: https://nexaform-rho.vercel.app
+      AD_GOLDEN_PROJECT_ID: 726260de-8056-4ad2-841d-b235bcaf7021
       AD_GOLDEN_SERVICE_SECRET: ${{ secrets.AD_GOLDEN_SERVICE_SECRET }}
     steps:
       - name: Baixar o código
@@ -46,14 +39,14 @@ jobs:
         shell: bash
         run: |
           if [ -z "$AD_GOLDEN_SERVICE_SECRET" ]; then
-            echo "::error::Configure uma única vez o secret AD_GOLDEN_SERVICE_SECRET com o mesmo valor usado na Vercel."
+            echo "::error::AD_GOLDEN_SERVICE_SECRET ausente."
             exit 1
           fi
 
-      - name: Executar golden suite real
+      - name: Gerar e avaliar requisitos
         run: node scripts/golden-production.mjs
 
-      - name: Instalar Chromium do Golden 2.0
+      - name: Instalar Chromium
         run: npx playwright install --with-deps chromium
 
       - name: Compilar e exercitar os cinco apps gerados
@@ -66,7 +59,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: golden-production-report
+          name: golden-v2-production-report
           path: |
             artifacts/golden-production.json
             artifacts/golden-apps.json
@@ -77,7 +70,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: golden-runtime-playwright
+          name: golden-v2-runtime-playwright
           path: |
             playwright-report/
             test-results/

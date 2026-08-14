@@ -53,31 +53,45 @@ export async function POST(req: NextRequest) {
 
   const currentFiles = safeCurrentFiles(body?.currentFiles);
   const requestedStage = Number(body?.stageIndex);
-  const snapshotRecovery = body?.snapshotRecovery === true && !!currentFiles?.length;
   let generationMessage = message;
   let stage: { index: number; total: number; label: string; snapshotRecovery: boolean } | null = null;
+  let stageDef: ReturnType<typeof stagedBuildStages>[number] | null = null;
+  let totalStages = 0;
   if (Number.isInteger(requestedStage) && requestedStage >= 0) {
     const stages = stagedBuildStages();
     if (requestedStage >= stages.length) {
       return NextResponse.json({ error: "Etapa Golden inválida." }, { status: 400 });
     }
-    const basePrompt = snapshotRecovery
-      ? buildStageRetryPrompt(message, stages[requestedStage], requestedStage, stages.length, "initial")
-      : buildStagePrompt(message, stages[requestedStage], requestedStage, stages.length, "initial");
-    generationMessage = snapshotRecovery && currentFiles
-      ? snapshotRecoveryPrompt(basePrompt, currentFiles)
-      : basePrompt;
-    stage = { index: requestedStage, total: stages.length, label: stages[requestedStage].label, snapshotRecovery };
+    stageDef = stages[requestedStage];
+    totalStages = stages.length;
+    generationMessage = buildStagePrompt(message, stageDef, requestedStage, totalStages, "initial");
+    stage = { index: requestedStage, total: totalStages, label: stageDef.label, snapshotRecovery: false };
   }
 
-  const result = await generateAppWithProviders({
+  let result = await generateAppWithProviders({
     message: generationMessage,
-    currentFiles: snapshotRecovery ? null : currentFiles,
+    currentFiles,
     name: typeof body?.name === "string" ? body.name : "Golden Production",
     costMode: "auto",
     forceReal: true,
     allowTemplate: false,
   });
+
+  if (result.engineMode !== "real" && currentFiles?.length && stageDef && Number.isInteger(requestedStage)) {
+    const recovery = snapshotRecoveryPrompt(
+      buildStageRetryPrompt(message, stageDef, requestedStage, totalStages, "initial"),
+      currentFiles
+    );
+    result = await generateAppWithProviders({
+      message: recovery,
+      currentFiles: null,
+      name: typeof body?.name === "string" ? body.name : "Golden Production",
+      costMode: "auto",
+      forceReal: true,
+      allowTemplate: false,
+    });
+    stage = { index: requestedStage, total: totalStages, label: stageDef.label, snapshotRecovery: true };
+  }
 
   if (result.engineMode !== "real") {
     return NextResponse.json({ error: result.failureReason || "Motor real indisponível.", engineMode: result.engineMode, stage }, { status: 502 });

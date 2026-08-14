@@ -18,32 +18,11 @@ const job: StagedBuildJob = {
   originalPrompt: "Crie um aplicativo",
   masterPrompt: "Crie um aplicativo completo",
   kind: "initial",
-  imageAttachments: [{
-    id: "attachment-1",
-    kind: "image",
-    name: "referencia.png",
-    type: "image/png",
-    size: 4,
-    content: "data:image/png;base64,AAAA",
-  }],
+  imageAttachments: [{ id: "attachment-1", kind: "image", name: "referencia.png", type: "image/png", size: 4, content: "data:image/png;base64,AAAA" }],
   visualRefinement: {
-    selection: {
-      tag: "button",
-      selector: "button.cta",
-      label: "Comprar",
-      text: "Comprar",
-      role: "button",
-      nearbyText: "Plano Pro Comprar",
-    },
-    sourceCandidates: [{
-      path: "components/Pricing.jsx",
-      score: 18,
-      evidence: "<button>Comprar</button>",
-    }],
-    baseline: [{
-      path: "components/Pricing.jsx",
-      signature: "25:abc123",
-    }],
+    selection: { tag: "button", selector: "button.cta", label: "Comprar", text: "Comprar", role: "button", nearbyText: "Plano Pro Comprar" },
+    sourceCandidates: [{ path: "components/Pricing.jsx", score: 18, evidence: "<button>Comprar</button>" }],
+    baseline: [{ path: "components/Pricing.jsx", signature: "25:abc123" }],
   },
   nextStage: 2,
   startedAt: "2026-07-23T12:00:00.000Z",
@@ -61,8 +40,10 @@ describe("retomada da geração por etapas", () => {
   it("divide produto operacional compacto com múltiplos fluxos", () => {
     const agenda = "Crie um app SaaS de agendamento para uma clínica: login, cadastro, agenda por dia e horário, cadastro de clientes, confirmação, reagendamento, cancelamento e estados de vazio, carregando e erro. Precisa funcionar bem no celular. Inclua também visão operacional dos atendimentos e filtros para localizar clientes e horários rapidamente.";
     const dashboard = "Crie um dashboard de gestão B2B para equipe comercial com KPIs, clientes, funil, tarefas, filtros e navegação responsiva. Deve ser um sistema profissional, rápido, com estados operacionais claros e sem botões decorativos. Inclua cadastro e busca de clientes, histórico das tarefas e visão gerencial do funil por etapa.";
+    const commerce = "Crie um site e-commerce para produtos de cuidado pessoal, com catálogo, cards de produto, busca, benefícios, preço, carrinho demonstrativo, jornada de checkout sem simular pagamento real, prova social e FAQ. Foco máximo em conversão e confiança.";
     expect(shouldStageInitialBuild(agenda, [], false)).toBe(true);
     expect(shouldStageInitialBuild(dashboard, [], false)).toBe(true);
+    expect(shouldStageInitialBuild(commerce, [], false)).toBe(true);
   });
 
   it("mantém landing simples em geração única", () => {
@@ -72,12 +53,7 @@ describe("retomada da geração por etapas", () => {
 
   it("limpa também trabalhos já persistidos antes de montar a etapa", () => {
     const request = "Crie uma esmalteria com agenda e notificações para clientes.";
-    const prompt = buildStagePrompt(
-      `${request} Ops — A geração passou do tempo limite. ${request}`,
-      stagedBuildStages()[0],
-      0,
-      7
-    );
+    const prompt = buildStagePrompt(`${request} Ops — A geração passou do tempo limite. ${request}`, stagedBuildStages()[0], 0, 7);
     expect(prompt).toContain(request);
     expect(prompt).not.toContain("Ops —");
     expect(prompt).toContain("no máximo 3 arquivos");
@@ -109,9 +85,6 @@ describe("retomada da geração por etapas", () => {
   });
 
   it("rejeita um contrato visual corrompido", () => {
-    expect(isValidStagedBuildJob({
-      ...job,
-      visualRefinement: { ...job.visualRefinement, baseline: "inválida" },
-    }, "project-1", "thread-1")).toBe(false);
+    expect(isValidStagedBuildJob({ ...job, visualRefinement: { ...job.visualRefinement, baseline: "inválida" } }, "project-1", "thread-1")).toBe(false);
   });
 });

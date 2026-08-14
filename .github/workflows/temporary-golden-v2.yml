@@ -1,4 +1,4 @@
-name: Temporary Golden 2.0 acceptance
+name: Temporary Golden 2.0 final coverage
 
 on:
   push:
@@ -59,7 +59,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: golden-v2-production-report
+          name: golden-v2-final-coverage-report
           path: |
             artifacts/golden-production.json
             artifacts/golden-apps.json

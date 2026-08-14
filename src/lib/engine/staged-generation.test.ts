@@ -67,6 +67,19 @@ describe("retomada da geração por etapas", () => {
     expect(stage.instruction).toContain("entidade central");
   });
 
+  it("obriga a última etapa a fechar todas as omissões pequenas da especificação", () => {
+    const stages = stagedBuildStages();
+    const prompt = buildStagePrompt(
+      "Crie uma loja com catálogo, prova social e FAQ.",
+      stages[stages.length - 1],
+      stages.length - 1,
+      stages.length
+    );
+    expect(prompt).toContain("CHECKLIST FINAL OBRIGATÓRIO");
+    expect(prompt).toContain("prova social/depoimentos e FAQ");
+    expect(prompt).toContain("realmente renderizado");
+  });
+
   it("aceita um trabalho compatível com o projeto e a conversa", () => {
     expect(isValidStagedBuildJob(job, "project-1", "thread-1")).toBe(true);
   });

@@ -8,7 +8,7 @@ import {
   isRetryableBackgroundFailure,
   nextBackgroundJobStatus,
 } from "@/lib/engine/background-jobs";
-import { buildStagePrompt, stagedStages } from "@/lib/engine/staged-generation";
+import { buildStagePrompt, buildStageRetryPrompt, stagedStages } from "@/lib/engine/staged-generation";
 import { classifyGenerationFailure, safeOperationalMessage } from "@/lib/engine/observability";
 
 export const maxDuration = 300;
@@ -24,6 +24,27 @@ function authorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
   return req.headers.get("authorization") === `Bearer ${secret}`;
+}
+
+function snapshotRecoveryPrompt(args: {
+  prompt: string;
+  currentFiles: Array<{ path: string; content: string }> | null;
+  currentCode: string | null;
+}): string {
+  const snapshot = args.currentFiles?.length
+    ? args.currentFiles.map((file) => `--- ARQUIVO ATUAL: ${file.path} ---\n${file.content}`).join("\n\n")
+    : args.currentCode
+      ? `--- ARQUIVO ATUAL: App.jsx ---\n${args.currentCode}`
+      : "";
+  if (!snapshot) return args.prompt;
+  return [
+    args.prompt,
+    "RECUPERAÇÃO POR SNAPSHOT COMPLETO: a edição incremental anterior falhou no quality gate.",
+    "Recrie o snapshot completo já corrigido, preservando tudo que funciona e aplicando SOMENTE o requisito essencial desta etapa. Não invente etapas futuras. O retorno deve ser um projeto completo e estruturalmente válido, com todos os imports relativos resolvidos.",
+    "SNAPSHOT ATUAL DO PROJETO:",
+    snapshot,
+    "FIM DO SNAPSHOT ATUAL.",
+  ].join("\n\n");
 }
 
 async function failClaimedJob(args: {
@@ -125,13 +146,13 @@ export async function GET(req: NextRequest) {
   const currentFiles = current && isMultiFile(current) ? current.files : null;
   const currentCode = current && !isMultiFile(current) ? current.code ?? null : null;
   const attempts = Number(row.attempts) || 1;
-  const prompt = buildStagePrompt(
-    payload.stagedJob.masterPrompt,
-    stage,
-    payload.stageIndex,
-    stages.length,
-    kind
-  );
+  const basePrompt = attempts > 1
+    ? buildStageRetryPrompt(payload.stagedJob.masterPrompt, stage, payload.stageIndex, stages.length, kind)
+    : buildStagePrompt(payload.stagedJob.masterPrompt, stage, payload.stageIndex, stages.length, kind);
+  const useSnapshotRecovery = attempts > 1 && !!(currentFiles?.length || currentCode);
+  const prompt = useSnapshotRecovery
+    ? snapshotRecoveryPrompt({ prompt: basePrompt, currentFiles, currentCode })
+    : basePrompt;
   const started = Date.now();
   let result: Awaited<ReturnType<typeof generateAppWithProviders>>;
   try {
@@ -139,8 +160,8 @@ export async function GET(req: NextRequest) {
     const raced = await Promise.race([
       generateAppWithProviders({
         message: prompt,
-        currentCode,
-        currentFiles,
+        currentCode: useSnapshotRecovery ? null : currentCode,
+        currentFiles: useSnapshotRecovery ? null : currentFiles,
         name: payload.name,
         userKey: process.env.OPENROUTER_API_KEY,
         userProvider: "openrouter",
@@ -209,7 +230,7 @@ export async function GET(req: NextRequest) {
       duration_ms: Date.now() - started,
       error_code: null,
       error_message: null,
-      metadata: { requestId: payload.requestId, background: true, stage: payload.stageIndex + 1 },
+      metadata: { requestId: payload.requestId, background: true, stage: payload.stageIndex + 1, snapshotRecovery: useSnapshotRecovery },
     }).eq("id", payload.reservationId).eq("user_id", payload.userId);
   }
   return NextResponse.json({
@@ -217,5 +238,6 @@ export async function GET(req: NextRequest) {
     status: "completed",
     projectId: payload.projectId,
     stage: payload.stageIndex + 1,
+    snapshotRecovery: useSnapshotRecovery,
   });
 }

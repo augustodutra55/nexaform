@@ -31,4 +31,15 @@ describe("Lovable parity roadmap certification", () => {
     expect(workflow).toContain("npm run build");
     expect(workflow).toContain("npm run test:e2e");
   });
+
+  it("mantém Golden 2.0 com avaliação semântica e runtime dos apps gerados", () => {
+    const workflow = readFileSync(resolve(ROOT, ".github/workflows/golden-production.yml"), "utf8");
+    const script = readFileSync(resolve(ROOT, "scripts/golden-production.mjs"), "utf8");
+    expect(existsSync(resolve(ROOT, "scripts/lib/golden-evaluator.mjs"))).toBe(true);
+    expect(existsSync(resolve(ROOT, "tests/e2e/golden-generated.spec.ts"))).toBe(true);
+    expect(script).toContain("evaluateGoldenCandidate");
+    expect(script).toContain("golden-apps.json");
+    expect(workflow).toContain("golden-generated.spec.ts");
+    expect(workflow).toContain("playwright install --with-deps chromium");
+  });
 });

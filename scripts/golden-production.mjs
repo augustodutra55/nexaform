@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { evaluateGoldenCandidate } from "./lib/golden-evaluator.mjs";
 
 const baseUrl = String(process.env.PRODUCTION_URL || "https://nexaform-rho.vercel.app").replace(/\/$/, "");
 const projectId = String(process.env.AD_GOLDEN_PROJECT_ID || "").trim();
@@ -56,5 +57,49 @@ async function runSimpleCase(id, name, message) {
 }
 async function runStagedCase(id, name, message) { let currentFiles = null; let lastData = null; let lastStatus = 0; const totalStages = 7; for (let stageIndex = 0; stageIndex < totalStages; stageIndex += 1) { const stageStarted = Date.now(); try { const { response, data } = await requestStageWithRecovery(id, stageIndex, { projectId, message, name: `Golden ${name}`, currentFiles, stageIndex }); lastStatus = response.status; lastData = data; const elapsed = ((Date.now() - stageStarted) / 1000).toFixed(1); if (!response.ok || data?.engineMode !== "real" || !hasGeneratedCode(data)) { const error = String(data?.error || `HTTP ${response.status}`); console.log(`  STAGE FAIL ${id} ${stageIndex + 1}/${totalStages} HTTP ${response.status} ${elapsed}s — ${error}`); return { status: response.status, data, error: `etapa ${stageIndex + 1}/${totalStages}: ${error}` }; } currentFiles = Array.isArray(data?.app?.files) ? data.app.files : currentFiles; console.log(`  STAGE PASS ${id} ${stageIndex + 1}/${totalStages} HTTP ${response.status} ${elapsed}s${data?.stage?.label ? ` — ${data.stage.label}` : ""}${data?.stage?.snapshotRecovery ? " — snapshot recovery" : ""}`); } catch (reason) { const error = reason instanceof Error ? reason.message : String(reason); console.log(`  STAGE FAIL ${id} ${stageIndex + 1}/${totalStages} HTTP - ${((Date.now() - stageStarted) / 1000).toFixed(1)}s — ${error}`); return { status: 0, data: lastData, error: `etapa ${stageIndex + 1}/${totalStages}: ${error}` }; } } return { status: lastStatus, data: lastData, error: "" }; }
 const rows = [];
-for (const [id, name, message, staged] of cases) { const started = Date.now(); let status = 0; let data = null; let error = ""; try { const result = staged ? await runStagedCase(id, name, message) : await runSimpleCase(id, name, message); status = result.status; data = result.data; error = result.error; } catch (reason) { error = reason instanceof Error ? reason.message : String(reason); } const durationMs = Date.now() - started; const passed = status >= 200 && status < 300 && data?.engineMode === "real" && hasGeneratedCode(data) && !error; rows.push({ id, name, staged, passed, status, durationMs, provider: data?.provider || null, model: data?.model || null, error: error || null }); console.log(`${passed ? "PASS" : "FAIL"} ${id} HTTP ${status || "-"} ${(durationMs / 1000).toFixed(1)}s${staged ? " staged" : ""}${error ? ` — ${error}` : ""}`); }
-const passed = rows.filter((row) => row.passed).length; const successRate = Math.round((passed / rows.length) * 1000) / 10; const report = { productionUrl: baseUrl, generatedAt: new Date().toISOString(), total: rows.length, passed, successRate, targetSuccessRate: 90, rows }; fs.mkdirSync("artifacts", { recursive: true }); fs.writeFileSync("artifacts/golden-production.json", JSON.stringify(report, null, 2)); console.log(`Golden suite: ${passed}/${rows.length} = ${successRate}% (meta >= 90%)`); if (successRate < 90) process.exitCode = 1;
+const generatedApps = [];
+for (const [id, name, message, staged] of cases) {
+  const started = Date.now();
+  let status = 0;
+  let data = null;
+  let error = "";
+  try {
+    const result = staged ? await runStagedCase(id, name, message) : await runSimpleCase(id, name, message);
+    status = result.status;
+    data = result.data;
+    error = result.error;
+  } catch (reason) {
+    error = reason instanceof Error ? reason.message : String(reason);
+  }
+  const durationMs = Date.now() - started;
+  const transportPassed = status >= 200 && status < 300 && data?.engineMode === "real" && hasGeneratedCode(data) && !error;
+  const evaluation = hasGeneratedCode(data)
+    ? evaluateGoldenCandidate(id, data)
+    : { passed: false, score: 0, semanticRate: 0, checks: [], blockers: ["generated-code"] };
+  const passed = transportPassed && evaluation.passed;
+  const failedChecks = evaluation.checks.filter((item) => !item.passed).map((item) => item.id);
+  rows.push({
+    id,
+    name,
+    staged,
+    passed,
+    status,
+    durationMs,
+    provider: data?.provider || null,
+    model: data?.model || null,
+    evaluatorScore: evaluation.score,
+    semanticRate: evaluation.semanticRate,
+    failedChecks,
+    error: error || (!evaluation.passed ? `Golden 2.0 recusou: ${failedChecks.join(", ") || evaluation.blockers.join(", ")}` : null),
+  });
+  if (hasGeneratedCode(data)) generatedApps.push({ id, name, app: data.app, evaluation });
+  console.log(`${passed ? "PASS" : "FAIL"} ${id} HTTP ${status || "-"} ${(durationMs / 1000).toFixed(1)}s${staged ? " staged" : ""} EVAL ${evaluation.score}% SEM ${evaluation.semanticRate}%${error ? ` — ${error}` : failedChecks.length ? ` — ${failedChecks.join(", ")}` : ""}`);
+}
+const passed = rows.filter((row) => row.passed).length;
+const successRate = Math.round((passed / rows.length) * 1000) / 10;
+const report = { validationVersion: 2, productionUrl: baseUrl, generatedAt: new Date().toISOString(), total: rows.length, passed, successRate, targetSuccessRate: 90, rows };
+fs.mkdirSync("artifacts", { recursive: true });
+fs.writeFileSync("artifacts/golden-production.json", JSON.stringify(report, null, 2));
+fs.writeFileSync("artifacts/golden-apps.json", JSON.stringify(generatedApps, null, 2));
+console.log(`Golden 2.0 static suite: ${passed}/${rows.length} = ${successRate}% (meta >= 90%)`);
+if (successRate < 90) process.exitCode = 1;

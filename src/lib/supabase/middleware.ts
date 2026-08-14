@@ -11,7 +11,7 @@ const AUTH_ROUTES = ["/login", "/cadastro", "/recuperar-senha"];
 export async function updateSession(request: NextRequest) {
   // O harness de interação só existe durante a suíte Playwright e não depende
   // de credenciais reais do Supabase no CI.
-  if (process.env.E2E_TEST_MODE === "1" && request.nextUrl.pathname === "/e2e-runtime") {
+  if (process.env.E2E_TEST_MODE === "1" && request.nextUrl.pathname.startsWith("/e2e-runtime")) {
     return NextResponse.next({ request });
   }
 

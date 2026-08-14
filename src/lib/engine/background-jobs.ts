@@ -12,11 +12,11 @@ export type BackgroundJobStatus =
 export const BACKGROUND_GENERATION_VERSION = 2;
 const SUPPORTED_BACKGROUND_GENERATION_VERSIONS = [1, BACKGROUND_GENERATION_VERSION];
 /**
- * Uma etapa pode consumir uma chamada paga longa. Por isso a fila nunca
- * repete automaticamente a mesma etapa: uma falha pausa o trabalho e deixa a
- * decisão de continuar com o usuário, preservando tudo que já foi salvo.
+ * Uma etapa pode consumir uma chamada paga longa. Permitimos uma única segunda
+ * execução, somente para falha estrutural/aplicação, com escopo reduzido.
+ * Erros de saldo, autenticação e timeout não são repetidos automaticamente.
  */
-export const BACKGROUND_MAX_ATTEMPTS = 1;
+export const BACKGROUND_MAX_ATTEMPTS = 2;
 
 export interface BackgroundGenerationPayload {
   version: number;
@@ -130,13 +130,11 @@ export function nextBackgroundJobStatus(input: {
 }
 
 /**
- * Mantido como contrato explícito: nenhuma falha autoriza uma nova chamada
- * paga automática. Correções curtas acontecem dentro da execução atual; se
- * ainda falhar, a etapa é pausada para continuação manual.
+ * Só falhas em que o provedor respondeu com código aproveitável recebem uma
+ * segunda tentativa curta. Isso evita cobrar novamente por indisponibilidade.
  */
 export function isRetryableBackgroundFailure(message: string): boolean {
-  void message;
-  return false;
+  return /quality gate|estruturalmente inv[aá]lido|n[aã]o p[oô]de ser aplicada|continuou inv[aá]lida/i.test(message);
 }
 
 export function retryDelaySeconds(attempts: number): number {

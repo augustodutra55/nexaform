@@ -18,18 +18,6 @@ function safeCurrentFiles(value: unknown): AppFile[] | null {
   return files.length ? files : null;
 }
 
-function snapshotRecoveryPrompt(prompt: string, files: AppFile[]): string {
-  const snapshot = files.map((file) => `--- ARQUIVO ATUAL: ${file.path} ---\n${file.content}`).join("\n\n");
-  return [
-    prompt,
-    "RECUPERAÇÃO POR SNAPSHOT COMPLETO: a edição incremental anterior falhou no quality gate.",
-    "Recrie o snapshot completo já corrigido, preservando tudo que funciona e aplicando SOMENTE o requisito essencial desta etapa. Não implemente etapas futuras. O retorno deve ser um projeto completo e estruturalmente válido, com todos os imports relativos resolvidos.",
-    "SNAPSHOT ATUAL DO PROJETO:",
-    snapshot,
-    "FIM DO SNAPSHOT ATUAL.",
-  ].join("\n\n");
-}
-
 export async function POST(req: NextRequest) {
   if (!verifyGoldenServiceAuth(req)) return NextResponse.json({ error: "Golden auth inválida." }, { status: 401 });
   const admin = createAdminClient();
@@ -78,19 +66,16 @@ export async function POST(req: NextRequest) {
   });
 
   if (result.engineMode !== "real" && currentFiles?.length && stageDef && Number.isInteger(requestedStage)) {
-    const recovery = snapshotRecoveryPrompt(
-      buildStageRetryPrompt(message, stageDef, requestedStage, totalStages, "initial"),
-      currentFiles
-    );
+    const recovery = buildStageRetryPrompt(message, stageDef, requestedStage, totalStages, "initial");
     result = await generateAppWithProviders({
       message: recovery,
-      currentFiles: null,
+      currentFiles,
       name: typeof body?.name === "string" ? body.name : "Golden Production",
       costMode: "auto",
       forceReal: true,
       allowTemplate: false,
     });
-    stage = { index: requestedStage, total: totalStages, label: stageDef.label, snapshotRecovery: true };
+    stage = { index: requestedStage, total: totalStages, label: stageDef.label, snapshotRecovery: false };
   }
 
   if (result.engineMode !== "real") {

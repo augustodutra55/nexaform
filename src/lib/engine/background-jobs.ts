@@ -1,4 +1,4 @@
-import { isAppCode, type AppCode, type AppGenerationResult } from "./app-types";
+import { codeStats, isAppCode, isMultiFile, projectStats, type AppCode, type AppGenerationResult } from "./app-types";
 
 export type BackgroundJobStatus =
   | "active"
@@ -229,5 +229,35 @@ export function advanceBackgroundGeneration(
       accumulatedDurationMs: totalDurationMs,
       result: finalResult,
     },
+  };
+}
+
+/**
+ * Entrega o app acumulado quando SOMENTE a última etapa (revisão/acabamento)
+ * falha depois das tentativas. A revisão é acabamento: nunca deve descartar as
+ * etapas anteriores, que já produziram um app real e utilizável. Vale para
+ * qualquer geração por etapas (app, site ou landing) — é motor compartilhado.
+ *
+ * Retorna null quando não há o que salvar: não é a etapa final, é a primeira
+ * etapa (sem snapshot anterior), ou o snapshot acumulado não é um app válido.
+ */
+export function salvageFinalStageResult(
+  payload: BackgroundGenerationPayload,
+  totalStages: number
+): AppGenerationResult | null {
+  const isFinalStage = payload.stageIndex === totalStages - 1;
+  if (!isFinalStage || payload.stageIndex <= 0) return null;
+  const app = payload.currentApp;
+  if (!isAppCode(app)) return null;
+  const stats = isMultiFile(app) ? projectStats(app) : codeStats(app.code ?? "");
+  return {
+    provider: "openrouter",
+    engineMode: "real",
+    stats,
+    reply:
+      "Projeto concluído com as etapas aplicadas. A etapa final de revisão não pôde ser aplicada e foi ignorada para não descartar o trabalho já pronto — refine pontualmente se quiser ajustar detalhes.",
+    plan: [],
+    app,
+    cost: Math.max(0, payload.accumulatedCost ?? 0),
   };
 }

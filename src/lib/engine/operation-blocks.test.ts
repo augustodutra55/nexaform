@@ -48,3 +48,38 @@ export default function Page(){ return <p>Depois</p> }
     expect(applyFileOperations(current, parsed!.ops)?.[1].content).toContain("Depois");
   });
 });
+
+describe("salvamento de AD_FILE truncado (Etapa 2/7 — Esmalteria)", () => {
+  it("recupera o último AD_FILE sem tag de fechamento", () => {
+    const text = `<AD_FILE path="components/Agendamento.jsx" op="create">
+export default function Agendamento(){
+  return <div className="p-4">Agenda da esmalteria</div>;
+}`; // truncado: sem </AD_FILE>
+    const r = parseOperationBlocks(text);
+    expect(r).not.toBeNull();
+    expect(r?.ops.length).toBe(1);
+    expect(r?.ops[0]).toMatchObject({ op: "create", path: "components/Agendamento.jsx" });
+    expect((r?.ops[0] as any).content).toContain("function Agendamento");
+  });
+
+  it("preserva arquivos fechados e ainda recupera o último truncado", () => {
+    const text = `<AD_FILE path="components/Servicos.jsx" op="create">
+export default function Servicos(){ return <div>ok</div> }
+</AD_FILE>
+<AD_FILE path="components/Agendamento.jsx" op="create">
+export default function Agendamento(){ return <div>agenda</div>`; // 2º truncado
+    const r = parseOperationBlocks(text);
+    expect(r?.ops.map((o) => o.path)).toEqual([
+      "components/Servicos.jsx",
+      "components/Agendamento.jsx",
+    ]);
+  });
+
+  it("não duplica um arquivo já fechado", () => {
+    const text = `<AD_FILE path="App.jsx" op="update">
+export default function App(){ return <main/> }
+</AD_FILE>`;
+    const r = parseOperationBlocks(text);
+    expect(r?.ops.length).toBe(1);
+  });
+});

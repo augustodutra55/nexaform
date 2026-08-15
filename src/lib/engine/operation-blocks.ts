@@ -58,6 +58,30 @@ export function parseOperationBlocks(text: string): OperationBlockResult | null 
     });
   }
 
+  // Salvamento de AD_FILE final truncado (sem </AD_FILE>): o provedor às vezes
+  // corta os últimos tokens da etapa. Em vez de descartar a etapa inteira,
+  // recuperamos o último bloco aberto até o próximo marcador AD_ ou o fim do
+  // texto. Se o arquivo estiver realmente incompleto, o quality gate o rejeita
+  // depois; mas quando só faltou a tag de fechamento, a etapa é preservada.
+  const openTags = [...text.matchAll(/<AD_FILE\b([^>]*)>/gi)];
+  const lastOpen = openTags[openTags.length - 1];
+  if (lastOpen) {
+    const contentStart = (lastOpen.index ?? 0) + lastOpen[0].length;
+    const rest = text.slice(contentStart);
+    if (!/<\/AD_FILE\s*>/i.test(rest)) {
+      const path = attributePath(lastOpen[1]);
+      const stop = rest.search(/<AD_(?:FILE|PATCH|DELETE|REPLY)\b/i);
+      const content = (stop >= 0 ? rest.slice(0, stop) : rest)
+        .replace(/^```(?:jsx|tsx|js|ts)?\s*\r?\n?/i, "")
+        .replace(/\r?\n?```\s*$/, "")
+        .trim();
+      const opMatch = /\bop\s*=\s*["'](create|update)["']/i.exec(lastOpen[1]);
+      if (path && content.length > 20 && !ops.some((op) => op.op !== "delete" && op.path === path)) {
+        ops.push({ op: opMatch?.[1]?.toLowerCase() === "create" ? "create" : "update", path, content });
+      }
+    }
+  }
+
   // O fechamento externo pode faltar quando o provedor corta os últimos tokens.
   // Se SEARCH e REPLACE estão completos, o patch ainda é seguro e aproveitável.
   const patchPattern = /<AD_PATCH\b([^>]*)>([\s\S]*?)(?:<\/AD_PATCH\s*>|(?=<AD_PATCH\b|<AD_FILE\b|<AD_DELETE\b|<AD_REPLY\b|$))/gi;

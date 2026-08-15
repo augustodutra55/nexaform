@@ -10,6 +10,7 @@ import {
   isTerminalJobStatus,
   nextBackgroundJobStatus,
   retryDelaySeconds,
+  salvageFinalStageResult,
 } from "./background-jobs";
 
 describe("background generation jobs", () => {
@@ -214,5 +215,65 @@ describe("background generation jobs", () => {
     expect(backgroundJobLabel("running", 1)).toBe("Gerando etapa");
     expect(backgroundJobLabel("retry", 1)).toBe("Etapa aguardando continuação");
     expect(backgroundJobLabel("completed")).toBe("Aplicando resultado");
+  });
+});
+
+describe("salvamento da etapa final (entrega o app quando só a revisão falha)", () => {
+  const app = {
+    kind: "app" as const,
+    name: "Esmalteria",
+    description: "",
+    files: [
+      { path: "App.jsx", content: "export default function App(){ return <main>Esmalteria</main> }" },
+      { path: "components/Agenda.jsx", content: "export default function Agenda(){ return <div>Agenda</div> }" },
+    ],
+    entry: "App.jsx",
+  };
+  const basePayload = {
+    version: BACKGROUND_GENERATION_VERSION,
+    projectId: "project-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    stagedJob: {
+      version: 1,
+      projectId: "project-1",
+      threadId: "thread-1",
+      originalPrompt: "Crie a esmalteria",
+      masterPrompt: "Crie a esmalteria completa",
+      kind: "initial" as const,
+      nextStage: 6,
+      startedAt: "2026-01-01T00:00:00.000Z",
+    },
+    stageIndex: 6,
+    requestId: "request-1",
+    reservationId: "reservation-1",
+    name: "Esmalteria",
+    costMode: "premium" as const,
+    queuedAt: "2026-01-01T00:00:00.000Z",
+    currentApp: app,
+    accumulatedCost: 0.42,
+  };
+
+  it("entrega o app acumulado quando a ÚLTIMA etapa (7 de 7) falha", () => {
+    const salvaged = salvageFinalStageResult(basePayload, 7);
+    expect(salvaged).not.toBeNull();
+    expect(salvaged?.app).toEqual(app);
+    expect(salvaged?.engineMode).toBe("real");
+    expect(salvaged?.cost).toBe(0.42);
+    expect(salvaged?.stats?.files).toBe(2);
+  });
+
+  it("NÃO salva quando a etapa que falhou não é a final", () => {
+    expect(salvageFinalStageResult({ ...basePayload, stageIndex: 2 }, 7)).toBeNull();
+  });
+
+  it("NÃO salva na primeira etapa (não há snapshot anterior)", () => {
+    expect(salvageFinalStageResult({ ...basePayload, stageIndex: 0 }, 1)).toBeNull();
+  });
+
+  it("NÃO salva quando não há app acumulado válido", () => {
+    const { currentApp: _omit, ...noApp } = basePayload;
+    void _omit;
+    expect(salvageFinalStageResult(noApp, 7)).toBeNull();
   });
 });

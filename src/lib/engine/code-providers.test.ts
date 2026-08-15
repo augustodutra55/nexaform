@@ -243,6 +243,14 @@ describe("orçamento adaptativo por modelo", () => {
     expect(modelOutputTokenBudget("CONSTRUÇÃO POR ETAPAS — ETAPA 2/7", true, "nvidia/nemotron-3-ultra-550b-a55b:free")).toBe(2600);
   });
 
+  it("dá teto suficiente ao Sonnet nas etapas para não truncar (Etapa 2/7)", () => {
+    // Regressão do travamento da Esmalteria: 3.000 tokens cortavam a resposta.
+    expect(modelOutputTokenBudget("REFINAMENTO POR ETAPAS — ETAPA 2 DE 7", true, "anthropic/claude-sonnet-4.5")).toBe(8000);
+    expect(modelOutputTokenBudget("CONSTRUÇÃO POR ETAPAS — ETAPA 1 DE 7", false, "anthropic/claude-sonnet-4.5")).toBe(10000);
+    // Refinamento avulso (não-etapado) permanece enxuto.
+    expect(modelOutputTokenBudget("Mude a cor do botão", true, "anthropic/claude-sonnet-4.5")).toBe(4000);
+  });
+
   it("usa um contrato compacto e único nos modelos gratuitos", () => {
     const initial = compactProviderSystemPrompt(false);
     expect(initial).toContain('<AD_FILE path="App.jsx" op="create">');

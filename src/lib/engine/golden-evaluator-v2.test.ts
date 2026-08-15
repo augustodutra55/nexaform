@@ -43,4 +43,14 @@ describe("Golden 2.0 evaluator", () => {
     expect(result.passed).toBe(false);
     expect(result.semanticRate).toBe(0);
   });
+
+  it("ignora arquivos auxiliares e reconhece finalizar pedido como checkout", () => {
+    const result = evaluateGoldenCandidate("commerce", candidate([
+      { path: "App.jsx", content: 'import Shop from "./Shop"; export default function App(){ return <Shop/> }' },
+      { path: "README.md", content: "Documentação do projeto" },
+      { path: "Shop.jsx", content: `export default function Shop(){ return <main><input placeholder="Busca"/><h1>Catálogo de produtos</h1><p>Preço R$ 20</p><button>Carrinho</button><button>Finalizar pedido</button><section>Depoimentos de clientes</section><section>FAQ</section></main> }` },
+    ]));
+    expect(result.passed).toBe(true);
+    expect(result.checks.find((item: { id: string }) => item.id === "semantic-checkout")?.passed).toBe(true);
+  });
 });

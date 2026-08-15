@@ -36,19 +36,24 @@ function resolvesRelative(from, source, paths) {
 }
 
 function syntaxErrors(file) {
-  const result = ts.transpileModule(file.content, {
-    fileName: file.path,
-    reportDiagnostics: true,
-    compilerOptions: {
-      jsx: ts.JsxEmit.ReactJSX,
-      target: ts.ScriptTarget.ES2020,
-      module: ts.ModuleKind.ESNext,
-      isolatedModules: true,
-    },
-  });
-  return (result.diagnostics || [])
-    .filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)
-    .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, " "));
+  if (!/\.(?:jsx|tsx|js|ts)$/i.test(file.path)) return [];
+  try {
+    const result = ts.transpileModule(file.content, {
+      fileName: file.path,
+      reportDiagnostics: true,
+      compilerOptions: {
+        jsx: ts.JsxEmit.ReactJSX,
+        target: ts.ScriptTarget.ES2020,
+        module: ts.ModuleKind.ESNext,
+        isolatedModules: true,
+      },
+    });
+    return (result.diagnostics || [])
+      .filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)
+      .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, " "));
+  } catch (reason) {
+    return [`Transpilação falhou: ${reason instanceof Error ? reason.message : String(reason)}`];
+  }
 }
 
 function check(id, label, passed, detail, blocking = false) {
@@ -85,7 +90,7 @@ const SCENARIO_RULES = {
     ["search", "Busca", /busca|pesquisa|search/i],
     ["price", "Preço", /pre[çc]o|price|R\$/i],
     ["cart", "Carrinho", /carrinho|cart/i],
-    ["checkout", "Jornada de checkout", /checkout|finalizar compra/i],
+    ["checkout", "Jornada de checkout", /checkout|finalizar (?:a )?(?:compra|pedido)|resumo do pedido|continuar para (?:o )?pagamento/i],
     ["social-proof", "Prova social", /depoimento|testimonial|avalia[çc][aã]o|estrelas|clientes/i],
     ["faq", "FAQ", /\bfaq\b|perguntas frequentes/i],
   ],

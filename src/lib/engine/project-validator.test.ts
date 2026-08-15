@@ -61,3 +61,41 @@ describe("validateAppProject visual e mídia", () => {
     expect(codes).toContain("video_preload");
   });
 });
+
+describe("validateAppProject conclusão funcional", () => {
+  it("reprova componente React criado mas não alcançável pelo App", () => {
+    const app: AppCode = {
+      kind: "app",
+      name: "Teste",
+      description: "Teste",
+      entry: "App.jsx",
+      files: [
+        { path: "App.jsx", content: 'import Screen from "./components/Screen"; export default function App(){ return <Screen />; }' },
+        { path: "components/Screen.jsx", content: "export default function Screen(){ return <main>Loja</main>; }" },
+        { path: "components/FAQ.jsx", content: "export default function FAQ(){ return <section>FAQ</section>; }" },
+      ],
+    };
+
+    const report = validateAppProject(app, buildGenerationPlan("crie uma loja"));
+
+    expect(report.errors).toContainEqual(expect.objectContaining({ code: "orphan_component", path: "components/FAQ.jsx" }));
+  });
+
+  it("reprova autenticação obrigatória ausente", () => {
+    const report = validateAppProject(
+      appWith('export default function Screen(){ return <main>Agenda</main>; }'),
+      buildGenerationPlan("aplicativo de agenda com cadastro, login e conta do usuário")
+    );
+
+    expect(report.errors.some((entry) => entry.code === "missing_auth")).toBe(true);
+  });
+
+  it("reprova jornada comercial obrigatória sem checkout", () => {
+    const report = validateAppProject(
+      appWith('export default function Screen(){ return <main><h1>Produtos e preços</h1></main>; }'),
+      buildGenerationPlan("loja com catálogo, preço e checkout")
+    );
+
+    expect(report.errors.some((entry) => entry.code === "missing_commercial_flow")).toBe(true);
+  });
+});

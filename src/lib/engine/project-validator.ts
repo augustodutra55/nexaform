@@ -34,13 +34,17 @@ function importSources(content: string): string[] {
   return sources;
 }
 
-function resolvesRelative(from: string, source: string, paths: Set<string>): boolean {
+function resolvedRelative(from: string, source: string, paths: Set<string>): string | null {
   const base = normalizePath(`${dirname(from)}/${source}`);
   for (const extension of SCRIPT_EXTENSIONS) {
-    if (paths.has(`${base}${extension}`)) return true;
-    if (paths.has(`${base}/index${extension || ".jsx"}`)) return true;
+    if (paths.has(`${base}${extension}`)) return `${base}${extension}`;
+    if (paths.has(`${base}/index${extension || ".jsx"}`)) return `${base}/index${extension || ".jsx"}`;
   }
-  return false;
+  return null;
+}
+
+function resolvesRelative(from: string, source: string, paths: Set<string>): boolean {
+  return resolvedRelative(from, source, paths) !== null;
 }
 
 function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQualityIssue[]; warnings: ProjectQualityIssue[] } {
@@ -96,9 +100,49 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
   if (entryFile && !/export\s+default\b/.test(entryFile.content)) errors.push(issue("missing_default_export", "O entry precisa exportar o componente raiz como default.", entry));
   if (entryFile && entryFile.content.split(/\r?\n/).length > 90) warnings.push(issue("thick_entry", "App.jsx deveria apenas montar os componentes e ficar abaixo de 60 linhas.", entry));
 
+  // Um componente criado mas nunca alcançado a partir do entry não aparece no
+  // aplicativo. Isso costuma acontecer quando a IA cria FAQ/depoimentos e
+  // esquece de importar/renderizar no App.jsx.
+  if (entryFile) {
+    const byPath = new Map(files.map((file) => [normalizePath(file.path), file]));
+    const reachable = new Set<string>();
+    const pending = [entry];
+    while (pending.length) {
+      const current = pending.pop()!;
+      if (reachable.has(current)) continue;
+      reachable.add(current);
+      const file = byPath.get(current);
+      if (!file) continue;
+      for (const source of importSources(file.content)) {
+        if (!source.startsWith(".")) continue;
+        const resolved = resolvedRelative(current, source, paths);
+        if (resolved && !reachable.has(resolved)) pending.push(resolved);
+      }
+    }
+    for (const file of files) {
+      const path = normalizePath(file.path);
+      if (reachable.has(path) || !/\.(?:jsx|tsx|js|ts)$/i.test(path)) continue;
+      if (/export\s+default\s+(?:function|class)\s+[A-Z]|export\s+default\s+[A-Z][A-Za-z0-9_$]*|function\s+[A-Z][A-Za-z0-9_$]*\s*\([^)]*\)\s*\{[\s\S]*?</.test(file.content)) {
+        errors.push(issue("orphan_component", "Componente criado, mas não importado/renderizado a partir do entry.", path));
+      }
+    }
+  }
+
   if (plan?.requiredCapabilities.some((capability) => capability.indexOf("window.AD") >= 0)) {
     const joined = files.map((file) => file.content).join("\n");
     if (!/\b(?:window\.)?AD\./.test(joined)) warnings.push(issue("missing_ad_data", "O pedido exige dados reais, mas nenhuma integração window.AD foi encontrada."));
+  }
+  if (plan?.requiredCapabilities.some((capability) => /autentica|sess[aã]o/i.test(capability))) {
+    const joined = files.map((file) => file.content).join("\n");
+    if (!/(?:window\.)?AD\s*\.\s*auth|\b(?:signIn|signUp|login|logout)\b/i.test(joined)) {
+      errors.push(issue("missing_auth", "O pedido exige autenticação, mas nenhum fluxo de sessão foi implementado."));
+    }
+  }
+  if (plan?.requiredCapabilities.some((capability) => /jornada comercial|pagamento/i.test(capability))) {
+    const joined = files.map((file) => file.content).join("\n");
+    if (!/checkout|finalizar\s+(?:a\s+)?(?:compra|pedido)|resumo\s+do\s+pedido|continuar\s+para\s+(?:o\s+)?pagamento/i.test(joined)) {
+      errors.push(issue("missing_commercial_flow", "O pedido exige jornada comercial, mas checkout/finalização não foi implementado."));
+    }
   }
 
   if (plan) {

@@ -35,6 +35,15 @@ function resolvesRelative(from, source, paths) {
   return false;
 }
 
+function resolvedRelative(from, source, paths) {
+  const base = normalizePath(`${dirname(from)}/${source}`);
+  for (const extension of SCRIPT_EXTENSIONS) {
+    if (paths.has(`${base}${extension}`)) return `${base}${extension}`;
+    if (paths.has(`${base}/index${extension || ".jsx"}`)) return `${base}/index${extension || ".jsx"}`;
+  }
+  return null;
+}
+
 function syntaxErrors(file) {
   if (!/\.(?:jsx|tsx|js|ts)$/i.test(file.path)) return [];
   try {
@@ -108,7 +117,22 @@ export function evaluateGoldenCandidate(id, data) {
     : [];
   const paths = new Set(files.map((file) => normalizePath(file.path)));
   const entry = normalizePath(data?.app?.entry || "");
-  const source = files.map((file) => file.content).join("\n");
+  const byPath = new Map(files.map((file) => [normalizePath(file.path), file]));
+  const reachable = new Set();
+  const pending = entry ? [entry] : [];
+  while (pending.length) {
+    const current = pending.pop();
+    if (!current || reachable.has(current)) continue;
+    reachable.add(current);
+    const file = byPath.get(current);
+    if (!file) continue;
+    for (const imported of importSources(file.content)) {
+      if (!imported.startsWith(".")) continue;
+      const resolved = resolvedRelative(current, imported, paths);
+      if (resolved && !reachable.has(resolved)) pending.push(resolved);
+    }
+  }
+  const source = files.filter((file) => reachable.has(normalizePath(file.path))).map((file) => file.content).join("\n");
   const checks = [];
 
   checks.push(check("real-engine", "Motor real", data?.engineMode === "real", `engineMode=${String(data?.engineMode || "ausente")}`, true));
@@ -148,7 +172,7 @@ export function evaluateGoldenCandidate(id, data) {
   const passedCount = checks.filter((item) => item.passed).length;
   const score = checks.length ? Math.round((passedCount / checks.length) * 100) : 0;
   return {
-    passed: blockers.length === 0 && semanticRate >= 0.85 && score >= 85,
+    passed: blockers.length === 0 && semanticRate === 1 && score >= 85,
     score,
     semanticRate: Math.round(semanticRate * 100),
     checks,

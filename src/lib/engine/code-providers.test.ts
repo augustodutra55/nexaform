@@ -145,6 +145,29 @@ describe("quality gate progressivo das etapas", () => {
     expect(staged.errors).toEqual([]);
     expect(staged.warnings[0].code).toBe("file_too_large");
   });
+
+  it("bloqueia capacidades ausentes e componentes órfãos na etapa final", () => {
+    const staged = stagedRuntimeQualityReport({
+      valid: false,
+      score: 60,
+      repaired: false,
+      errors: [
+        { code: "orphan_component", message: "FAQ não renderizada", path: "components/FAQ.jsx" },
+        { code: "missing_auth", message: "Autenticação ausente" },
+        { code: "missing_commercial_flow", message: "Checkout ausente" },
+        { code: "file_too_large", message: "Arquivo grande", path: "App.jsx" },
+      ],
+      warnings: [],
+    }, true, true);
+
+    expect(staged.valid).toBe(false);
+    expect(staged.errors.map((value) => value.code)).toEqual([
+      "orphan_component",
+      "missing_auth",
+      "missing_commercial_flow",
+    ]);
+    expect(staged.warnings.map((value) => value.code)).toEqual(["file_too_large"]);
+  });
 });
 
 

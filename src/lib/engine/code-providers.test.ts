@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { compactProviderSystemPrompt, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairBaseFiles, qualityRepairInstruction, recoverStagedMissingImports, rollbackMissingImportFiles, shouldTryFreeModelsAfterPaidDiagnostics, stagedRuntimeQualityReport } from "./code-providers";
+import { compactProviderSystemPrompt, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairBaseFiles, qualityRepairInstruction, recoverStagedMissingImports, rollbackMissingImportFiles, shouldTryFreeModelsAfterPaidDiagnostics, stagedRuntimeQualityReport, streamAppWithOpenRouter, streamOpenRouter } from "./code-providers";
+import { BUDGET_MODEL_OPENROUTER, PREMIUM_MODEL_OPENROUTER } from "./models";
 import type { AppGenerationResult, ProjectQualityReport } from "./app-types";
 
 const report: ProjectQualityReport = {
@@ -307,5 +308,140 @@ describe("orçamento de tempo dos fallbacks gratuitos", () => {
     expect(shouldTryFreeModelsAfterPaidDiagnostics(false, [
       "OpenRouter: anthropic/claude-sonnet-4.5 não passou no quality gate após uma correção automática.",
     ])).toBe(false);
+  });
+});
+
+// ── Streaming SSE com fallback (Fase 1) ──────────────────────────────────────
+
+function sseChunk(delta: string): string {
+  return `data: ${JSON.stringify({ choices: [{ delta: { content: delta } }] })}\n\n`;
+}
+
+function sseUsage(promptTokens: number, completionTokens: number, cost?: number): string {
+  return `data: ${JSON.stringify({
+    choices: [{ delta: {} }],
+    usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens, ...(cost !== undefined ? { cost } : {}) },
+  })}\n\n`;
+}
+
+function sseResponse(parts: string[]): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const part of parts) controller.enqueue(encoder.encode(part));
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.close();
+    },
+  });
+  return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+const VALID_INITIAL_PROJECT = [
+  '<AD_FILE path="App.jsx" op="create">',
+  'import Home from "./components/Home";',
+  "export default function App() {",
+  "  return <Home />;",
+  "}",
+  "</AD_FILE>",
+  '<AD_FILE path="components/Home.jsx" op="create">',
+  "export default function Home() {",
+  '  return <main className="p-4">Contador pronto</main>;',
+  "}",
+  "</AD_FILE>",
+  "<AD_REPLY>Base criada.</AD_REPLY>",
+].join("\n");
+
+const STREAM_ARGS = {
+  message: "Crie um app de contador simples",
+  currentFiles: null,
+  currentCode: null,
+  name: "Contador",
+  userKey: "sk-or-teste",
+  userProvider: "openrouter" as const,
+  costMode: "premium" as const,
+  forceReal: true,
+};
+
+describe("streamOpenRouter", () => {
+  it("emite cada delta em onToken e devolve o texto completo com custo real", async () => {
+    const tokens: string[] = [];
+    const diag: string[] = [];
+    const fetchImpl = (async () =>
+      sseResponse([sseChunk("Olá "), sseChunk("mundo"), sseUsage(100, 20, 0.0042)])) as unknown as typeof fetch;
+
+    const result = await streamOpenRouter("sk-or-teste", STREAM_ARGS, PREMIUM_MODEL_OPENROUTER, diag, {
+      onToken: (token) => tokens.push(token),
+      fetchImpl,
+    });
+
+    expect(result?.text).toBe("Olá mundo");
+    expect(result?.cost).toBe(0.0042);
+    expect(tokens).toEqual(["Olá ", "mundo"]);
+    expect(diag).toEqual([]);
+  });
+
+  it("registra diagnóstico legível e devolve null em falha HTTP", async () => {
+    const diag: string[] = [];
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ error: { message: "Insufficient credits" } }), { status: 402 })) as unknown as typeof fetch;
+
+    const result = await streamOpenRouter("sk-or-teste", STREAM_ARGS, PREMIUM_MODEL_OPENROUTER, diag, { fetchImpl });
+
+    expect(result).toBeNull();
+    expect(diag[0]).toContain("HTTP 402");
+    expect(diag[0]).toContain("sem crédito/saldo");
+  });
+});
+
+describe("streamAppWithOpenRouter — chain de fallback", () => {
+  it("aceita o tier principal quando ele responde um projeto válido", async () => {
+    const models: string[] = [];
+    const fetchImpl = (async (_url: any, init: any) => {
+      models.push(JSON.parse(init.body).model);
+      return sseResponse([sseChunk(VALID_INITIAL_PROJECT), sseUsage(500, 300)]);
+    }) as unknown as typeof fetch;
+
+    const result = await streamAppWithOpenRouter("sk-or-teste", STREAM_ARGS, { fetchImpl });
+
+    expect(models).toEqual([PREMIUM_MODEL_OPENROUTER]);
+    expect(result.engineMode).toBe("real");
+    expect(result.provider).toBe("openrouter");
+    expect(result.app.files?.map((file) => file.path)).toEqual(["App.jsx", "components/Home.jsx"]);
+  });
+
+  it("cai para o próximo modelo do chain quando o principal falha por HTTP", async () => {
+    const models: string[] = [];
+    const attempts: Array<{ model: string; attempt: number }> = [];
+    const fetchImpl = (async (_url: any, init: any) => {
+      const model = JSON.parse(init.body).model;
+      models.push(model);
+      if (model === PREMIUM_MODEL_OPENROUTER) {
+        return new Response(JSON.stringify({ error: { message: "Insufficient credits" } }), { status: 402 });
+      }
+      return sseResponse([sseChunk(VALID_INITIAL_PROJECT), sseUsage(500, 300)]);
+    }) as unknown as typeof fetch;
+
+    const result = await streamAppWithOpenRouter("sk-or-teste", STREAM_ARGS, {
+      fetchImpl,
+      onModel: (model, attempt) => attempts.push({ model, attempt }),
+    });
+
+    expect(models).toEqual([PREMIUM_MODEL_OPENROUTER, BUDGET_MODEL_OPENROUTER]);
+    expect(attempts[0]).toEqual({ model: PREMIUM_MODEL_OPENROUTER, attempt: 1 });
+    expect(attempts[1]).toEqual({ model: BUDGET_MODEL_OPENROUTER, attempt: 2 });
+    expect(result.engineMode).toBe("real");
+    expect(result.model).toBe(BUDGET_MODEL_OPENROUTER);
+  });
+
+  it("devolve o fallback-card com o motivo real quando todos os modelos falham", async () => {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ error: { message: "Insufficient credits" } }), { status: 402 })) as unknown as typeof fetch;
+    const diag: string[] = [];
+
+    const result = await streamAppWithOpenRouter("sk-or-teste", STREAM_ARGS, { fetchImpl, diag });
+
+    expect(result.engineMode).toBe("demo");
+    expect(result.failureReason).toContain("HTTP 402");
+    expect(diag.length).toBeGreaterThan(0);
   });
 });

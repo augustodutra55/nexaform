@@ -837,17 +837,25 @@ function App(){
   };
 }
 
-export async function generateAppWithProviders(a: Args): Promise<AppGenerationResult> {
+/** Tier efetivo desta geração — compartilhado entre o caminho síncrono e o
+ * streaming para nunca divergirem na escolha de modelo. */
+export function generationTierFor(a: Args): "economy" | "premium" {
   const isRefinement = !!(a.currentFiles?.length || a.currentCode);
   const isStagedBuild = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
   const functionalRefinement = isRefinement && isFunctionalRefinement(a.message);
   const premiumOnly = isStagedBuild || functionalRefinement;
+  return premiumOnly
+    ? "premium"
+    : pickTier(a.costMode ?? "auto", { isApp: true, isRefinement, message: a.message });
+}
+
+export async function generateAppWithProviders(a: Args): Promise<AppGenerationResult> {
+  const isRefinement = !!(a.currentFiles?.length || a.currentCode);
+  const isStagedBuild = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
   // Um superprompt já foi dividido justamente para preservar qualidade. Nestas
   // etapas — e em mudanças funcionais de navegação, botões, fluxo ou correção —
   // o modo econômico não pode substituir o modelo forte silenciosamente.
-  const tier = premiumOnly
-    ? "premium"
-    : pickTier(a.costMode ?? "auto", { isApp: true, isRefinement, message: a.message });
+  const tier = generationTierFor(a);
   // Coletor de motivos técnicos de falha (para dar um erro honesto, não genérico).
   const diag: string[] = [];
   const hadKey = !!(a.userKey || process.env.ANTHROPIC_API_KEY || process.env.OPENROUTER_API_KEY);
@@ -932,4 +940,151 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
     }
   }
   return demoFallback(a.message, hadKey && diag.length ? diag.join(" | ") : undefined);
+}
+
+// ── STREAMING SSE (Fase 1 — paridade Lovable) ────────────────────────────────
+// O caminho de streaming reaproveita o MESMO chain de fallback, os MESMOS
+// prompts e o MESMO quality gate do caminho síncrono. Nada é duplicado: apenas
+// o transporte muda (tokens chegam em chunks e são repassados via onToken).
+
+export interface StreamCallbacks {
+  /** Recebe cada delta de texto assim que o OpenRouter o emite. */
+  onToken?: (token: string, model: string) => void;
+  /** Notifica o início de cada tentativa de modelo do chain de fallback. */
+  onModel?: (model: string, attempt: number) => void;
+  /** Injetável nos testes; em produção usa o fetch global. */
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * Chama UM modelo do OpenRouter em modo `stream: true`, emitindo cada delta em
+ * `onToken` e devolvendo o texto completo + custo real ao final. Retorna null
+ * (com diagnóstico em `diag`) em falha HTTP, stream vazio ou timeout — o mesmo
+ * contrato de callOpenRouter, para o chain de fallback continuar funcionando.
+ */
+export async function streamOpenRouter(
+  apiKey: string,
+  a: Args,
+  model: string,
+  diag: string[],
+  opts: StreamCallbacks = {}
+): Promise<{ text: string; cost: number } | null> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  try {
+    const res = await fetchImpl("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxOutputTokens(a, model),
+        usage: { include: true },
+        stream: true,
+        messages: [
+          { role: "system", content: systemPromptFor(a, model) },
+          { role: "user", content: openRouterUserContent(a) },
+        ],
+        ...openRouterControlsForModel(model),
+      }),
+      signal: AbortSignal.timeout(providerTimeoutMs(a, false, model)),
+    });
+    if (!res.ok) {
+      const detail = await errDetail(res);
+      const hint =
+        res.status === 404 ? " — modelo indisponível/renomeado no OpenRouter" :
+        res.status === 401 ? " — chave rejeitada" :
+        res.status === 402 ? " — sem crédito/saldo" : "";
+      diag.push(`OpenRouter: modelo ${model} → HTTP ${res.status}${hint}. ${detail}`);
+      return null;
+    }
+    if (!res.body) {
+      diag.push(`OpenRouter: ${model} respondeu sem corpo de stream.`);
+      return null;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let text = "";
+    let cost = 0;
+    let promptTokens = 0;
+    let completionTokens = 0;
+    let sawUsageCost = false;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
+        const payload = trimmed.slice(5).trim();
+        if (!payload || payload === "[DONE]") continue;
+        let chunk: any;
+        try { chunk = JSON.parse(payload); } catch { continue; }
+        const delta = chunk?.choices?.[0]?.delta?.content;
+        if (typeof delta === "string" && delta) {
+          text += delta;
+          opts.onToken?.(delta, model);
+        }
+        if (chunk?.usage) {
+          if (typeof chunk.usage.cost === "number") { cost = chunk.usage.cost; sawUsageCost = true; }
+          promptTokens = chunk.usage.prompt_tokens ?? promptTokens;
+          completionTokens = chunk.usage.completion_tokens ?? completionTokens;
+        }
+      }
+    }
+    if (!sawUsageCost) cost = estimateCost(model, promptTokens, completionTokens);
+    if (!text.trim()) {
+      diag.push(`OpenRouter: ${model} respondeu vazio no modo streaming.`);
+      return null;
+    }
+    return { text, cost };
+  } catch (e) {
+    diag.push(reasonFromException("OpenRouter", model, e));
+    return null;
+  }
+}
+
+/**
+ * Geração completa em streaming: percorre o chain de fallback do tier efetivo
+ * (o mesmo de generateAppWithProviders), transmite tokens de cada tentativa e
+ * valida o resultado com o quality gate existente. Quando todos os modelos
+ * falham, devolve o demoFallback com failureReason — a rota converte isso no
+ * fallback-card visível ao usuário.
+ */
+export async function streamAppWithOpenRouter(
+  apiKey: string,
+  a: Args,
+  opts: StreamCallbacks & { diag?: string[] } = {}
+): Promise<AppGenerationResult> {
+  const isStagedBuild = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
+  const tier = generationTierFor(a);
+  const diag = opts.diag ?? [];
+  const chain = modelExecutionPlan(tier, "openrouter");
+  const chainDiagnosticsStart = diag.length;
+  for (let i = 0; i < chain.length; i++) {
+    if (i > 0 && !shouldTryFreeModelsAfterPaidDiagnostics(isStagedBuild, diag.slice(chainDiagnosticsStart))) {
+      diag.push("OpenRouter: fallbacks adicionais foram ignorados nesta etapa para preservar o prazo da requisição.");
+      break;
+    }
+    const model = chain[i];
+    opts.onModel?.(model, i + 1);
+    const streamed = await streamOpenRouter(apiKey, a, model, diag, opts);
+    if (!streamed) continue;
+    const candidate = parse(streamed.text, "openrouter", streamed.cost, model, a.currentFiles ?? null);
+    if (!candidate) {
+      diag.push(`OpenRouter: resposta em streaming de ${model} não pôde ser aplicada (${responseFormatSummary(streamed.text)}).`);
+      continue;
+    }
+    const quality = assessCandidate(candidate, a);
+    if (quality.valid) return candidate;
+    const recovered = recoverStagedMissingImports(candidate, a);
+    if (recovered) {
+      diag.push(`OpenRouter: ${model} teve apenas arquivos com imports quebrados revertidos; alterações válidas da etapa foram preservadas.`);
+      return recovered;
+    }
+    diag.push(`OpenRouter: ${model} gerou código estruturalmente inválido no modo streaming [${qualityFailureSummary(quality)}].`);
+  }
+  return demoFallback(a.message, diag.length ? diag.join(" | ") : undefined);
 }

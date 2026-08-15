@@ -212,9 +212,12 @@ describe("background generation jobs", () => {
 
   it("explica o estado da fila em linguagem de interface", () => {
     expect(backgroundJobLabel("queued")).toBe("Na fila · aguardando execução");
-    expect(backgroundJobLabel("running", 1)).toBe("Gerando etapa");
-    expect(backgroundJobLabel("retry", 1)).toBe("Etapa aguardando continuação");
-    expect(backgroundJobLabel("completed")).toBe("Aplicando resultado");
+    expect(backgroundJobLabel("running")).toBe("Gerando etapa");
+    expect(backgroundJobLabel("running", 1)).toBe("Gerando etapa · tentativa 1/2");
+    expect(backgroundJobLabel("running", 2)).toBe("Gerando etapa · tentativa 2/2");
+    expect(backgroundJobLabel("running", 5)).toBe("Gerando etapa · tentativa 2/2");
+    expect(backgroundJobLabel("retry", 1)).toBe("Etapa aguardando nova tentativa · 2/2");
+    expect(backgroundJobLabel("completed")).toBe("Concluído · aplicando resultado");
   });
 });
 

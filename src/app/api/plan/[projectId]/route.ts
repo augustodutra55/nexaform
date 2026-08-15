@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { buildGenerationPlan } from "@/lib/engine/generation-plan";
-import { nextPlanStatus, renderPlanSummary, type ProjectPlanStatus } from "@/lib/engine/plan-agent";
+import { nextPlanStatus, renderPlanSummary, toProjectPlanView, type ProjectPlanStatus } from "@/lib/engine/plan-agent";
 import { isUuid } from "@/lib/engine/data-guard";
 
 function bad(error: string, status = 400) {
@@ -35,7 +35,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ pro
     .order("created_at", { ascending: false })
     .limit(20);
   if (error) return bad(error.message, 500);
-  return NextResponse.json({ plans: data || [] });
+  const plans = data || [];
+  // Envelope padronizado (views) além das linhas cruas, para o plan-card.
+  return NextResponse.json({ plans, views: plans.map((row: any) => toProjectPlanView(row)) });
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
@@ -56,7 +58,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
       .select("id, prompt, plan, status, approved_at, executed_at, created_at, updated_at")
       .single();
     if (error) return bad(error.message, 500);
-    return NextResponse.json({ plan: data, summary: renderPlanSummary(plan), mode: "plan" }, { status: 201 });
+    return NextResponse.json(
+      { plan: data, view: toProjectPlanView(data as any), summary: renderPlanSummary(plan), mode: "plan" },
+      { status: 201 }
+    );
   }
 
   if (!body.planId || !isUuid(body.planId) || !body.action) return bad("Informe prompt ou planId/action.");
@@ -88,5 +93,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     .select("id, prompt, plan, status, approved_at, executed_at, created_at, updated_at")
     .single();
   if (error) return bad(error.message, 500);
-  return NextResponse.json({ plan: data, mode: body.action === "execute" ? "agent" : "plan" });
+  return NextResponse.json({
+    plan: data,
+    view: toProjectPlanView(data as any),
+    mode: body.action === "execute" ? "agent" : "plan",
+  });
 }

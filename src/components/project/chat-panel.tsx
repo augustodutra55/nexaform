@@ -146,6 +146,63 @@ const REFINE_APP = ["Melhore a experiência de uso", "Adicione validações e fe
 const REFINE_GAME = ["Adicione um placar", "Crie níveis de dificuldade", "Adicione um botão de reiniciar"];
 const REFINE_CODE_SITE = ["Melhore a versão mobile", "Deixe o visual mais premium", "Revise os textos e chamadas"];
 
+/** Consome /api/chat (SSE) e devolve o resultado final da geração. Retorna
+ * null quando a rota não responde com streaming — o chamador cai no caminho
+ * síncrono (/api/generate-app) sem mudança de comportamento. Erros emitidos
+ * pelo stream são lançados com a mesma forma dos erros do caminho síncrono. */
+async function streamAppRequest(
+  payload: Record<string, unknown>,
+  signal: AbortSignal,
+  onToken: (token: string) => void
+): Promise<any | null> {
+  let res: Response;
+  try {
+    res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      signal,
+    });
+  } catch (error: any) {
+    if (error?.name === "AbortError") throw error;
+    return null; // rede/rota indisponível → caminho síncrono
+  }
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("text/event-stream") || !res.body) {
+    if (!res.ok && contentType.includes("application/json")) {
+      const data = await res.json().catch(() => null);
+      if (data?.error) throw new Error(data.error);
+    }
+    return null;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let eventName = "";
+  let result: any = null;
+  let streamedError: Error | null = null;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("event:")) { eventName = trimmed.slice(6).trim(); continue; }
+      if (!trimmed.startsWith("data:")) continue;
+      let data: any = null;
+      try { data = JSON.parse(trimmed.slice(5).trim()); } catch { continue; }
+      if (eventName === "token" && typeof data?.t === "string") onToken(data.t);
+      else if (eventName === "result") result = data;
+      else if (eventName === "error") streamedError = new Error(String(data?.error ?? "Falha na geração."));
+    }
+  }
+  if (streamedError) throw streamedError;
+  if (!result) throw new Error("O servidor encerrou o stream antes de enviar o resultado.");
+  return result;
+}
+
 function canRetryStagedFailure(error: any): boolean {
   if (error?.name === "AbortError") return false;
   const message = String(error?.message || "").toLowerCase();
@@ -222,6 +279,7 @@ export function ChatPanel({
     }
   });
   const [generating, setGenerating] = useState(false);
+  const [streamTail, setStreamTail] = useState("");
   const [plan, setPlan] = useState<string[]>([]);
   const [planDone, setPlanDone] = useState(0);
   const [lastCost, setLastCost] = useState<number | null>(null);
@@ -234,6 +292,8 @@ export function ChatPanel({
   const [resumeJob, setResumeJob] = useState<StagedBuildJob | null>(null);
   const [stageStatus, setStageStatus] = useState<{ current: number; total: number; label: string } | null>(null);
   const [backgroundJob, setBackgroundJob] = useState<BackgroundJobSnapshot | null>(null);
+  const backgroundJobRef = useRef<BackgroundJobSnapshot | null>(null);
+  backgroundJobRef.current = backgroundJob;
   const [backgroundSubmitting, setBackgroundSubmitting] = useState(false);
   const processingBackgroundRef = useRef<string | null>(null);
   const stagedStorageKey = `adstudio:staged-build:${projectId}`;
@@ -377,6 +437,53 @@ export function ChatPanel({
     const poll = async () => {
       let nextDelay = 8000;
       try {
+        // 1) Status LEVE a cada 2s enquanto o job está ativo (queued/running/
+        // retry): /api/generation-jobs/queue devolve só o estado, sem o payload
+        // pesado (currentApp). O snapshot completo é buscado uma única vez no
+        // início e novamente quando o status fica terminal (resultado/retomada).
+        try {
+          const statusResponse = await fetch(`/api/generation-jobs/queue?projectId=${encodeURIComponent(projectId)}`, {
+            cache: "no-store",
+          });
+          if (statusResponse.ok) {
+            const statusData = await statusResponse.json();
+            const light = statusData?.job;
+            if (!light) {
+              if (!disposed) setBackgroundJob(null);
+              return;
+            }
+            if (light.threadId && light.threadId !== threadId) return;
+            const knownSnapshot = backgroundJobRef.current;
+            if (light.active && knownSnapshot && knownSnapshot.id === light.id) {
+              nextDelay = 2000;
+              if (!disposed) {
+                setBackgroundJob({
+                  ...knownSnapshot,
+                  status: light.status,
+                  attempts: light.attempts,
+                  last_error: light.lastError ?? knownSnapshot.last_error,
+                  updated_at: light.updatedAt ?? knownSnapshot.updated_at,
+                });
+                const lightStages = stagedStages(light.kind === "refinement" ? "refinement" : "initial");
+                setPlan(lightStages.map((item, index) => `${index + 1}/${lightStages.length} · ${item.label}`));
+                setPlanDone(Math.min(light.stageIndex, lightStages.length));
+                const activeStage = lightStages[light.stageIndex];
+                if (activeStage) {
+                  setStageStatus({
+                    current: light.stageIndex + 1,
+                    total: lightStages.length,
+                    label: activeStage.label,
+                  });
+                }
+              }
+              return;
+            }
+            // Sem snapshot ainda, ou status terminal → segue para a consulta completa.
+          }
+          // Rota leve indisponível (deploy antigo) → comportamento anterior intacto.
+        } catch {
+          // Oscilação só da rota leve não interrompe o polling completo.
+        }
         const response = await fetch(`/api/generation-jobs?projectId=${encodeURIComponent(projectId)}`, {
           cache: "no-store",
         });
@@ -389,7 +496,7 @@ export function ChatPanel({
         }
         if (row.payload.threadId !== threadId) return;
         if (!disposed) setBackgroundJob(row);
-        if (!isTerminalJobStatus(row.status) || row.status === "completed") nextDelay = 2500;
+        if (!isTerminalJobStatus(row.status) || row.status === "completed") nextDelay = 2000;
 
         const queuedJob = row.payload.stagedJob as StagedBuildJob;
         const queuedStages = stagedStages(queuedJob.kind ?? "initial");
@@ -910,7 +1017,22 @@ export function ChatPanel({
             userProvider: localStorage.getItem("nexaform:ai-provider") || null,
             costMode,
           };
-      let data = await request(payload);
+      // Streaming SSE primeiro (tokens em tempo real via /api/chat); se a rota
+      // não streamar (chave Anthropic, rota ausente, rede), cai no caminho
+      // síncrono exatamente como antes.
+      let data: any = null;
+      if (useApp && genModeRef.current === "real") {
+        try {
+          data = await streamAppRequest(
+            payload,
+            controller.signal,
+            (token) => setStreamTail((tail) => (tail + token).slice(-600))
+          );
+        } finally {
+          setStreamTail("");
+        }
+      }
+      if (!data) data = await request(payload);
       if (useApp && activeVisualSelection) {
         data = await recoverSelectedResult(
           data,
@@ -1161,11 +1283,18 @@ export function ChatPanel({
         {busy && (
           <div className="max-w-[85%] space-y-2 rounded-xl bg-secondary p-3.5">
             {plan.length === 0 ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                {backgroundJob
-                  ? `${backgroundJobLabel(backgroundJob.status, backgroundJob.attempts)}…`
-                  : backgroundSubmitting ? "Enviando para a fila…" : "Escrevendo o código…"}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  {backgroundJob
+                    ? `${backgroundJobLabel(backgroundJob.status, backgroundJob.attempts)}…`
+                    : backgroundSubmitting ? "Enviando para a fila…" : "Escrevendo o código…"}
+                </div>
+                {streamTail && (
+                  <pre className="max-h-28 overflow-hidden whitespace-pre-wrap break-all rounded-md bg-background/60 p-2 font-mono text-[10px] leading-4 text-muted-foreground">
+                    {streamTail}
+                  </pre>
+                )}
               </div>
             ) : (
               plan.map((step, i) => (
@@ -1510,8 +1639,8 @@ export function ChatPanel({
               size="icon"
               variant="destructive"
               onClick={stopGeneration}
-              aria-label="Parar geração"
-              title="Parar"
+              aria-label={backgroundBusy ? "Pausar geração em segundo plano" : "Parar geração"}
+              title={backgroundBusy ? "Pausar" : "Parar"}
               className="animate-pulse-soft"
             >
               <Square />

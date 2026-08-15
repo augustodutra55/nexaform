@@ -69,15 +69,20 @@ export function backgroundJobLabel(
   status: BackgroundJobStatus,
   attempts = 0
 ): string {
+  // O card de status mostra a tentativa atual para o usuário entender o
+  // progresso real da fila ("tentativa 1/2" → "2/2") sem abrir o histórico.
+  const attempt = Math.min(Math.max(1, attempts), BACKGROUND_MAX_ATTEMPTS);
   switch (status) {
     case "queued":
       return "Na fila · aguardando execução";
     case "running":
-      return "Gerando etapa";
+      return attempts > 0
+        ? `Gerando etapa · tentativa ${attempt}/${BACKGROUND_MAX_ATTEMPTS}`
+        : "Gerando etapa";
     case "retry":
-      return "Etapa aguardando continuação";
+      return `Etapa aguardando nova tentativa · ${Math.min(attempt + 1, BACKGROUND_MAX_ATTEMPTS)}/${BACKGROUND_MAX_ATTEMPTS}`;
     case "completed":
-      return "Aplicando resultado";
+      return "Concluído · aplicando resultado";
     case "failed":
       return "Etapa pausada";
     case "cancelled":

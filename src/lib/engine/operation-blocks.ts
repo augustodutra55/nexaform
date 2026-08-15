@@ -236,3 +236,97 @@ export function applyFileOperations(current: AppFile[], ops: FileOperation[]): A
   if (!touched || map.size === 0) return null;
   return Array.from(map.entries()).map(([path, content]) => ({ path, content }));
 }
+
+// ── Diff de arquivo (Fase 3 — file tree + diff editor) ───────────────────────
+// LCS de linhas próprio e sem dependências. Mantém o painel leve (a alternativa
+// seria a lib `diff` ~12 KB ou o Monaco pesado — ambos evitados de propósito).
+
+export type DiffLineKind = "same" | "add" | "del";
+
+export interface DiffLine {
+  kind: DiffLineKind;
+  /** Número da linha no arquivo original (undefined em linhas adicionadas). */
+  oldLine?: number;
+  /** Número da linha no arquivo novo (undefined em linhas removidas). */
+  newLine?: number;
+  text: string;
+}
+
+export interface FileDiff {
+  changed: boolean;
+  added: number;
+  removed: number;
+  lines: DiffLine[];
+}
+
+/** Maior subsequência comum de linhas (matriz de comprimentos). */
+function lcsMatrix(a: string[], b: string[]): number[][] {
+  const rows = a.length;
+  const cols = b.length;
+  const table: number[][] = Array.from({ length: rows + 1 }, () => new Array(cols + 1).fill(0));
+  for (let i = rows - 1; i >= 0; i--) {
+    for (let j = cols - 1; j >= 0; j--) {
+      table[i][j] = a[i] === b[j]
+        ? table[i + 1][j + 1] + 1
+        : Math.max(table[i + 1][j], table[i][j + 1]);
+    }
+  }
+  return table;
+}
+
+/**
+ * Compara `original` com `updated` linha a linha e devolve o modelo do diff.
+ * `applyDiff` é o nome de contrato desta fase: dada a versão original e a nova
+ * de um arquivo, produz o conjunto de linhas (iguais/adicionadas/removidas) que
+ * o editor de diff renderiza e que a rota de apply usa para confirmar mudanças.
+ */
+export function applyDiff(original: string, updated: string): FileDiff {
+  const a = original.length ? original.split("\n") : [];
+  const b = updated.length ? updated.split("\n") : [];
+  const table = lcsMatrix(a, b);
+  const lines: DiffLine[] = [];
+  let i = 0;
+  let j = 0;
+  let added = 0;
+  let removed = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      lines.push({ kind: "same", oldLine: i + 1, newLine: j + 1, text: a[i] });
+      i++; j++;
+    } else if (table[i + 1][j] >= table[i][j + 1]) {
+      lines.push({ kind: "del", oldLine: i + 1, text: a[i] });
+      removed++; i++;
+    } else {
+      lines.push({ kind: "add", newLine: j + 1, text: b[j] });
+      added++; j++;
+    }
+  }
+  while (i < a.length) { lines.push({ kind: "del", oldLine: i + 1, text: a[i] }); removed++; i++; }
+  while (j < b.length) { lines.push({ kind: "add", newLine: j + 1, text: b[j] }); added++; j++; }
+  return { changed: added > 0 || removed > 0, added, removed, lines };
+}
+
+/** Aplica um conjunto de arquivos aceitos sobre os arquivos originais,
+ * preservando os que não foram tocados. `content` vazio remove o arquivo.
+ * Devolve o novo conjunto ou null quando nada muda (evita versão redundante). */
+export function applyAcceptedFiles(
+  original: AppFile[],
+  accepted: Array<{ path: string; content: string | null }>
+): AppFile[] | null {
+  const map = new Map<string, string>();
+  for (const file of original) map.set(file.path.replace(/^\.?\//, ""), file.content);
+  let touched = 0;
+  for (const change of accepted) {
+    const path = String(change.path || "").replace(/^\.?\//, "").trim();
+    if (!path || path.split("/").includes("..")) continue;
+    if (change.content === null || change.content === "") {
+      if (map.delete(path)) touched++;
+      continue;
+    }
+    if (map.get(path) === change.content) continue;
+    map.set(path, change.content);
+    touched++;
+  }
+  if (!touched || map.size === 0) return null;
+  return Array.from(map.entries()).map(([path, content]) => ({ path, content }));
+}

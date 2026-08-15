@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import { buildGenerationPlan } from "./generation-plan";
 import {
   buildAgentExecutionContext,
+  buildPlanPhases,
   canExecutePlan,
   nextPlanStatus,
   normalizeWorkspaceMode,
   renderPlanSummary,
+  toProjectPlanView,
 } from "./plan-agent";
 
 describe("plan-agent", () => {
@@ -35,5 +37,35 @@ describe("plan-agent", () => {
     const context = buildAgentExecutionContext({ id: "plano-1", prompt: "CRM", plan });
     expect(context).toContain("PLANO APROVADO");
     expect(context).toContain("plano-1");
+  });
+});
+
+describe("plano auto — fases e view padronizada (Fase 5)", () => {
+  it("deriva fases estáveis a partir do plano", () => {
+    const plan = buildGenerationPlan("Crie um app de agendamento para esmalteria com login e painel admin");
+    const phases = buildPlanPhases(plan);
+    expect(phases.length).toBeGreaterThan(1);
+    expect(phases[0].id).toBe("objective");
+    expect(phases[0].detail).toContain(plan.objective);
+    expect(phases.some((phase) => phase.id === "visual")).toBe(true);
+    expect(phases.some((phase) => phase.id === "acceptance")).toBe(true);
+  });
+
+  it("normaliza uma linha de project_plans para a view da UI", () => {
+    const plan = buildGenerationPlan("Landing premium para consultoria com FAQ");
+    const view = toProjectPlanView({
+      id: "11111111-1111-1111-1111-111111111111",
+      prompt: "Landing premium para consultoria com FAQ",
+      plan,
+      status: "draft",
+      approved_at: null,
+      executed_at: null,
+      created_at: "2026-01-01T00:00:00.000Z",
+    });
+    expect(view.status).toBe("draft");
+    expect(view.summary).toEqual(renderPlanSummary(plan));
+    expect(view.phases).toEqual(buildPlanPhases(plan));
+    expect(view.approvedAt).toBeNull();
+    expect(view.createdAt).toBe("2026-01-01T00:00:00.000Z");
   });
 });

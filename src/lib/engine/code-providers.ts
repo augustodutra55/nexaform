@@ -262,6 +262,7 @@ function generationPlanFor(a: Args) {
 }
 
 const STAGED_RUNTIME_BLOCKERS = new Set([
+  "syntax_error",
   "single_file",
   "unsafe_path",
   "duplicate_path",
@@ -281,7 +282,7 @@ export function stagedRuntimeQualityReport(
   isFinalStage = false
 ): ProjectQualityReport {
   if (!isStagedBuild) return report;
-  const finalStageBlockers = new Set(["orphan_component", "missing_auth", "missing_commercial_flow"]);
+  const finalStageBlockers = new Set(["orphan_component", "missing_auth", "missing_commercial_flow", "missing_required_section"]);
   const blocks = (code: string) => STAGED_RUNTIME_BLOCKERS.has(code) || (isFinalStage && finalStageBlockers.has(code));
   const errors = report.errors.filter((value) => blocks(value.code));
   const advisory = report.errors.filter((value) => !blocks(value.code));

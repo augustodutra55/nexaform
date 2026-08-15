@@ -98,4 +98,22 @@ describe("validateAppProject conclusão funcional", () => {
 
     expect(report.errors.some((entry) => entry.code === "missing_commercial_flow")).toBe(true);
   });
+
+  it("reprova JSX inválido antes de devolver o projeto", () => {
+    const app = appWith('export default function Screen(){ return <main>Loja</main>; }\n</section>');
+    const report = validateAppProject(app, buildGenerationPlan("crie uma loja"));
+
+    expect(report.errors).toContainEqual(expect.objectContaining({ code: "syntax_error", path: "components/Screen.jsx" }));
+  });
+
+  it("reprova seção explicitamente pedida que não foi renderizada", () => {
+    const report = validateAppProject(
+      appWith('export default function Screen(){ return <main><h1>Loja</h1></main>; }'),
+      buildGenerationPlan("crie uma loja com benefícios, prova social e FAQ")
+    );
+
+    const missing = report.errors.filter((entry) => entry.code === "missing_required_section").map((entry) => entry.message);
+    expect(missing).toHaveLength(3);
+    expect(missing.join(" ")).toContain("FAQ");
+  });
 });

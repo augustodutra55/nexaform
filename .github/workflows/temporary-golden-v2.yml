@@ -1,4 +1,4 @@
-name: Temporary Golden 2.0 bounded complete runtime
+name: Temporary Golden 2.0 snapshot-safe runtime
 
 on:
   push:
@@ -59,7 +59,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: golden-v2-bounded-complete-runtime-report
+          name: golden-v2-snapshot-safe-runtime-report
           path: |
             artifacts/golden-production.json
             artifacts/golden-apps.json

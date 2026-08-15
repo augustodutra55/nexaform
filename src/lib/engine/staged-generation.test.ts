@@ -80,6 +80,11 @@ describe("retomada da geração por etapas", () => {
     expect(prompt).toContain("realmente renderizado");
   });
 
+  it("antecipa conteúdo comercial quando não há painel administrativo pedido", () => {
+    expect(stagedBuildStages()[4].instruction).toContain("benefícios, prova social/depoimentos e FAQ");
+    expect(stagedBuildStages()[4].instruction).toContain("realmente renderizados");
+  });
+
   it("aceita um trabalho compatível com o projeto e a conversa", () => {
     expect(isValidStagedBuildJob(job, "project-1", "thread-1")).toBe(true);
   });

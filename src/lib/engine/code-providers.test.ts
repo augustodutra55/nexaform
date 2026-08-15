@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compactProviderSystemPrompt, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairBaseFiles, qualityRepairInstruction, rollbackMissingImportFiles, shouldTryFreeModelsAfterPaidDiagnostics, stagedRuntimeQualityReport } from "./code-providers";
+import { compactProviderSystemPrompt, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairBaseFiles, qualityRepairInstruction, recoverStagedMissingImports, rollbackMissingImportFiles, shouldTryFreeModelsAfterPaidDiagnostics, stagedRuntimeQualityReport } from "./code-providers";
 import type { AppGenerationResult, ProjectQualityReport } from "./app-types";
 
 const report: ProjectQualityReport = {
@@ -111,6 +111,38 @@ describe("reparo dirigido do quality gate", () => {
     };
 
     expect(rollbackMissingImportFiles(candidate, previous, missingInNewFile)?.app.files).toEqual(previous);
+  });
+
+  it("preserva o snapshot anterior válido quando a revisão final cria import sem arquivo", () => {
+    const previous = [
+      { path: "App.jsx", content: 'import Dashboard from "./Dashboard"; export default function App(){ return <Dashboard /> }' },
+      { path: "Dashboard.jsx", content: 'export default function Dashboard(){ return <main><h1>KPIs de clientes e funil</h1><button onClick={()=>window.AD.select("clients", {})}>Tarefas e filtros</button></main> }' },
+    ];
+    const candidate = {
+      provider: "openrouter",
+      engineMode: "real",
+      stats: { lines: 3, components: 2, hooks: 0, handlers: 0, files: 2 },
+      reply: "feito",
+      plan: [],
+      app: {
+        kind: "app",
+        name: "Dashboard",
+        description: "",
+        files: [
+          { path: "App.jsx", content: 'import Dashboard from "./Dashboard"; import Polish from "./Polish"; export default function App(){ return <><Dashboard/><Polish/></> }' },
+          previous[1],
+        ],
+        entry: "App.jsx",
+      },
+      cost: 0,
+      model: "teste",
+    } as AppGenerationResult;
+    const message = `CONSTRUÇÃO POR ETAPAS — ETAPA 7 DE 7: Revisão e acabamento.
+--- ESPECIFICAÇÃO MESTRA ---
+Crie um dashboard B2B com KPIs, clientes, funil, tarefas e filtros.
+--- FIM DA ESPECIFICAÇÃO MESTRA ---`;
+
+    expect(recoverStagedMissingImports(candidate, { message, currentFiles: previous, currentCode: null, name: "Dashboard" })?.app.files).toEqual(previous);
   });
 });
 

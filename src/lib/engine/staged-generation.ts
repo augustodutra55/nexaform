@@ -223,7 +223,7 @@ export function stagedBuildStages(): StagedBuildStage[] {
       id: "admin",
       label: "Painel administrativo",
       instruction:
-        "Implemente o painel administrativo ou gerencial, métricas essenciais e ferramentas de operação solicitadas. Use dados reais das coleções já existentes e preserve os fluxos dos demais perfis. Crie ou altere no máximo 3 arquivos curtos.",
+        "Se a especificação pedir painel administrativo ou gerencial, implemente métricas essenciais e ferramentas de operação com dados reais. Se não pedir painel, use esta etapa para implementar conteúdo comercial explicitamente solicitado e ainda ausente, como benefícios, prova social/depoimentos e FAQ, sempre em componentes realmente renderizados. Preserve os fluxos existentes e crie ou altere no máximo 3 arquivos curtos.",
     },
     {
       id: "automation",

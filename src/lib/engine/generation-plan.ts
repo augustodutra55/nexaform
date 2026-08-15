@@ -97,7 +97,9 @@ export function visualProfileFor(message: string, kind: "site" | "app"): VisualP
  * sem custo adicional e sem consumir a janela da Vercel.
  */
 export function buildGenerationPlan(message: string, mediaAssets: GenerationMediaAsset[] = []): GenerationPlan {
-  const normalized = message.toLowerCase();
+  const stagedSpecification = /--- ESPECIFICAÇÃO MESTRA ---\s*([\s\S]*?)\s*--- FIM DA ESPECIFICAÇÃO MESTRA ---/i.exec(message)?.[1]?.trim();
+  const sourceMessage = stagedSpecification || message;
+  const normalized = sourceMessage.toLowerCase();
   const isSite = has(normalized, /\b(site|landing|página|pagina|institucional|portf[oó]lio|vitrine|one.?page)\b/);
   const kind: "site" | "app" = isSite ? "site" : "app";
   const requiredCapabilities: string[] = [];
@@ -107,7 +109,7 @@ export function buildGenerationPlan(message: string, mediaAssets: GenerationMedi
   const imageCount = mediaAssets.filter((asset) => asset.type.indexOf("image/") === 0).length;
   const videoCount = mediaAssets.filter((asset) => asset.type.indexOf("video/") === 0).length;
 
-  if (has(normalized, /\b(login|cadastro|conta|usu[aá]rio|autentica)/)) requiredCapabilities.push("autenticação e estados de sessão");
+  if (has(normalized, /\b(?:login|cadastro|conta|usu[aá]rio|autentica(?:r|[çc][aã]o)?)\b/)) requiredCapabilities.push("autenticação e estados de sessão");
   if (has(normalized, /\b(formul[aá]rio|lead|contato|orçamento|orcamento|agendamento)/)) requiredCapabilities.push("formulários validados com feedback visível");
   if (has(normalized, /\b(produto|estoque|cat[aá]logo|serviço|servico|cliente|crm|ve[ií]culo)/)) requiredCapabilities.push("dados reais via window.AD, com vazio/carregando/erro");
   if (has(normalized, /\b(pagamento|checkout|assinatura|preço|preco|plano)/)) requiredCapabilities.push("jornada comercial clara, sem simular pagamento real");
@@ -125,7 +127,7 @@ export function buildGenerationPlan(message: string, mediaAssets: GenerationMedi
 
   return {
     kind,
-    objective: compactObjective(message),
+    objective: compactObjective(sourceMessage),
     audience: has(normalized, /\b(b2b|empresa|gestor|equipe|concession[aá]ria|cl[ií]nica|escrit[oó]rio)/)
       ? "cliente empresarial e sua operação"
       : "usuário final descrito no pedido",

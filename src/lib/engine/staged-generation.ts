@@ -235,7 +235,7 @@ export function stagedBuildStages(): StagedBuildStage[] {
       id: "quality",
       label: "Revisão e acabamento",
       instruction:
-        "Faça uma revisão final focada nos fluxos críticos: corrija imports, navegação, estados, validações, responsividade e acessibilidade. Não adicione módulos grandes novos. Altere apenas os arquivos indispensáveis, no máximo 5, e preserve os recursos funcionais já construídos.",
+        "Faça uma revisão final focada nos fluxos críticos: corrija imports, navegação, estados, validações, responsividade e acessibilidade. Para seções pequenas ausentes, prefira inseri-las em um componente já renderizado; só adicione um import quando criar o arquivo correspondente na mesma resposta. Não adicione módulos grandes novos. Altere apenas os arquivos indispensáveis, no máximo 5, e preserve os recursos funcionais já construídos.",
     },
   ];
 }

@@ -43,13 +43,30 @@ describe("buildGenerationPlan", () => {
   });
 
   it("preserva seções obrigatórias mesmo depois de um cabeçalho longo de etapa", () => {
-    const plan = buildGenerationPlan(`${"CONSTRUÇÃO POR ETAPAS — revisão final. ".repeat(10)}
-      ESPECIFICAÇÃO MESTRA: loja com benefícios, prova social, depoimentos e FAQ.`);
+    const plan = buildGenerationPlan(`${"CONSTRUÇÃO POR ETAPAS — revisão final com checklist genérico de benefícios, prova social e FAQ. ".repeat(4)}
+      --- ESPECIFICAÇÃO MESTRA ---
+      loja com benefícios, prova social, depoimentos e FAQ.
+      --- FIM DA ESPECIFICAÇÃO MESTRA ---`);
 
     expect(plan.requiredCapabilities).toEqual(expect.arrayContaining([
       "seção de FAQ realmente renderizada",
       "seção de prova social/depoimentos realmente renderizada",
       "seção de benefícios realmente renderizada",
     ]));
+  });
+
+  it("não confunde checklist genérico de etapa com requisito da especificação", () => {
+    const plan = buildGenerationPlan(`CONSTRUÇÃO POR ETAPAS — revisão final com benefícios, prova social e FAQ.
+      --- ESPECIFICAÇÃO MESTRA ---
+      Crie uma agenda com login e cadastro de clientes.
+      --- FIM DA ESPECIFICAÇÃO MESTRA ---`);
+
+    expect(plan.requiredCapabilities).toContain("autenticação e estados de sessão");
+    expect(plan.requiredCapabilities.some((item) => /FAQ|prova social|benefícios/.test(item))).toBe(false);
+  });
+
+  it("não confunde formulário de contato com conta de usuário", () => {
+    const plan = buildGenerationPlan("Landing com formulário de contato e FAQ");
+    expect(plan.requiredCapabilities).not.toContain("autenticação e estados de sessão");
   });
 });

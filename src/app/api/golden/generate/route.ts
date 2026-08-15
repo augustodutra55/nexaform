@@ -52,11 +52,13 @@ export async function POST(req: NextRequest) {
     }
     stageDef = stages[requestedStage];
     totalStages = stages.length;
-    generationMessage = buildStagePrompt(message, stageDef, requestedStage, totalStages, "initial");
+    generationMessage = body?.goldenRecovery
+      ? buildStageRetryPrompt(message, stageDef, requestedStage, totalStages, "initial")
+      : buildStagePrompt(message, stageDef, requestedStage, totalStages, "initial");
     stage = { index: requestedStage, total: totalStages, label: stageDef.label, snapshotRecovery: false };
   }
 
-  let result = await generateAppWithProviders({
+  const result = await generateAppWithProviders({
     message: generationMessage,
     currentFiles,
     name: typeof body?.name === "string" ? body.name : "Golden Production",
@@ -64,19 +66,6 @@ export async function POST(req: NextRequest) {
     forceReal: true,
     allowTemplate: false,
   });
-
-  if (result.engineMode !== "real" && currentFiles?.length && stageDef && Number.isInteger(requestedStage)) {
-    const recovery = buildStageRetryPrompt(message, stageDef, requestedStage, totalStages, "initial");
-    result = await generateAppWithProviders({
-      message: recovery,
-      currentFiles,
-      name: typeof body?.name === "string" ? body.name : "Golden Production",
-      costMode: "auto",
-      forceReal: true,
-      allowTemplate: false,
-    });
-    stage = { index: requestedStage, total: totalStages, label: stageDef.label, snapshotRecovery: false };
-  }
 
   if (result.engineMode !== "real") {
     return NextResponse.json({ error: result.failureReason || "Motor real indisponível.", engineMode: result.engineMode, stage }, { status: 502 });

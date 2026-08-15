@@ -155,6 +155,7 @@ describe("quality gate progressivo das etapas", () => {
         { code: "orphan_component", message: "FAQ não renderizada", path: "components/FAQ.jsx" },
         { code: "missing_auth", message: "Autenticação ausente" },
         { code: "missing_commercial_flow", message: "Checkout ausente" },
+        { code: "missing_required_section", message: "FAQ ausente" },
         { code: "file_too_large", message: "Arquivo grande", path: "App.jsx" },
       ],
       warnings: [],
@@ -165,6 +166,7 @@ describe("quality gate progressivo das etapas", () => {
       "orphan_component",
       "missing_auth",
       "missing_commercial_flow",
+      "missing_required_section",
     ]);
     expect(staged.warnings.map((value) => value.code)).toEqual(["file_too_large"]);
   });

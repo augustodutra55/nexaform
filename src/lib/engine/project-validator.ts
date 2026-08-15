@@ -1,4 +1,5 @@
 import type { AppCode, AppFile, GenerationPlan, ProjectQualityIssue, ProjectQualityReport } from "./app-types";
+import ts from "typescript";
 
 const SCRIPT_EXTENSIONS = ["", ".jsx", ".js", ".tsx", ".ts"];
 const FORBIDDEN_IMPORTS = new Set([
@@ -32,6 +33,27 @@ function importSources(content: string): string[] {
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(content))) sources.push(match[2]);
   return sources;
+}
+
+function syntaxErrors(file: AppFile): string[] {
+  if (!/\.(?:jsx|tsx|js|ts)$/i.test(file.path)) return [];
+  try {
+    const result = ts.transpileModule(file.content, {
+      fileName: file.path,
+      reportDiagnostics: true,
+      compilerOptions: {
+        jsx: ts.JsxEmit.ReactJSX,
+        target: ts.ScriptTarget.ES2020,
+        module: ts.ModuleKind.ESNext,
+        isolatedModules: true,
+      },
+    });
+    return (result.diagnostics || [])
+      .filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)
+      .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, " "));
+  } catch (reason) {
+    return [`Transpilação falhou: ${reason instanceof Error ? reason.message : String(reason)}`];
+  }
 }
 
 function resolvedRelative(from: string, source: string, paths: Set<string>): string | null {
@@ -74,6 +96,10 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
   for (const file of files) {
     const path = normalizePath(file.path);
     const lines = file.content.split(/\r?\n/).length;
+    const compilerErrors = syntaxErrors(file);
+    if (compilerErrors.length) {
+      errors.push(issue("syntax_error", `JSX/TypeScript inválido: ${compilerErrors.slice(0, 3).join("; ")}`, path));
+    }
     if (lines > 220) errors.push(issue("file_too_large", `Arquivo com ${lines} linhas; divida em componentes menores.`, path));
     else if (lines > 150) warnings.push(issue("file_large", `Arquivo com ${lines} linhas; o limite recomendado é 150.`, path));
 
@@ -103,6 +129,7 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
   // Um componente criado mas nunca alcançado a partir do entry não aparece no
   // aplicativo. Isso costuma acontecer quando a IA cria FAQ/depoimentos e
   // esquece de importar/renderizar no App.jsx.
+  let reachableSource = "";
   if (entryFile) {
     const byPath = new Map(files.map((file) => [normalizePath(file.path), file]));
     const reachable = new Set<string>();
@@ -119,6 +146,10 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
         if (resolved && !reachable.has(resolved)) pending.push(resolved);
       }
     }
+    reachableSource = files
+      .filter((file) => reachable.has(normalizePath(file.path)))
+      .map((file) => file.content)
+      .join("\n");
     for (const file of files) {
       const path = normalizePath(file.path);
       if (reachable.has(path) || !/\.(?:jsx|tsx|js|ts)$/i.test(path)) continue;
@@ -129,19 +160,33 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
   }
 
   if (plan?.requiredCapabilities.some((capability) => capability.indexOf("window.AD") >= 0)) {
-    const joined = files.map((file) => file.content).join("\n");
+    const joined = reachableSource || files.map((file) => file.content).join("\n");
     if (!/\b(?:window\.)?AD\./.test(joined)) warnings.push(issue("missing_ad_data", "O pedido exige dados reais, mas nenhuma integração window.AD foi encontrada."));
   }
   if (plan?.requiredCapabilities.some((capability) => /autentica|sess[aã]o/i.test(capability))) {
-    const joined = files.map((file) => file.content).join("\n");
+    const joined = reachableSource || files.map((file) => file.content).join("\n");
     if (!/(?:window\.)?AD\s*\.\s*auth|\b(?:signIn|signUp|login|logout)\b/i.test(joined)) {
       errors.push(issue("missing_auth", "O pedido exige autenticação, mas nenhum fluxo de sessão foi implementado."));
     }
   }
   if (plan?.requiredCapabilities.some((capability) => /jornada comercial|pagamento/i.test(capability))) {
-    const joined = files.map((file) => file.content).join("\n");
+    const joined = reachableSource || files.map((file) => file.content).join("\n");
     if (!/checkout|finalizar\s+(?:a\s+)?(?:compra|pedido)|resumo\s+do\s+pedido|continuar\s+para\s+(?:o\s+)?pagamento/i.test(joined)) {
       errors.push(issue("missing_commercial_flow", "O pedido exige jornada comercial, mas checkout/finalização não foi implementado."));
+    }
+  }
+  if (plan) {
+    const requested = plan.objective;
+    const joined = reachableSource || files.map((file) => file.content).join("\n");
+    const requestedSections: Array<[RegExp, RegExp, string]> = [
+      [/\bfaq\b|perguntas frequentes/i, /\bfaq\b|perguntas frequentes/i, "FAQ"],
+      [/prova social|depoimentos?|testimonials?/i, /prova social|depoimentos?|testimonials?|avalia[çc][aã]o m[eé]dia/i, "prova social/depoimentos"],
+      [/benef[ií]cios?|vantagens?/i, /benef[ií]cios?|vantagens?/i, "benefícios"],
+    ];
+    for (const [requestPattern, evidencePattern, label] of requestedSections) {
+      if (requestPattern.test(requested) && !evidencePattern.test(joined)) {
+        errors.push(issue("missing_required_section", `O pedido exige ${label}, mas essa seção não está renderizada no projeto.`));
+      }
     }
   }
 

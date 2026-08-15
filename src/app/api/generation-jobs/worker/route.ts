@@ -8,6 +8,7 @@ import {
   isBackgroundGenerationPayload,
   isRetryableBackgroundFailure,
   nextBackgroundJobStatus,
+  salvageFinalStageResult,
 } from "@/lib/engine/background-jobs";
 import { buildStagePrompt, buildStageRetryPrompt, stagedStages } from "@/lib/engine/staged-generation";
 import { classifyGenerationFailure, safeOperationalMessage } from "@/lib/engine/observability";
@@ -167,6 +168,52 @@ export async function GET(req: NextRequest) {
       maxAttempts: BACKGROUND_MAX_ATTEMPTS,
       retryable: isRetryableBackgroundFailure(message),
     });
+    // Se SOMENTE a última etapa (revisão/acabamento) esgotou as tentativas,
+    // entregamos o app já construído nas etapas anteriores em vez de descartar
+    // todo o trabalho. Assim o app aparece no preview e é salvo, mesmo quando o
+    // acabamento final não pôde ser aplicado. Vale para qualquer geração.
+    if (status === "failed") {
+      const salvaged = salvageFinalStageResult(payload, stages.length);
+      if (salvaged) {
+        const salvageTransition = advanceBackgroundGeneration(
+          { ...payload, stageIndex: stages.length - 1, currentApp: undefined },
+          salvaged,
+          stages.length,
+          Date.now() - started,
+          new Date().toISOString()
+        );
+        const { error: salvageError } = await admin.from("staged_generation_jobs").update({
+          status: "completed",
+          payload: salvageTransition.payload,
+          last_error: message.slice(0, 800),
+          next_attempt_at: new Date().toISOString(),
+          locked_at: null,
+          locked_by: null,
+          completed_at: new Date().toISOString(),
+        }).eq("id", row.id).eq("locked_by", workerId);
+        if (!salvageError) {
+          if (payload.reservationId) {
+            await admin.from("generations").update({
+              status: "completed",
+              provider: "openrouter",
+              cost_usd: salvageTransition.totalCost,
+              duration_ms: salvageTransition.totalDurationMs,
+              error_code: null,
+              error_message: null,
+              metadata: {
+                requestId: payload.requestId,
+                background: true,
+                stages: stages.length,
+                executions: executionCount,
+                durable: true,
+                finalStageSalvaged: true,
+              },
+            }).eq("id", payload.reservationId).eq("user_id", payload.userId);
+          }
+          return NextResponse.json({ processed: true, status: "completed", salvagedFinalStage: true });
+        }
+      }
+    }
     await admin.from("staged_generation_jobs").update({
       status,
       last_error: message.slice(0, 800),

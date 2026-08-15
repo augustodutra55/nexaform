@@ -111,6 +111,9 @@ export function buildGenerationPlan(message: string, mediaAssets: GenerationMedi
   if (has(normalized, /\b(formul[aá]rio|lead|contato|orçamento|orcamento|agendamento)/)) requiredCapabilities.push("formulários validados com feedback visível");
   if (has(normalized, /\b(produto|estoque|cat[aá]logo|serviço|servico|cliente|crm|ve[ií]culo)/)) requiredCapabilities.push("dados reais via window.AD, com vazio/carregando/erro");
   if (has(normalized, /\b(pagamento|checkout|assinatura|preço|preco|plano)/)) requiredCapabilities.push("jornada comercial clara, sem simular pagamento real");
+  if (has(normalized, /\bfaq\b|perguntas frequentes/)) requiredCapabilities.push("seção de FAQ realmente renderizada");
+  if (has(normalized, /prova social|depoimentos?|testimonials?/)) requiredCapabilities.push("seção de prova social/depoimentos realmente renderizada");
+  if (has(normalized, /benef[ií]cios?|vantagens?/)) requiredCapabilities.push("seção de benefícios realmente renderizada");
   if (has(normalized, /\b(áudio|audio|voz|microfone|pron[uú]ncia|falar)/)) requiredCapabilities.push("voz pelo runtime AD.voice com fallback e feedback");
   if (has(normalized, /\b(v[ií]deo|video|vsl)/)) requiredCapabilities.push("mídia em vídeo responsiva, com controles e fallback");
   if (has(normalized, /\b(3d|tr[eê]s dimens|imersiv|cinematogr[aá]fic)/)) visualDirection.push("3D ou profundidade visual somente onde trouxer impacto");

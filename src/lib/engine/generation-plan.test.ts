@@ -41,4 +41,15 @@ describe("buildGenerationPlan", () => {
     expect(withUpload.media.videoMode).toBe("uploaded");
     expect(withUpload.media.videoUrls).toEqual(["https://cdn.example/treino.mp4"]);
   });
+
+  it("preserva seções obrigatórias mesmo depois de um cabeçalho longo de etapa", () => {
+    const plan = buildGenerationPlan(`${"CONSTRUÇÃO POR ETAPAS — revisão final. ".repeat(10)}
+      ESPECIFICAÇÃO MESTRA: loja com benefícios, prova social, depoimentos e FAQ.`);
+
+    expect(plan.requiredCapabilities).toEqual(expect.arrayContaining([
+      "seção de FAQ realmente renderizada",
+      "seção de prova social/depoimentos realmente renderizada",
+      "seção de benefícios realmente renderizada",
+    ]));
+  });
 });

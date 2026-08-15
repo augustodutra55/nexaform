@@ -168,7 +168,10 @@ export function applyFileOperations(current: AppFile[], ops: FileOperation[]): A
       continue;
     }
     if (typeof operation.content !== "string" || !operation.content.trim()) return null;
-    if (map.get(path) === operation.content) return null;
+    // Modelos às vezes reenviam junto um arquivo inalterado e outro realmente
+    // corrigido. O no-op não deve invalidar o lote transacional inteiro; se
+    // todas as operações forem no-op, `touched` continua zero e o lote falha.
+    if (map.get(path) === operation.content) continue;
     // O conteúdo completo é seguro mesmo quando o modelo troca create/update.
     // A existência do caminho determina naturalmente se é criação ou alteração.
     map.set(path, operation.content);

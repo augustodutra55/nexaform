@@ -434,10 +434,19 @@ export function rollbackMissingImportFiles(
   };
 }
 
-function recoverStagedMissingImports(candidate: AppGenerationResult, a: Args): AppGenerationResult | null {
+export function recoverStagedMissingImports(candidate: AppGenerationResult, a: Args): AppGenerationResult | null {
   if (!a.currentFiles?.length || !/(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message)) {
     return null;
   }
+
+  // Uma revisão não pode destruir um snapshot anterior que já cumpria todo o
+  // contrato final. O rollback só é aceito depois de revalidar esse snapshot
+  // com as regras completas da última etapa.
+  const previousSnapshot: AppGenerationResult = {
+    ...candidate,
+    app: { ...candidate.app, files: a.currentFiles },
+  };
+  if (assessCandidate(previousSnapshot, a, true).valid) return previousSnapshot;
 
   let recovered = candidate;
   // Remover um arquivo novo quebrado pode expor um segundo import quebrado no

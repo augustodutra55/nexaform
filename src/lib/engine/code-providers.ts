@@ -277,11 +277,14 @@ const STAGED_RUNTIME_BLOCKERS = new Set([
  * visíveis como avisos e podem ser tratadas nas etapas seguintes. */
 export function stagedRuntimeQualityReport(
   report: ProjectQualityReport,
-  isStagedBuild: boolean
+  isStagedBuild: boolean,
+  isFinalStage = false
 ): ProjectQualityReport {
   if (!isStagedBuild) return report;
-  const errors = report.errors.filter((value) => STAGED_RUNTIME_BLOCKERS.has(value.code));
-  const advisory = report.errors.filter((value) => !STAGED_RUNTIME_BLOCKERS.has(value.code));
+  const finalStageBlockers = new Set(["orphan_component", "missing_auth", "missing_commercial_flow"]);
+  const blocks = (code: string) => STAGED_RUNTIME_BLOCKERS.has(code) || (isFinalStage && finalStageBlockers.has(code));
+  const errors = report.errors.filter((value) => blocks(value.code));
+  const advisory = report.errors.filter((value) => !blocks(value.code));
   const warnings = [...report.warnings, ...advisory];
   return {
     ...report,
@@ -327,11 +330,12 @@ function textPromptFor(a: Args): string {
 function assessCandidate(result: AppGenerationResult, a: Args, repaired = false): ProjectQualityReport {
   const generationPlan = generationPlanFor(a);
   let report = validateAppProject(result.app, generationPlan, repaired);
+  const isFinalStage = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS\s*[—-]\s*ETAPA\s+(?:7\s+DE\s+7|3\s+DE\s+3)/i.test(a.message);
 
   // Um refinamento não deve ser rejeitado por uma falha antiga que ele não
   // introduziu. Só erros novos bloqueiam a edição; os antigos permanecem
   // visíveis na telemetria para uma correção futura.
-  if (a.currentFiles?.length) {
+  if (a.currentFiles?.length && !isFinalStage) {
     const entry = a.currentFiles.find((file) => /(^|\/)App\.(jsx|tsx|js|ts)$/.test(file.path))?.path ?? a.currentFiles[0].path;
     const baseline = validateAppProject({ kind: "app", name: a.name, description: "", files: a.currentFiles, entry }, generationPlan);
     const baselineKeys = new Set(baseline.errors.map(issueKey));
@@ -343,7 +347,8 @@ function assessCandidate(result: AppGenerationResult, a: Args, repaired = false)
 
   report = stagedRuntimeQualityReport(
     report,
-    /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message)
+    /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message),
+    isFinalStage
   );
 
   result.generationPlan = generationPlan;

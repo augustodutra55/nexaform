@@ -53,4 +53,18 @@ describe("Golden 2.0 evaluator", () => {
     expect(result.passed).toBe(true);
     expect(result.checks.find((item: { id: string }) => item.id === "semantic-checkout")?.passed).toBe(true);
   });
+
+  it("não dá crédito semântico a componentes órfãos", () => {
+    const result = evaluateGoldenCandidate("commerce", candidate([
+      { path: "App.jsx", content: 'import Shop from "./Shop"; export default function App(){ return <Shop/> }' },
+      { path: "Shop.jsx", content: `export default function Shop(){ return <main><input placeholder="Busca"/><h1>Catálogo de produtos</h1><p>Preço R$ 20</p><button>Carrinho</button><button>Finalizar pedido</button></main> }` },
+      { path: "FAQ.jsx", content: "export default function FAQ(){ return <section>FAQ</section> }" },
+      { path: "SocialProof.jsx", content: "export default function SocialProof(){ return <section>Depoimentos de clientes</section> }" },
+    ]));
+
+    expect(result.passed).toBe(false);
+    expect(result.semanticRate).toBe(71);
+    expect(result.checks.find((item: { id: string }) => item.id === "semantic-faq")?.passed).toBe(false);
+    expect(result.checks.find((item: { id: string }) => item.id === "semantic-social-proof")?.passed).toBe(false);
+  });
 });

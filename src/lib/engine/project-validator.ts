@@ -176,7 +176,7 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
     }
   }
   if (plan) {
-    const requested = plan.objective;
+    const requested = `${plan.objective}\n${plan.requiredCapabilities.join("\n")}`;
     const joined = reachableSource || files.map((file) => file.content).join("\n");
     const requestedSections: Array<[RegExp, RegExp, string]> = [
       [/\bfaq\b|perguntas frequentes/i, /\bfaq\b|perguntas frequentes/i, "FAQ"],

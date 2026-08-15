@@ -262,4 +262,10 @@ describe("orçamento de tempo dos fallbacks gratuitos", () => {
       "OpenRouter: modelo anthropic/claude-sonnet-4.5 não respondeu dentro do limite desta etapa.",
     ])).toBe(true);
   });
+
+  it("não troca por modelo mais fraco depois de uma resposta simples falhar no quality gate", () => {
+    expect(shouldTryFreeModelsAfterPaidDiagnostics(false, [
+      "OpenRouter: anthropic/claude-sonnet-4.5 não passou no quality gate após uma correção automática.",
+    ])).toBe(false);
+  });
 });

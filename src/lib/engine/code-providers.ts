@@ -552,10 +552,11 @@ export function shouldTryFreeModelsAfterPaidDiagnostics(
   isStagedBuild: boolean,
   diagnostics: string[]
 ): boolean {
-  if (!isStagedBuild) return true;
   const summary = diagnostics.join(" | ");
-  const paidAnsweredButFailed = /n[aã]o respondeu dentro|quality gate|gerou c[oó]digo estruturalmente inv[aá]lido|n[aã]o passou|resposta inicial .* n[aã]o p[oô]de ser aplicada|continuou inv[aá]lida/i.test(summary);
+  const paidAnsweredButFailed = /quality gate|gerou c[oó]digo estruturalmente inv[aá]lido|n[aã]o passou|resposta inicial .* n[aã]o p[oô]de ser aplicada|continuou inv[aá]lida/i.test(summary);
   if (paidAnsweredButFailed) return false;
+  if (!isStagedBuild) return true;
+  if (/n[aã]o respondeu dentro/i.test(summary)) return false;
   return /HTTP (?:401|402|404|408|429|5\d\d)\b/i.test(summary);
 }
 

@@ -84,6 +84,41 @@ export function parseOperationBlocks(text: string): OperationBlockResult | null 
     if (path) ops.push({ op: "delete", path });
   }
 
+  // Alguns modelos misturam blocos AD_FILE com um envelope JSON de ops/files.
+  // O parser anterior escolhia os blocos e descartava silenciosamente a parte
+  // JSON, inclusive quando o AD_FILE era apenas um no-op e a mudança real
+  // estava no envelope. Só aceitamos um objeto JSON completo e verificável.
+  if (ops.length) {
+    const candidates: string[] = [];
+    const starts = Array.from(text.matchAll(/(?:^|\n)\s*\{/g));
+    for (let index = starts.length - 1; index >= 0; index -= 1) {
+      const match = starts[index];
+      const offset = (match.index || 0) + match[0].lastIndexOf("{");
+      candidates.push(text.slice(offset).trim());
+    }
+    for (const candidate of candidates) {
+      try {
+        const envelope = JSON.parse(candidate);
+        const structured = Array.isArray(envelope?.ops)
+          ? envelope.ops
+          : Array.isArray(envelope?.files)
+            ? envelope.files.map((file: any) => ({ op: "update", path: file?.path, content: file?.content }))
+            : [];
+        for (const raw of structured) {
+          const path = typeof raw?.path === "string" ? raw.path.trim() : "";
+          if (!path) continue;
+          if (raw.op === "delete") ops.push({ op: "delete", path });
+          else if ((raw.op === "patch" || typeof raw.search === "string") && typeof raw.search === "string" && typeof raw.replace === "string") {
+            addPatch(ops, path, raw.search, raw.replace);
+          } else if (typeof raw.content === "string" && raw.content.trim()) {
+            ops.push({ op: raw.op === "create" ? "create" : "update", path, content: raw.content });
+          }
+        }
+        break;
+      } catch {}
+    }
+  }
+
   if (!ops.length) {
     // Rede de segurança para provedores que ignoram o contrato e devolvem
     // Markdown. O caminho pode vir em título, negrito, backticks, "Arquivo:",
@@ -111,16 +146,13 @@ export function parseOperationBlocks(text: string): OperationBlockResult | null 
     }
   }
 
-  if (!ops.length) {
-    // Alguns modelos emitem um objeto "JSON-like" com o caminho como chave e
-    // o conteúdo numa cerca de código. Não tentamos consertar JSON arbitrário:
-    // extraímos apenas pares caminho+cerca, que são atômicos e verificáveis.
-    const jsonLikeFilePattern = /["']?([\w./-]+\.(?:jsx|tsx|js|ts))["']?\s*:\s*```[^\r\n]*\r?\n([\s\S]*?)```/gi;
-    let jsonLikeMatch: RegExpExecArray | null;
-    while ((jsonLikeMatch = jsonLikeFilePattern.exec(text)) !== null) {
-      const content = jsonLikeMatch[2].trim();
-      if (content) ops.push({ op: "update", path: jsonLikeMatch[1], content });
-    }
+  // Também aproveita pares caminho+cerca de objetos JSON-like, mesmo quando
+  // vieram acompanhados de AD_FILE. Cada par continua atômico e verificável.
+  const jsonLikeFilePattern = /["']?([\w./-]+\.(?:jsx|tsx|js|ts))["']?\s*:\s*```[^\r\n]*\r?\n([\s\S]*?)```/gi;
+  let jsonLikeMatch: RegExpExecArray | null;
+  while ((jsonLikeMatch = jsonLikeFilePattern.exec(text)) !== null) {
+    const content = jsonLikeMatch[2].trim();
+    if (content) ops.push({ op: "update", path: jsonLikeMatch[1], content });
   }
 
   if (!ops.length) return null;

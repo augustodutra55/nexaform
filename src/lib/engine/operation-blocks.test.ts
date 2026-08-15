@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyFileOperations } from "./operation-blocks";
+import { applyFileOperations, parseOperationBlocks } from "./operation-blocks";
 
 describe("aplicação transacional de operações", () => {
   const current = [
@@ -22,5 +22,29 @@ describe("aplicação transacional de operações", () => {
     expect(applyFileOperations(current, [
       { op: "update", path: "App.jsx", content: current[0].content },
     ])).toBeNull();
+  });
+
+  it("combina AD_FILE no-op com a mudança real de um envelope JSON", () => {
+    const parsed = parseOperationBlocks(`<AD_FILE path="App.jsx" op="update">
+${current[0].content}
+</AD_FILE>
+{"ops":[{"op":"update","path":"Page.jsx","content":"export default function Page(){ return <p>Depois</p> }"}]}`);
+
+    expect(parsed).not.toBeNull();
+    expect(applyFileOperations(current, parsed!.ops)).toEqual([
+      current[0],
+      { path: "Page.jsx", content: "export default function Page(){ return <p>Depois</p> }" },
+    ]);
+  });
+
+  it("combina AD_FILE com arquivo em JSON-like cercado", () => {
+    const parsed = parseOperationBlocks(`<AD_FILE path="App.jsx" op="update">
+${current[0].content}
+</AD_FILE>
+"Page.jsx": \`\`\`jsx
+export default function Page(){ return <p>Depois</p> }
+\`\`\``);
+
+    expect(applyFileOperations(current, parsed!.ops)?.[1].content).toContain("Depois");
   });
 });

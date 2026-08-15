@@ -516,8 +516,8 @@ function providerTimeoutMs(a: Args, repair = false, model = ""): number {
   }
   if (isStaged) return repair ? 50_000 : 80_000;
   if (isRefinement) return repair ? 60_000 : 90_000;
-  if (repair) return 70_000;
-  return 180_000;
+  if (repair) return 100_000;
+  return 160_000;
 }
 
 function responseText(value: any): string | null {

@@ -23,7 +23,7 @@ async function requestStageWithRecovery(id, stageIndex, payload) {
   let last = null;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
-      const result = await requestGeneration(payload, 290_000);
+      const result = await requestGeneration({ ...payload, goldenRecovery: attempt > 1 }, 290_000);
       last = result;
       if (result.response.ok || ![429, 502, 503, 504].includes(result.response.status) || attempt === 2) return result;
       console.log(`  STAGE RETRY ${id} ${stageIndex + 1}/7 após HTTP ${result.response.status} — uma única recuperação Golden será executada.`);

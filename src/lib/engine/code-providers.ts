@@ -247,8 +247,8 @@ export function modelOutputTokenBudget(message: string, hasCurrentProject: boole
     if (hasCurrentProject) return 2_800;
     return 7_000;
   }
-  if (isStaged && hasCurrentProject) return 3_000;
-  if (isStaged) return 4_500;
+  if (isStaged && hasCurrentProject) return 8_000;
+  if (isStaged) return 10_000;
   if (hasCurrentProject) return 4_000;
   return 24_000;
 }

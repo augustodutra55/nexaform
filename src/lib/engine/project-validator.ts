@@ -100,7 +100,11 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
     if (compilerErrors.length) {
       errors.push(issue("syntax_error", `JSX/TypeScript inválido: ${compilerErrors.slice(0, 3).join("; ")}`, path));
     }
-    if (lines > 220) errors.push(issue("file_too_large", `Arquivo com ${lines} linhas; divida em componentes menores.`, path));
+    // Tamanho é estilo, não correção: um componente grande compila e roda. Nunca
+    // deve bloquear a geração — antes derrubava refinamentos com agenda/catálogo
+    // VÁLIDOS só por passar de 220 linhas. Fica como aviso para o modelo dividir
+    // em componentes menores nas próximas etapas, sem descartar código que funciona.
+    if (lines > 220) warnings.push(issue("file_too_large", `Arquivo com ${lines} linhas; considere dividir em componentes menores.`, path));
     else if (lines > 150) warnings.push(issue("file_large", `Arquivo com ${lines} linhas; o limite recomendado é 150.`, path));
 
     if (/import\s+["'][^"']+\.css["']/.test(file.content)) errors.push(issue("css_import", "CSS de pacote/arquivo não é suportado pelo runtime; use Tailwind.", path));

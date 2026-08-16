@@ -19,6 +19,19 @@ function appWith(component: string): AppCode {
   };
 }
 
+describe("validateAppProject — tamanho não bloqueia", () => {
+  it("um componente grande porém válido NÃO é erro: file_too_large vira aviso", () => {
+    // Reproduz o caso da agenda (BookingFlow.jsx > 220 linhas, válida e funcional)
+    // que antes era descartada só pelo tamanho.
+    const bigBody = Array.from({ length: 240 }, (_, i) => `  const passo${i} = ${i};`).join("\n");
+    const component = `export default function Screen(){\n${bigBody}\n  return <div className="p-4">Agenda</div>;\n}`;
+    const report = validateAppProject(appWith(component), buildGenerationPlan("agenda de agendamento"));
+
+    expect(report.errors.some((entry) => entry.code === "file_too_large")).toBe(false);
+    expect(report.warnings.some((entry) => entry.code === "file_too_large")).toBe(true);
+  });
+});
+
 describe("validateAppProject visual e mídia", () => {
   it("reprova múltiplas cenas 3D", () => {
     const app = appWith(`

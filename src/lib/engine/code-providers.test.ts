@@ -409,28 +409,23 @@ describe("streamAppWithOpenRouter — chain de fallback", () => {
     expect(result.app.files?.map((file) => file.path)).toEqual(["App.jsx", "components/Home.jsx"]);
   });
 
-  it("cai para o próximo modelo do chain quando o principal falha por HTTP", async () => {
+  it("app NÃO rebaixa para modelo fraco quando o forte falha — falha honesta", async () => {
+    // Para apps reais, rebaixar sonnet -> xiaomi/free só produz lixo ou 429.
+    // O chain do app tem apenas o modelo forte; se ele falhar, entregamos um
+    // erro honesto em vez de um demo disfarçado gerado por modelo fraco.
     const models: string[] = [];
-    const attempts: Array<{ model: string; attempt: number }> = [];
     const fetchImpl = (async (_url: any, init: any) => {
       const model = JSON.parse(init.body).model;
       models.push(model);
-      if (model === PREMIUM_MODEL_OPENROUTER) {
-        return new Response(JSON.stringify({ error: { message: "Insufficient credits" } }), { status: 402 });
-      }
-      return sseResponse([sseChunk(VALID_INITIAL_PROJECT), sseUsage(500, 300)]);
+      return new Response(JSON.stringify({ error: { message: "Insufficient credits" } }), { status: 402 });
     }) as unknown as typeof fetch;
 
-    const result = await streamAppWithOpenRouter("sk-or-teste", STREAM_ARGS, {
-      fetchImpl,
-      onModel: (model, attempt) => attempts.push({ model, attempt }),
-    });
+    const result = await streamAppWithOpenRouter("sk-or-teste", STREAM_ARGS, { fetchImpl });
 
-    expect(models).toEqual([PREMIUM_MODEL_OPENROUTER, BUDGET_MODEL_OPENROUTER]);
-    expect(attempts[0]).toEqual({ model: PREMIUM_MODEL_OPENROUTER, attempt: 1 });
-    expect(attempts[1]).toEqual({ model: BUDGET_MODEL_OPENROUTER, attempt: 2 });
-    expect(result.engineMode).toBe("real");
-    expect(result.model).toBe(BUDGET_MODEL_OPENROUTER);
+    expect(models).toEqual([PREMIUM_MODEL_OPENROUTER]);
+    expect(models).not.toContain(BUDGET_MODEL_OPENROUTER);
+    expect(result.engineMode).toBe("demo");
+    expect(result.failureReason).toContain("HTTP 402");
   });
 
   it("devolve o fallback-card com o motivo real quando todos os modelos falham", async () => {

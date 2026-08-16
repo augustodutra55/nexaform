@@ -70,7 +70,11 @@ export function pickTier(
     );
   const lightEdit = /\b(troque|mude|ajuste|cor|texto|t[íi]tulo|fonte|espa[çc]|tom|remova|adicione uma se[çc][ãa]o)\b/.test(m);
 
-  if (opts.isApp) return complex || !opts.isRefinement ? "premium" : "economy";
+  // Apps são projetos reais multi-arquivo. No modo automático eles SEMPRE usam o
+  // modelo forte: o modelo fraco (haiku) emite formato AD_PATCH+json-like que o
+  // parser não aplica e derruba a geração. Quem quer economizar escolhe
+  // "Econômico" explicitamente; o automático prioriza entregar algo utilizável.
+  if (opts.isApp) return "premium";
   if (opts.isRefinement && lightEdit) return "economy";
   if (complex) return "premium";
   return "economy";
@@ -92,10 +96,18 @@ function uniqueModels(models: string[]): string[] {
  */
 export function modelExecutionPlan(
   tier: Tier,
-  provider: "openrouter" | "claude"
+  provider: "openrouter" | "claude",
+  opts?: { isApp?: boolean }
 ): string[] {
   const selected = modelFor(tier, provider);
   if (provider === "claude") return [selected];
+  // Apps reais (multi-arquivo) NÃO se beneficiam de rebaixar para modelos
+  // fracos/gratuitos quando o modelo forte falha por formato ou qualidade — eles
+  // só produzem código inaplicável ou 429 e terminam em demo/falha. Mantemos
+  // apenas o modelo escolhido; o retry por etapa e o quality gate cuidam da
+  // resiliência, e uma falha honesta é melhor que um demo disfarçado. A cascata
+  // barata continua valendo para sites/landing simples.
+  if (opts?.isApp) return [selected];
   return uniqueModels([
     selected,
     BUDGET_MODEL_OPENROUTER,

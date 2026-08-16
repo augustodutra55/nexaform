@@ -1188,6 +1188,8 @@ export default function ProjectPage() {
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
       <ProjectTopbar
         name={project.name}
+        projectId={projectId}
+        currentSchema={mode === "app" ? currentApp() : store.schema}
         published={project.published}
         shareSlug={project.share_slug}
         canExport={resolvePlan(access).canExport}
@@ -1197,6 +1199,9 @@ export default function ProjectPage() {
         studio={isOwner(access)}
         onRename={handleRename}
         onRestoreVersion={handleRestoreVersion}
+        onVersionRenamed={(id, label) =>
+          setVersions((cur) => cur.map((v) => (v.id === id ? { ...v, label } : v)))
+        }
         onPublish={handlePublish}
         onExport={handleExport}
         onCommercialExport={handleCommercialExport}

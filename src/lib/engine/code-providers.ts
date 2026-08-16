@@ -869,7 +869,7 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
     key: string,
     call: (k: string, args: Args, model: string, d: string[]) => Promise<AppGenerationResult | null>
   ): Promise<AppGenerationResult | null> {
-    const chain = modelExecutionPlan(tier, provider);
+    const chain = modelExecutionPlan(tier, provider, { isApp: true });
     const chainDiagnosticsStart = diag.length;
     for (let i = 0; i < chain.length; i++) {
       if (provider === "openrouter" && i > 0 && !shouldTryFreeModelsAfterPaidDiagnostics(
@@ -1061,7 +1061,7 @@ export async function streamAppWithOpenRouter(
   const isStagedBuild = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS|RECUPERAÇÃO AUTOMÁTICA/.test(a.message);
   const tier = generationTierFor(a);
   const diag = opts.diag ?? [];
-  const chain = modelExecutionPlan(tier, "openrouter");
+  const chain = modelExecutionPlan(tier, "openrouter", { isApp: true });
   const chainDiagnosticsStart = diag.length;
   for (let i = 0; i < chain.length; i++) {
     if (i > 0 && !shouldTryFreeModelsAfterPaidDiagnostics(isStagedBuild, diag.slice(chainDiagnosticsStart))) {

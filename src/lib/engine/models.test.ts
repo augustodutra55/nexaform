@@ -9,6 +9,7 @@ import {
   PREMIUM_MODEL_OPENROUTER,
   estimateCost,
   modelExecutionPlan,
+  pickTier,
 } from "./models";
 
 describe("modelExecutionPlan", () => {
@@ -58,5 +59,34 @@ describe("modelExecutionPlan", () => {
       plan.indexOf(FREE_MODEL_OPENROUTER)
     );
     expect(FREE_CODING_MODELS_OPENROUTER.every((model) => model.endsWith(":free"))).toBe(true);
+  });
+
+  it("APP não rebaixa para modelos fracos/grátis — usa só o modelo escolhido", () => {
+    expect(modelExecutionPlan("premium", "openrouter", { isApp: true })).toEqual([
+      PREMIUM_MODEL_OPENROUTER,
+    ]);
+    expect(modelExecutionPlan("economy", "openrouter", { isApp: true })).toEqual([
+      ECON_MODEL_OPENROUTER,
+    ]);
+    const appPlan = modelExecutionPlan("premium", "openrouter", { isApp: true });
+    expect(appPlan).not.toContain(BUDGET_MODEL_OPENROUTER);
+    expect(appPlan).not.toContain(FREE_MODEL_OPENROUTER);
+    FREE_CODING_MODELS_OPENROUTER.forEach((m) => expect(appPlan).not.toContain(m));
+  });
+});
+
+describe("pickTier — app no automático sempre usa o modelo forte", () => {
+  it("app no auto vira premium mesmo em refinamento leve (não cai para haiku)", () => {
+    expect(pickTier("auto", { isApp: true, isRefinement: true, message: "mude a cor do botão" })).toBe("premium");
+    expect(pickTier("auto", { isApp: true, isRefinement: false, message: "crie a esmalteria" })).toBe("premium");
+  });
+
+  it("respeita a escolha explícita do usuário (econômico continua econômico)", () => {
+    expect(pickTier("economy", { isApp: true, isRefinement: true, message: "qualquer coisa" })).toBe("economy");
+    expect(pickTier("premium", { isApp: false, isRefinement: true, message: "texto" })).toBe("premium");
+  });
+
+  it("sites/landing simples continuam podendo usar o econômico no auto", () => {
+    expect(pickTier("auto", { isApp: false, isRefinement: true, message: "troque o título" })).toBe("economy");
   });
 });

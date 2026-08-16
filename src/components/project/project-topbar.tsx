@@ -16,10 +16,8 @@ import {
   PanelRight,
   CloudUpload,
   ClipboardList,
-  Save,
 } from "lucide-react";
 import { useProjectStore } from "@/lib/store/project";
-import { timeAgo } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -44,6 +42,7 @@ import { ProjectMeta, ProjectStatus, STATUS_LABEL, STATUS_ORDER, STATUS_STYLE } 
 import { cn } from "@/lib/utils";
 import { DeliveryPanel } from "@/components/project/delivery-panel";
 import { GitHubProjectButton } from "@/components/project/github-project-button";
+import { VersionHistoryPanel } from "@/components/project/version-history-panel";
 
 export interface VersionRow {
   id: string;
@@ -54,6 +53,8 @@ export interface VersionRow {
 
 interface TopbarProps {
   name: string;
+  projectId: string;
+  currentSchema?: unknown;
   published: boolean;
   shareSlug: string | null;
   canExport: boolean;
@@ -63,6 +64,7 @@ interface TopbarProps {
   studio: boolean;
   onRename: (name: string) => void;
   onRestoreVersion: (v: VersionRow) => void;
+  onVersionRenamed?: (id: string, label: string) => void;
   onPublish: () => Promise<string | null>;
   onExport: () => void;
   onCommercialExport: () => Promise<void>;
@@ -73,6 +75,8 @@ interface TopbarProps {
 
 export function ProjectTopbar({
   name,
+  projectId,
+  currentSchema,
   published,
   shareSlug,
   canExport,
@@ -82,6 +86,7 @@ export function ProjectTopbar({
   studio,
   onRename,
   onRestoreVersion,
+  onVersionRenamed,
   onPublish,
   onExport,
   onCommercialExport,
@@ -93,7 +98,6 @@ export function ProjectTopbar({
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
-  const [versionName, setVersionName] = useState("");
   const status: ProjectStatus = meta.status ?? "rascunho";
 
   async function handleShare() {
@@ -195,35 +199,17 @@ export function ProjectTopbar({
         <DialogContent className="max-h-[70vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Histórico de versões</DialogTitle>
-            <DialogDescription>Cada geração cria uma versão. Salve marcos com nome e restaure quando quiser.</DialogDescription>
+            <DialogDescription>Cada geração cria uma versão. Marque checkpoints, compare com a atual e restaure quando quiser.</DialogDescription>
           </DialogHeader>
-          <div className="flex items-end gap-2 rounded-lg border bg-secondary/30 p-3">
-            <div className="flex-1 space-y-1">
-              <Label className="text-xs">Salvar versão atual</Label>
-              <Input value={versionName} onChange={(e) => setVersionName(e.target.value)} placeholder="Ex.: cliente aprovou o hero" className="h-8" />
-            </div>
-            <Button size="sm" onClick={async () => {
-              await onSaveVersion(versionName.trim() || "Marco manual");
-              setVersionName("");
-              toast.success("Versão salva no histórico");
-            }}><Save className="h-3.5 w-3.5" /> Salvar</Button>
-          </div>
-          <div className="space-y-2">
-            {versions.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Nenhuma versão ainda. Gere algo pelo chat para começar o histórico.</p>}
-            {versions.map((v, i) => (
-              <div key={v.id} className="flex items-center justify-between rounded-lg border p-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{v.label || `Versão ${versions.length - i}`}</p>
-                  <p className="text-xs text-muted-foreground">{timeAgo(v.created_at)}</p>
-                </div>
-                <Button variant="outline" size="sm" onClick={() => {
-                  onRestoreVersion(v);
-                  setVersionsOpen(false);
-                  toast.success("Versão restaurada");
-                }}>Restaurar</Button>
-              </div>
-            ))}
-          </div>
+          <VersionHistoryPanel
+            projectId={projectId}
+            versions={versions}
+            currentSchema={currentSchema}
+            onSaveVersion={onSaveVersion}
+            onRestoreVersion={onRestoreVersion}
+            onVersionRenamed={onVersionRenamed}
+            onClose={() => setVersionsOpen(false)}
+          />
         </DialogContent>
       </Dialog>
 

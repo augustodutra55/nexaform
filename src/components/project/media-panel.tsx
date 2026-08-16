@@ -42,6 +42,8 @@ export function MediaPanel({ projectId, projectName, files, assets, focusSource,
   const selected = items.find((item) => item.id === selectedId) || items[0] || null;
   const [promptKind, setPromptKind] = useState<MediaKind>(selected?.kind || "image");
   const [uploading, setUploading] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [promptText, setPromptText] = useState("");
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -61,10 +63,57 @@ export function MediaPanel({ projectId, projectName, files, assets, focusSource,
   }, [selected?.id, selected?.kind]);
 
   const prompt = buildMediaPrompt(selected, projectName, promptKind);
+  useEffect(() => setPromptText(prompt), [prompt]);
 
   async function copy(value: string, message: string) {
     await navigator.clipboard.writeText(value);
     toast.success(message);
+  }
+
+  // Gera uma imagem por IA (Nano Banana) direto aqui e a aplica no bloco selecionado.
+  async function generateAi() {
+    const text = promptText.trim();
+    if (!text) {
+      toast.error("Descreva a imagem que você quer gerar.");
+      return;
+    }
+    setGenerating(true);
+    try {
+      const response = await fetch(`/api/media-generate/${projectId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          prompt: text,
+          userKey: localStorage.getItem("nexaform:ai-key") || null,
+          userProvider: localStorage.getItem("nexaform:ai-provider") || null,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Não foi possível gerar a imagem.");
+
+      const asset: ProjectMediaAsset = {
+        id: crypto.randomUUID(),
+        url: data.url,
+        path: "",
+        name: `IA · ${text.slice(0, 40)}`,
+        type: "image/png",
+        size: 0,
+        createdAt: new Date().toISOString(),
+      };
+      await onAssetsChange([asset, ...assets].slice(0, 100));
+
+      if (selected && selected.kind === "image") {
+        await onReplace(selected, data.url);
+        toast.success("Imagem gerada e aplicada", { description: selected.context });
+      } else {
+        await navigator.clipboard.writeText(data.url).catch(() => {});
+        toast.success("Imagem gerada e salva na biblioteca", { description: "A URL foi copiada." });
+      }
+    } catch (error: any) {
+      toast.error("Falha ao gerar a imagem", { description: error?.message });
+    } finally {
+      setGenerating(false);
+    }
   }
 
   async function upload(file: File) {
@@ -131,7 +180,7 @@ export function MediaPanel({ projectId, projectName, files, assets, focusSource,
               <h2 className="font-semibold">Central de Mídia</h2>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              Escolha uma imagem, copie o prompt, gere no ChatGPT ou Genspark e arraste o resultado aqui.
+              Escolha um bloco e <strong>gere a imagem aqui mesmo com IA</strong> (Nano Banana). Ou copie o prompt para o ChatGPT/Genspark e arraste o resultado.
             </p>
           </div>
 
@@ -188,12 +237,20 @@ export function MediaPanel({ projectId, projectName, files, assets, focusSource,
                 <button onClick={() => setPromptKind("audio")} className={cn("rounded-md px-2.5 py-1", promptKind === "audio" && "bg-secondary font-medium")}>Áudio</button>
               </div>
             </div>
-            <Textarea value={prompt} readOnly className="min-h-28 resize-none text-xs" />
+            <Textarea value={promptText} onChange={(event) => setPromptText(event.target.value)} className="min-h-28 resize-none text-xs" placeholder="Descreva a imagem que você quer…" />
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => copy(prompt, "Prompt copiado")}><Copy /> Copiar prompt</Button>
+              {promptKind === "image" && (
+                <Button size="sm" variant="brand" onClick={generateAi} disabled={generating}>
+                  {generating ? <Loader2 className="animate-spin" /> : <WandSparkles />} Gerar com IA
+                </Button>
+              )}
+              <Button size="sm" variant="outline" onClick={() => copy(promptText, "Prompt copiado")}><Copy /> Copiar prompt</Button>
               <Button size="sm" variant="outline" asChild><a href="https://chatgpt.com/" target="_blank" rel="noreferrer">ChatGPT <ExternalLink /></a></Button>
               <Button size="sm" variant="outline" asChild><a href="https://www.genspark.ai/" target="_blank" rel="noreferrer">Genspark <ExternalLink /></a></Button>
             </div>
+            {promptKind === "image" && (
+              <p className="mt-2 text-[11px] text-muted-foreground">Gera com o Nano Banana usando sua chave do OpenRouter. Some segundos.</p>
+            )}
           </div>
         </section>
 

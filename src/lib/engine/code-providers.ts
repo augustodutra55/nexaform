@@ -699,13 +699,13 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
   }
 }
 
-async function callOpenRouter(apiKey: string, a: Args, model: string, diag: string[]): Promise<AppGenerationResult | null> {
+async function callOpenRouter(apiKey: string, a: Args, model: string, diag: string[], fetchImpl: typeof fetch = fetch): Promise<AppGenerationResult | null> {
   try {
     const initialMessages = [
       { role: "system", content: systemPromptFor(a, model) },
       { role: "user", content: openRouterUserContent(a) },
     ];
-    const send = (messages: any[], timeoutMs = providerTimeoutMs(a, false, model)) => fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const send = (messages: any[], timeoutMs = providerTimeoutMs(a, false, model)) => fetchImpl("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
@@ -1071,20 +1071,28 @@ export async function streamAppWithOpenRouter(
     const model = chain[i];
     opts.onModel?.(model, i + 1);
     const streamed = await streamOpenRouter(apiKey, a, model, diag, opts);
-    if (!streamed) continue;
-    const candidate = parse(streamed.text, "openrouter", streamed.cost, model, a.currentFiles ?? null);
-    if (!candidate) {
-      diag.push(`OpenRouter: resposta em streaming de ${model} não pôde ser aplicada (${responseFormatSummary(streamed.text)}).`);
-      continue;
+    if (streamed) {
+      const candidate = parse(streamed.text, "openrouter", streamed.cost, model, a.currentFiles ?? null);
+      if (candidate) {
+        const quality = assessCandidate(candidate, a);
+        if (quality.valid) return candidate;
+        const recovered = recoverStagedMissingImports(candidate, a);
+        if (recovered) {
+          diag.push(`OpenRouter: ${model} teve apenas arquivos com imports quebrados revertidos; alterações válidas da etapa foram preservadas.`);
+          return recovered;
+        }
+        diag.push(`OpenRouter: ${model} gerou código estruturalmente inválido no modo streaming [${qualityFailureSummary(quality)}].`);
+      } else {
+        diag.push(`OpenRouter: resposta em streaming de ${model} não pôde ser aplicada (${responseFormatSummary(streamed.text)}); recuperação de formato sem streaming iniciada.`);
+      }
     }
-    const quality = assessCandidate(candidate, a);
-    if (quality.valid) return candidate;
-    const recovered = recoverStagedMissingImports(candidate, a);
-    if (recovered) {
-      diag.push(`OpenRouter: ${model} teve apenas arquivos com imports quebrados revertidos; alterações válidas da etapa foram preservadas.`);
-      return recovered;
-    }
-    diag.push(`OpenRouter: ${model} gerou código estruturalmente inválido no modo streaming [${qualityFailureSummary(quality)}].`);
+    // Rede de segurança: quando o streaming falha por FORMATO (ex.: AD_PATCH+
+    // json-like) ou por qualidade, repetimos a MESMA etapa SEM streaming. Esse
+    // caminho tem recuperação de formato (reforça AD_FILE/AD_PATCH) e correção
+    // de quality gate. Antes, um refinamento nesse formato era descartado direto
+    // e o pedido do usuário nem chegava a ser aplicado.
+    const synced = await callOpenRouter(apiKey, a, model, diag, opts.fetchImpl ?? fetch);
+    if (synced) return synced;
   }
   return demoFallback(a.message, diag.length ? diag.join(" | ") : undefined);
 }

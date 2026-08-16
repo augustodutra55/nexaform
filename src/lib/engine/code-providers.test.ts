@@ -422,10 +422,42 @@ describe("streamAppWithOpenRouter — chain de fallback", () => {
 
     const result = await streamAppWithOpenRouter("sk-or-teste", STREAM_ARGS, { fetchImpl });
 
-    expect(models).toEqual([PREMIUM_MODEL_OPENROUTER]);
+    // Pode tentar o modelo forte no streaming e de novo no fallback sem streaming,
+    // mas NUNCA rebaixa para um modelo fraco/grátis.
+    expect(models.length).toBeGreaterThanOrEqual(1);
+    expect(models.every((m) => m === PREMIUM_MODEL_OPENROUTER)).toBe(true);
     expect(models).not.toContain(BUDGET_MODEL_OPENROUTER);
     expect(result.engineMode).toBe("demo");
     expect(result.failureReason).toContain("HTTP 402");
+  });
+
+  it("recupera pelo caminho SEM streaming quando o streaming vem em formato inaplicável", async () => {
+    // Reproduz o bug real: o refinamento chega em formato que o parser não
+    // aplica (ex.: AD_PATCH+json-like). Antes era descartado; agora o motor
+    // repete a etapa sem streaming (com recuperação de formato) e entrega.
+    const calls: Array<{ model: string; stream: boolean }> = [];
+    const fetchImpl = (async (_url: any, init: any) => {
+      const body = JSON.parse(init.body);
+      calls.push({ model: body.model, stream: !!body.stream });
+      if (body.stream) {
+        // streaming devolve prosa que o parser não consegue transformar em operações
+        return sseResponse([sseChunk("Claro! Já apliquei as mudanças que você pediu."), sseUsage(400, 200)]);
+      }
+      // recuperação sem streaming devolve um projeto válido
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: VALID_INITIAL_PROJECT } }],
+          usage: { prompt_tokens: 500, completion_tokens: 300 },
+        }),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await streamAppWithOpenRouter("sk-or-teste", STREAM_ARGS, { fetchImpl });
+
+    expect(result.engineMode).toBe("real");
+    expect(calls.some((c) => c.stream)).toBe(true); // tentou streaming
+    expect(calls.some((c) => !c.stream)).toBe(true); // caiu na recuperação sem streaming
   });
 
   it("devolve o fallback-card com o motivo real quando todos os modelos falham", async () => {

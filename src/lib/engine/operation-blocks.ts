@@ -187,6 +187,58 @@ export function parseOperationBlocks(text: string): OperationBlockResult | null 
   };
 }
 
+/**
+ * Localiza o intervalo [start, end) de `search` dentro de `before`.
+ * 1) Tenta o match EXATO e ÚNICO (comportamento original, mais seguro).
+ * 2) Se não houver, tenta um match por LINHAS ignorando indentação/espaços nas
+ *    pontas de cada linha — tolera a diferença de espaço que fazia o modelo
+ *    errar o AD_SEARCH e derrubar o refinamento inteiro.
+ * Sempre exige correspondência ÚNICA; ambíguo devolve null para nunca corromper.
+ */
+function locatePatch(before: string, search: string): { start: number; end: number } | null {
+  if (!search) return null;
+  const firstExact = before.indexOf(search);
+  if (firstExact >= 0) {
+    const second = before.indexOf(search, firstExact + search.length);
+    return second >= 0 ? null : { start: firstExact, end: firstExact + search.length };
+  }
+
+  // Match por linhas, tolerante a espaços. Trabalhamos sobre o `before` original
+  // (offsets reais); a comparação é feita com cada linha "trimada".
+  const beforeLines = before.split("\n");
+  const offsets: number[] = [];
+  let cursor = 0;
+  for (const line of beforeLines) {
+    offsets.push(cursor);
+    cursor += line.length + 1; // +1 do \n
+  }
+
+  const rawNeedle = search.replace(/\r/g, "").split("\n");
+  while (rawNeedle.length && rawNeedle[0].trim() === "") rawNeedle.shift();
+  while (rawNeedle.length && rawNeedle[rawNeedle.length - 1].trim() === "") rawNeedle.pop();
+  if (!rawNeedle.length) return null;
+  const needle = rawNeedle.map((l) => l.trim());
+
+  const matches: number[] = [];
+  for (let i = 0; i + needle.length <= beforeLines.length; i += 1) {
+    let ok = true;
+    for (let j = 0; j < needle.length; j += 1) {
+      if (beforeLines[i + j].trim() !== needle[j]) { ok = false; break; }
+    }
+    if (ok) {
+      matches.push(i);
+      if (matches.length > 1) return null; // ambíguo
+    }
+  }
+  if (matches.length !== 1) return null;
+
+  const startLine = matches[0];
+  const endLine = startLine + needle.length - 1;
+  const start = offsets[startLine];
+  const end = offsets[endLine] + beforeLines[endLine].length; // fim da última linha (sem o \n)
+  return { start, end };
+}
+
 /** Aplica patches somente quando o trecho existe uma única vez, evitando corrupção. */
 export function applyFileOperations(current: AppFile[], ops: FileOperation[]): AppFile[] | null {
   const map = new Map<string, string>();
@@ -215,9 +267,9 @@ export function applyFileOperations(current: AppFile[], ops: FileOperation[]): A
     if (operation.op === "patch") {
       const before = map.get(path);
       if (before == null) return null;
-      const first = before.indexOf(operation.search);
-      if (first < 0 || before.indexOf(operation.search, first + operation.search.length) >= 0) return null;
-      const after = before.slice(0, first) + operation.replace + before.slice(first + operation.search.length);
+      const span = locatePatch(before, operation.search);
+      if (!span) return null;
+      const after = before.slice(0, span.start) + operation.replace + before.slice(span.end);
       if (after === before) return null;
       map.set(path, after);
       touched++;

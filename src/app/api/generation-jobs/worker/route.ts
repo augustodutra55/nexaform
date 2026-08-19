@@ -12,6 +12,7 @@ import {
 } from "@/lib/engine/background-jobs";
 import { buildStagePrompt, buildStageRetryPrompt, stagedStages } from "@/lib/engine/staged-generation";
 import { classifyGenerationFailure, safeOperationalMessage } from "@/lib/engine/observability";
+import { resolveAdimgInApp } from "@/lib/media/ai-image";
 
 export const maxDuration = 300;
 const configuredMaxMs = Number(process.env.GEN_MAX_MS);
@@ -239,6 +240,22 @@ export async function GET(req: NextRequest) {
       }).eq("id", payload.reservationId).eq("user_id", payload.userId);
     }
     return NextResponse.json({ processed: true, status, executions: executionCount });
+  }
+
+  // Gera as fotos ADIMG desta etapa (antes só a geração síncrona fazia isso;
+  // a fila durável deixava as imagens novas quebradas). Usa a chave da plataforma
+  // e nunca derruba a etapa: se uma imagem falhar, cai num placeholder que carrega.
+  try {
+    const imgs = await resolveAdimgInApp(result.app, {
+      apiKey: process.env.OPENROUTER_API_KEY || null,
+      supabase: admin,
+      projectId: payload.projectId,
+      max: 10,
+      timeoutMs: 15_000,
+    });
+    if (imgs) console.info("[worker] adimg", JSON.stringify({ projectId: payload.projectId, generated: imgs }));
+  } catch {
+    /* imagem é opcional — nunca derruba a etapa */
   }
 
   const transition = advanceBackgroundGeneration(

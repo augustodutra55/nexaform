@@ -61,7 +61,7 @@ export function buildMultiFileSrcDoc(
   for (const f of files) map[f.path.replace(/^\.?\//, "")] = f.content;
   const filesJson = JSON.stringify(map);
   const entryJson = JSON.stringify(entry.replace(/^\.?\//, ""));
-  const adScript = adGlobalScript(projectId);
+  const adScript = adGlobalScript(projectId, { admin: editorSession });
   const auditSource = runtimeAuditSource();
   const selectionSource = editorSession ? visualSelectionSource() : "";
   const externals = detectExternals(files);
@@ -190,7 +190,10 @@ ${adScript}
       var mod = req('', ENTRY);
       var App = mod && (mod.default || mod.App);
       if(typeof App !== 'function'){ var m2='O arquivo de entrada ('+ENTRY+') precisa ter um export default de um componente React.'; showError(m2); nxReport(m2); return; }
-      ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+      var __adRoot = ReactDOM.createRoot(document.getElementById('root'));
+      window.__adRerender = function(){ try { __adRoot.render(React.createElement(App)); } catch(e){} };
+      window.addEventListener('ad:settings-changed', window.__adRerender);
+      __adRoot.render(React.createElement(App));
       setTimeout(function(){ nxPostAudit(); nxReady(); }, 500);
     } catch(err){ var m=(err && err.message) || String(err); showError(m); nxReport(m); }
   })();

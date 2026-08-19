@@ -23,6 +23,32 @@ function dirname(path: string): string {
   return index < 0 ? "" : path.slice(0, index);
 }
 
+/**
+ * Erros FATAIS: quebram a execução/renderização do app (ele nem roda). Tudo o
+ * mais é erro de COMPLETUDE/política — o site RODA, só está incompleto. Para não
+ * falhar e cobrar crédito à toa, o motor ENTREGA um site que roda (mesmo com esses
+ * avisos) em vez de recusar tudo — igual ao comportamento do Lovable, que entrega
+ * algo para você iterar. Só bloqueamos de fato quando o app não abre.
+ */
+export const FATAL_ISSUE_CODES = new Set<string>([
+  "single_file",
+  "unsafe_path",
+  "duplicate_path",
+  "missing_entry",
+  "syntax_error",
+  "css_import",
+  "node_import",
+  "missing_import",
+  "missing_default_export",
+  "react_router",
+  "location_navigation",
+]);
+
+/** true quando o app RODA (nenhum erro fatal), mesmo que falte completude. */
+export function isRunnableReport(report: Pick<ProjectQualityReport, "errors">): boolean {
+  return !report.errors.some((e) => FATAL_ISSUE_CODES.has(e.code));
+}
+
 function issue(code: string, message: string, path?: string): ProjectQualityIssue {
   return { code, message, path };
 }

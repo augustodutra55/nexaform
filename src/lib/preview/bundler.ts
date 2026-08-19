@@ -157,7 +157,10 @@ export async function bundleApp(files: AppFile[], entry: string): Promise<Bundle
     `import React from 'react';\n` +
     `import { createRoot } from 'react-dom/client';\n` +
     `import App from '${entryPath}';\n` +
-    `createRoot(document.getElementById('root')).render(React.createElement(App));\n`;
+    `var __adRoot = createRoot(document.getElementById('root'));\n` +
+    `window.__adRerender = function(){ try { __adRoot.render(React.createElement(App)); } catch(e){} };\n` +
+    `window.addEventListener('ad:settings-changed', window.__adRerender);\n` +
+    `__adRoot.render(React.createElement(App));\n`;
 
   const result = await esbuild.build({
     entryPoints: [BOOT],
@@ -227,7 +230,7 @@ export function buildBundledSrcDoc(
   projectId?: string | null,
   opts?: { published?: boolean; editorSession?: boolean }
 ): string {
-  const adScript = adGlobalScript(projectId);
+  const adScript = adGlobalScript(projectId, { admin: !!opts?.editorSession });
   const auditSource = runtimeAuditSource();
   const selectionSource = opts?.editorSession ? visualSelectionSource() : "";
   // Marcador só no site publicado: liga o analytics de visita do runtime (window.AD).

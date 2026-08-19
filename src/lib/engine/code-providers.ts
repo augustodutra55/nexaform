@@ -12,7 +12,7 @@ import { BUDGET_MODEL_OPENROUTER, CostMode, pickTier, modelExecutionPlan, estima
 import type { PromptAttachment } from "./prompt-attachments";
 import { applyFileOperations, parseOperationBlocks } from "./operation-blocks";
 import { buildGenerationPlan, renderGenerationPlan } from "./generation-plan";
-import { issueKey, validateAppProject } from "./project-validator";
+import { issueKey, validateAppProject, isRunnableReport } from "./project-validator";
 
 interface Args {
   message: string;
@@ -662,6 +662,15 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
         diag.push(`Claude: ${model} teve apenas arquivos com imports quebrados revertidos; alterações válidas da etapa foram preservadas.`);
         return recovered;
       }
+      // ENTREGAR EM VEZ DE FALHAR: se o site RODA (sem erro fatal), entregamos a
+      // melhor versão mesmo com avisos de completude, para o usuário poder iterar,
+      // em vez de recusar tudo e cobrar crédito. (Só falha quando o app não abre.)
+      const deliverable = corrected && correctedQuality && isRunnableReport(correctedQuality) ? corrected
+        : isRunnableReport(quality) ? r : null;
+      if (deliverable) {
+        diag.push(`Claude: ${model} entregue com avisos de completude (roda), em vez de falhar.`);
+        return deliverable;
+      }
       diag.push(`Claude: ${model} não passou no quality gate após uma correção automática${correctedQuality ? ` [${qualityFailureSummary(correctedQuality)}]` : ""}.`);
       return null;
     }
@@ -766,6 +775,15 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
       if (recovered) {
         diag.push(`OpenRouter: ${model} teve apenas arquivos com imports quebrados revertidos; alterações válidas da etapa foram preservadas.`);
         return recovered;
+      }
+      // ENTREGAR EM VEZ DE FALHAR: se o site RODA (sem erro fatal), entregamos a
+      // melhor versão mesmo com avisos de completude, para o usuário iterar, em vez
+      // de recusar tudo e cobrar crédito. (Só falha quando o app não abre.)
+      const deliverable = corrected && correctedQuality && isRunnableReport(correctedQuality) ? corrected
+        : isRunnableReport(quality) ? r : null;
+      if (deliverable) {
+        diag.push(`OpenRouter: ${model} entregue com avisos de completude (roda), em vez de falhar.`);
+        return deliverable;
       }
       diag.push(`OpenRouter: ${model} não passou no quality gate após uma correção automática${correctedQuality ? ` [${qualityFailureSummary(correctedQuality)}]` : ""}.`);
       return null;

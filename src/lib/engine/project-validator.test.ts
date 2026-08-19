@@ -1,7 +1,25 @@
 import { describe, expect, it } from "vitest";
 import type { AppCode } from "./app-types";
 import { buildGenerationPlan } from "./generation-plan";
-import { validateAppProject } from "./project-validator";
+import { validateAppProject, isRunnableReport } from "./project-validator";
+
+describe("isRunnableReport — entregar quando roda, falhar só quando não abre", () => {
+  it("app com erro de COMPLETUDE (seção faltando, componente órfão) é entregável", () => {
+    expect(isRunnableReport({ errors: [{ code: "missing_required_section", message: "" }] })).toBe(true);
+    expect(isRunnableReport({ errors: [{ code: "orphan_component", message: "" }] })).toBe(true);
+    expect(isRunnableReport({ errors: [{ code: "missing_commercial_flow", message: "" }] })).toBe(true);
+  });
+
+  it("app com erro FATAL (não roda) NÃO é entregável", () => {
+    expect(isRunnableReport({ errors: [{ code: "syntax_error", message: "" }] })).toBe(false);
+    expect(isRunnableReport({ errors: [{ code: "missing_import", message: "" }] })).toBe(false);
+    expect(isRunnableReport({ errors: [{ code: "missing_entry", message: "" }] })).toBe(false);
+  });
+
+  it("sem erros, é entregável", () => {
+    expect(isRunnableReport({ errors: [] })).toBe(true);
+  });
+});
 
 function appWith(component: string): AppCode {
   return {

@@ -49,6 +49,72 @@ export default function Page(){ return <p>Depois</p> }
   });
 });
 
+describe("patch tolerante a espaços (reduz 'não pôde ser aplicada')", () => {
+  const current = [
+    {
+      path: "components/Hero.jsx",
+      content: [
+        "export default function Hero() {",
+        "  return (",
+        "    <h1 className=\"title\">Bem-vindo</h1>",
+        "  );",
+        "}",
+      ].join("\n"),
+    },
+  ];
+
+  it("aplica quando o AD_SEARCH tem indentação diferente da do arquivo", () => {
+    // O modelo mandou o trecho SEM a indentação real (erro comum que derrubava tudo).
+    const result = applyFileOperations(current, [
+      {
+        op: "patch",
+        path: "components/Hero.jsx",
+        search: "<h1 className=\"title\">Bem-vindo</h1>",
+        replace: "    <h1 className=\"title\">Bem-vinda à Esmalteria</h1>",
+      } as any,
+    ]);
+    expect(result).not.toBeNull();
+    expect(result![0].content).toContain("Bem-vinda à Esmalteria");
+    expect(result![0].content).not.toContain(">Bem-vindo<");
+  });
+
+  it("aplica um bloco multi-linha mesmo com espaços diferentes", () => {
+    const result = applyFileOperations(current, [
+      {
+        op: "patch",
+        path: "components/Hero.jsx",
+        search: "return (\n<h1 className=\"title\">Bem-vindo</h1>\n);",
+        replace: "  return (\n    <h1>Novo</h1>\n  );",
+      } as any,
+    ]);
+    expect(result).not.toBeNull();
+    expect(result![0].content).toContain("<h1>Novo</h1>");
+  });
+
+  it("mantém o match exato quando ele existe", () => {
+    const result = applyFileOperations(current, [
+      {
+        op: "patch",
+        path: "components/Hero.jsx",
+        search: "  return (",
+        replace: "  return ( /* ok */",
+      } as any,
+    ]);
+    expect(result![0].content).toContain("return ( /* ok */");
+  });
+
+  it("rejeita (null) quando o trecho aparece em mais de um lugar (ambíguo)", () => {
+    const dup = [
+      { path: "A.jsx", content: "const x = 1;\nconst x = 1;\n" },
+    ];
+    expect(
+      applyFileOperations(dup, [
+        { op: "patch", path: "A.jsx", search: "const x = 1;", replace: "const x = 2;" } as any,
+      ])
+    ).toBeNull();
+  });
+});
+
 describe("salvamento de AD_FILE truncado (Etapa 2/7 — Esmalteria)", () => {
   it("recupera o último AD_FILE sem tag de fechamento", () => {
     const text = `<AD_FILE path="components/Agendamento.jsx" op="create">

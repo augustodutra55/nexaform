@@ -2,10 +2,11 @@
 import { useEffect, type RefObject } from "react";
 import type { RuntimeAuditIssue, RuntimeAuditReport } from "@/lib/preview/runtime-audit";
 
-type BridgeKind = "data" | "upload" | "email" | "view" | "auth" | "voice" | "telemetry";
+type BridgeKind = "data" | "upload" | "email" | "view" | "auth" | "voice" | "telemetry" | "settings";
 const METHODS: Record<BridgeKind, string[]> = {
   data: ["GET", "POST", "PATCH", "DELETE"], upload: ["POST"],
   email: ["POST"], view: ["POST"], auth: ["GET", "POST"], voice: ["POST"], telemetry: ["POST"],
+  settings: ["GET", "POST"],
 };
 const sessionKey = (projectId: string) => `adstudio:app-token:${projectId}`;
 
@@ -248,6 +249,7 @@ export function usePreviewBridge(
         data: `/api/data/${projectId}`, upload: `/api/upload/${projectId}`,
         email: `/api/email/${projectId}`, view: `/api/view/${projectId}`,
         auth: `/api/app-auth/${projectId}`, telemetry: `/api/telemetry/${projectId}`,
+        settings: `/api/app-settings/${projectId}`,
       };
       try {
         const headers = new Headers();

@@ -4,8 +4,12 @@
  * (mesmo origin, escopado por projeto). É o "backend" que os apps usam para
  * salvar dados de verdade, tanto no preview quanto no app publicado.
  */
-export function adGlobalScript(projectId?: string | null): string {
+export function adGlobalScript(
+  projectId?: string | null,
+  opts?: { admin?: boolean }
+): string {
   const pid = JSON.stringify(projectId || "");
+  const adminFlag = opts?.admin ? "true" : "false";
   return `<script>
 (function(){
   var PID = ${pid};
@@ -173,6 +177,195 @@ export function adGlobalScript(projectId?: string | null): string {
       }
     }
   };
+
+  // ── AD.settings: CONTEÚDO editável do site (admin embutido no motor) ──────
+  // get(chave, padrão) é SÍNCRONO e à prova de loop: registra a chave, devolve o
+  // override salvo (ou o padrão). O app gerado NÃO precisa de useEffect/estado —
+  // por isso é impossível criar o loop "recarrega infinito" de antes. Um painel
+  // de administração (injetado abaixo) deixa o DONO DO NEGÓCIO trocar textos,
+  // cores, marcas e imagens direto no site, sem mexer no código. Igual para todos
+  // os projetos do AD Studio, como o Nano Banana é para as imagens.
+  var ADS = { saved:{}, reg:{}, ready:false, loading:null, admin:${adminFlag}, hasPin:false, pin:'' };
+  function adsInfer(key, def){
+    try{
+      var k=String(key||'').toLowerCase();
+      if(typeof def==='string' && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(def.trim())) return 'color';
+      if(/(^|[_.:-])(cor|color|colour)([_.:-]|$)/.test(k)) return 'color';
+      if(/(^|[_.:-])(image|imagem|img|logo|foto|photo|banner|capa|avatar|icone|icon)([_.:-]|$)/.test(k)) return 'image';
+      if(typeof def==='string' && /^(https?:|data:image|ADIMG:)/i.test(def.trim())) return 'image';
+      if(typeof def==='string' && def.length>60) return 'longtext';
+      return 'text';
+    }catch(e){ return 'text'; }
+  }
+  window.AD.settings = {
+    get: function(key, fallback){
+      try{
+        if(key && !ADS.reg[key]) ADS.reg[key] = { key:key, def:fallback, type:adsInfer(key, fallback), order:Object.keys(ADS.reg).length };
+      }catch(e){}
+      var v = ADS.saved[key];
+      return (v===undefined||v===null||v==='') ? fallback : v;
+    },
+    all: function(){ var o={}; try{ Object.keys(ADS.reg).forEach(function(k){ o[k]=window.AD.settings.get(k, ADS.reg[k].def); }); }catch(e){} return o; },
+    ready: function(){ return ADS.loading || Promise.resolve(); }
+  };
+  // Carrega os overrides UMA única vez. Só dispara re-render se HOUVER override
+  // salvo (caso raro) — no caso comum não há flash nem trabalho extra.
+  ADS.loading = bridge('settings',{method:'GET'}).then(function(r){
+    ADS.ready = true;
+    if(r && r.values && typeof r.values==='object') ADS.saved = r.values;
+    ADS.hasPin = !!(r && r.hasPin);
+    if(Object.keys(ADS.saved).length){ try{ window.dispatchEvent(new Event('ad:settings-changed')); }catch(e){} }
+  }).catch(function(){ ADS.ready = true; });
+
+  // ── Painel de administração (injetado; nunca faz parte do código gerado) ──
+  (function installAdmin(){
+    var COLORS='#0b1220', btn=null, panel=null, built=false;
+    function adminAllowed(){
+      if(ADS.admin) return true;            // dono no preview do estúdio
+      if(ADS.hasPin) return true;           // dono ativou a edição pelo cliente (definiu um PIN)
+      try{ return /(^|#)(admin|editar|config)/i.test(location.hash||''); }catch(e){ return false; }
+    }
+    function esc(s){ return String(s==null?'':s); }
+    function field(item){
+      var wrap=document.createElement('label');
+      wrap.style.cssText='display:block;margin:0 0 14px;font:500 12px/1.4 ui-sans-serif,system-ui,sans-serif;color:#334155';
+      var title=document.createElement('div');
+      title.textContent=item.key;
+      title.style.cssText='margin:0 0 6px;color:#0f172a;font-weight:600;word-break:break-all';
+      wrap.appendChild(title);
+      var cur=window.AD.settings.get(item.key, item.def);
+      var input;
+      if(item.type==='color'){
+        input=document.createElement('input'); input.type='color';
+        input.value=/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(cur))?cur:'#000000';
+        input.style.cssText='width:56px;height:34px;padding:0;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer';
+      } else if(item.type==='image'){
+        var box=document.createElement('div');
+        input=document.createElement('input'); input.type='text'; input.value=esc(cur);
+        input.placeholder='Cole uma URL, envie um arquivo ou gere abaixo';
+        input.style.cssText='width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font:inherit';
+        var row=document.createElement('div'); row.style.cssText='display:flex;gap:6px;margin-top:6px;flex-wrap:wrap';
+        var up=document.createElement('button'); up.type='button'; up.textContent='Enviar imagem';
+        up.style.cssText='padding:6px 10px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;cursor:pointer;font:500 12px ui-sans-serif,system-ui,sans-serif';
+        var file=document.createElement('input'); file.type='file'; file.accept='image/*'; file.style.display='none';
+        up.onclick=function(){ file.click(); };
+        file.onchange=function(){
+          var f=file.files&&file.files[0]; if(!f) return;
+          up.textContent='Enviando…'; up.disabled=true;
+          window.AD.upload(f).then(function(url){ input.value=url; prev.src=url; up.textContent='Enviar imagem'; up.disabled=false; })
+            .catch(function(){ up.textContent='Falhou — tente de novo'; up.disabled=false; });
+        };
+        row.appendChild(up); row.appendChild(file);
+        var prev=document.createElement('img'); prev.src=/^(https?:|data:image)/i.test(String(cur))?cur:'';
+        prev.style.cssText='margin-top:8px;max-height:80px;max-width:100%;border-radius:8px;'+(prev.src?'':'display:none');
+        input.addEventListener('input',function(){ if(/^(https?:|data:image)/i.test(input.value)){ prev.src=input.value; prev.style.display=''; } });
+        box.appendChild(input); box.appendChild(row); box.appendChild(prev);
+        wrap.appendChild(box); wrap.__adInput=input; return wrap;
+      } else if(item.type==='longtext'){
+        input=document.createElement('textarea'); input.value=esc(cur); input.rows=3;
+        input.style.cssText='width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font:inherit;resize:vertical';
+      } else {
+        input=document.createElement('input'); input.type='text'; input.value=esc(cur);
+        input.style.cssText='width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font:inherit';
+      }
+      wrap.appendChild(input); wrap.__adInput=input; return wrap;
+    }
+    function buildPanel(){
+      var items=Object.keys(ADS.reg).map(function(k){ return ADS.reg[k]; }).sort(function(a,b){ return a.order-b.order; });
+      panel=document.createElement('div');
+      panel.style.cssText='position:fixed;left:16px;bottom:70px;z-index:2147483000;width:340px;max-width:calc(100vw - 32px);max-height:75vh;overflow:auto;background:#fff;border:1px solid #e2e8f0;border-radius:16px;box-shadow:0 20px 60px -12px rgba(2,6,23,.35);padding:16px;font:14px ui-sans-serif,system-ui,sans-serif;color:#0f172a';
+      var head=document.createElement('div'); head.style.cssText='display:flex;align-items:center;justify-content:space-between;margin-bottom:12px';
+      var h=document.createElement('div'); h.textContent='Editar o site'; h.style.cssText='font-weight:700;font-size:15px';
+      var x=document.createElement('button'); x.textContent='✕'; x.style.cssText='border:none;background:transparent;font-size:16px;cursor:pointer;color:#64748b';
+      x.onclick=function(){ toggle(false); };
+      head.appendChild(h); head.appendChild(x); panel.appendChild(head);
+      if(!items.length){
+        var empty=document.createElement('p'); empty.textContent='Este site ainda não tem campos editáveis.';
+        empty.style.cssText='color:#64748b;font-size:13px'; panel.appendChild(empty);
+      }
+      var inputs={};
+      items.forEach(function(it){ var f=field(it); inputs[it.key]=f.__adInput; panel.appendChild(f); });
+      // PIN (quando o buyer edita pelo site publicado e há PIN configurado)
+      var pinInput=null;
+      if(!ADS.admin){
+        var pf=document.createElement('label'); pf.style.cssText='display:block;margin:6px 0 12px;font:500 12px ui-sans-serif,system-ui,sans-serif;color:#334155';
+        var pl=document.createElement('div'); pl.textContent='PIN de administração'; pl.style.cssText='margin:0 0 6px;color:#0f172a;font-weight:600'; pf.appendChild(pl);
+        pinInput=document.createElement('input'); pinInput.type='password'; pinInput.inputMode='numeric'; pinInput.value=ADS.pin||'';
+        pinInput.placeholder='Peça o PIN a quem criou o site';
+        pinInput.style.cssText='width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font:inherit';
+        pf.appendChild(pinInput); panel.appendChild(pf);
+      }
+      // DONO: define/altera o PIN que a dona do negócio usa no site publicado.
+      var setPinInput=null;
+      if(ADS.admin){
+        var wrapPin=document.createElement('div');
+        wrapPin.style.cssText='margin:10px 0 12px;padding:10px;border:1px dashed #cbd5e1;border-radius:10px;background:#f8fafc';
+        var pl2=document.createElement('div'); pl2.textContent='PIN para o dono do site editar';
+        pl2.style.cssText='font:600 12px ui-sans-serif,system-ui,sans-serif;color:#0f172a;margin-bottom:4px';
+        var note=document.createElement('div');
+        note.textContent=(ADS.hasPin?'Já existe um PIN. ':'Nenhum PIN ainda. ')+'Defina um PIN (4 a 12 dígitos) e passe ao cliente com o link do site + #editar. Assim ele edita textos, cores e imagens sozinho.';
+        note.style.cssText='font:400 11px ui-sans-serif,system-ui,sans-serif;color:#64748b;margin-bottom:6px';
+        setPinInput=document.createElement('input'); setPinInput.type='text'; setPinInput.inputMode='numeric';
+        setPinInput.placeholder=ADS.hasPin?'Digite um novo PIN para trocar':'Ex.: 2468';
+        setPinInput.style.cssText='width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font:inherit';
+        wrapPin.appendChild(pl2); wrapPin.appendChild(note); wrapPin.appendChild(setPinInput);
+        panel.appendChild(wrapPin);
+      }
+      var msg=document.createElement('div'); msg.style.cssText='min-height:16px;margin:2px 0 8px;font-size:12px';
+      var save=document.createElement('button'); save.textContent='Salvar alterações';
+      save.style.cssText='width:100%;padding:10px 14px;border:none;border-radius:10px;background:#e11d48;color:#fff;font-weight:600;cursor:pointer';
+      save.onclick=function(){
+        var values={};
+        Object.keys(inputs).forEach(function(k){ var el=inputs[k]; if(el) values[k]=el.value; });
+        var pin=pinInput?pinInput.value:'';
+        var newPin=setPinInput?String(setPinInput.value||'').trim():'';
+        save.disabled=true; save.textContent='Salvando…'; msg.textContent=''; msg.style.color='#64748b';
+        var body={ values: values }; if(pin) body.adminPin=pin; if(newPin) body.setPin=newPin;
+        bridge('settings',{method:'POST',body:body}).then(function(){
+          ADS.saved=Object.assign({}, ADS.saved, values); if(pin) ADS.pin=pin;
+          if(newPin){ ADS.hasPin=true; if(setPinInput) setPinInput.value=''; }
+          try{ window.dispatchEvent(new Event('ad:settings-changed')); }catch(e){}
+          msg.style.color='#16a34a'; msg.textContent=newPin?'Salvo! PIN definido — já pode passar ao cliente.':'Salvo! As mudanças já apareceram no site.';
+          save.disabled=false; save.textContent='Salvar alterações';
+        }).catch(function(err){
+          msg.style.color='#dc2626'; msg.textContent=(err&&err.message)||'Não foi possível salvar.';
+          save.disabled=false; save.textContent='Salvar alterações';
+        });
+      };
+      panel.appendChild(msg); panel.appendChild(save);
+      document.body.appendChild(panel);
+    }
+    function toggle(show){
+      if(show){ if(!panel) buildPanel(); else panel.style.display=''; }
+      else if(panel){ panel.style.display='none'; }
+    }
+    function ensureButton(){
+      if(btn || !adminAllowed()) return;
+      if(!Object.keys(ADS.reg).length) return; // nada editável → não mostra nada
+      // Pontinho DISFARÇADO (estilo Airbnb): um ponto pequeno e discreto no canto.
+      // O visitante comum quase não repara; quem comprou o site sabe que é ali e
+      // clica para abrir o admin. Sem texto, sem chamar atenção.
+      btn=document.createElement('button');
+      var open=false;
+      btn.type='button'; btn.setAttribute('aria-label','Editar o site'); btn.title='Editar o site';
+      btn.style.cssText='position:fixed;left:12px;bottom:12px;z-index:2147483000;width:14px;height:14px;padding:0;border:1px solid rgba(255,255,255,.6);border-radius:50%;background:rgba(15,23,42,.30);box-shadow:0 1px 5px rgba(2,6,23,.35);cursor:pointer;opacity:.45;transition:opacity .2s ease,transform .2s ease';
+      btn.onmouseenter=function(){ btn.style.opacity='1'; btn.style.transform='scale(1.35)'; };
+      btn.onmouseleave=function(){ if(!open){ btn.style.opacity='.45'; btn.style.transform='scale(1)'; } };
+      btn.onclick=function(){
+        open=!open; toggle(open);
+        btn.style.opacity=open?'1':'.45'; btn.style.transform=open?'scale(1.35)':'scale(1)';
+      };
+      document.body.appendChild(btn);
+    }
+    function boot(){
+      // Espera o app montar para saber quais campos existem (reg preenche no render).
+      var tries=0;
+      var iv=setInterval(function(){ ensureButton(); if(btn || ++tries>40) clearInterval(iv); }, 400);
+      try{ window.addEventListener('hashchange', ensureButton); }catch(e){}
+    }
+    if(document.readyState==='complete'||document.readyState==='interactive') boot();
+    else window.addEventListener('DOMContentLoaded', boot);
+  })();
 
   // ── Analytics de visita (só no site PUBLICADO, marcado por __AD_PUBLISHED) ──
   // Conta uma visita por carregamento. Agregado e anônimo. No preview do editor

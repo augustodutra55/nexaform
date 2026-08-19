@@ -1,0 +1,49 @@
+import { describe, expect, it } from "vitest";
+import { CODE_SYSTEM_PROMPT, CODE_REFINE_SYSTEM_PROMPT, buildCodeUserPrompt } from "./code-prompts";
+
+describe("religar edição do dono automaticamente no refinamento", () => {
+  const semSettings = [{ path: "components/Hero.jsx", content: "export default () => <h1>Esmalteria</h1>;" }];
+  const comSettings = [
+    { path: "components/Hero.jsx", content: "export default () => <h1>{AD.settings.get('hero.titulo','Esmalteria')}</h1>;" },
+  ];
+
+  it("injeta a instrução de liberar edição quando o site ainda não usa AD.settings", () => {
+    const prompt = buildCodeUserPrompt("mude a cor do botão", semSettings);
+    expect(prompt).toMatch(/LIBERAR EDIÇÃO PELO DONO/);
+    expect(prompt).toContain("AD.settings.get");
+  });
+
+  it("NÃO injeta de novo quando o site já usa AD.settings", () => {
+    const prompt = buildCodeUserPrompt("mude a cor do botão", comSettings);
+    expect(prompt).not.toMatch(/LIBERAR EDIÇÃO PELO DONO/);
+  });
+
+  it("não injeta na primeira geração (sem arquivos atuais)", () => {
+    const prompt = buildCodeUserPrompt("site de barbearia", null);
+    expect(prompt).not.toMatch(/LIBERAR EDIÇÃO PELO DONO/);
+  });
+});
+
+describe("prompt do motor — admin embutido (AD.settings) e imagens", () => {
+  it("ensina o modelo a usar AD.settings.get para conteúdo editável", () => {
+    expect(CODE_SYSTEM_PROMPT).toContain("AD.settings.get");
+    // reforça que é síncrono e sem efeito (evita o loop de recarregamento)
+    expect(CODE_SYSTEM_PROMPT).toMatch(/sem useEffect|SÍNCRONA|síncrono/i);
+  });
+
+  it("proíbe desenhar ilustração/pessoa/mão em SVG como imagem de conteúdo", () => {
+    expect(CODE_SYSTEM_PROMPT).toMatch(/ilustração em svg|ilustração em SVG|SVG/i);
+    expect(CODE_SYSTEM_PROMPT).toMatch(/ADIMG/);
+  });
+
+  it("proíbe simulador que pinta SVG ou sobrepõe formas em foto; manda grade de amostras", () => {
+    expect(CODE_SYSTEM_PROMPT).toMatch(/SIMULADOR|PROVADOR/i);
+    expect(CODE_SYSTEM_PROMPT).toMatch(/GRADE DE AMOSTRAS|amostras de cor|backgroundColor/i);
+    expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/amostras|MOSTRU/i);
+  });
+
+  it("o prompt de refinamento preserva AD.settings e não recria painel de admin", () => {
+    expect(CODE_REFINE_SYSTEM_PROMPT).toContain("AD.settings");
+    expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/não crie painel de admin|__settings/i);
+  });
+});

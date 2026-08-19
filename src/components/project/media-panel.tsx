@@ -45,7 +45,68 @@ export function MediaPanel({ projectId, projectName, files, assets, focusSource,
   const [generating, setGenerating] = useState(false);
   const [promptText, setPromptText] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [batch, setBatch] = useState<{ running: boolean; done: number; total: number }>({ running: false, done: 0, total: 0 });
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const imageItems = useMemo(() => items.filter((item) => item.kind === "image"), [items]);
+
+  // Gera UMA imagem por IA a partir de um prompt e devolve a URL (ou lança erro).
+  async function generateOne(text: string): Promise<string> {
+    const response = await fetch(`/api/media-generate/${projectId}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        prompt: text,
+        userKey: localStorage.getItem("nexaform:ai-key") || null,
+        userProvider: localStorage.getItem("nexaform:ai-provider") || null,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "Não foi possível gerar a imagem.");
+    return data.url as string;
+  }
+
+  // Gera TODAS as imagens do site de uma vez (não só a principal) e aplica cada
+  // uma no seu bloco. É o "gerar tudo" pedido: um clique cuida do site inteiro.
+  async function generateAllImages() {
+    if (!imageItems.length) {
+      toast.error("Não encontrei imagens para gerar neste site.");
+      return;
+    }
+    setBatch({ running: true, done: 0, total: imageItems.length });
+    let ok = 0;
+    let failed = 0;
+    try {
+      // Gera com concorrência limitada para não estourar limites do provedor.
+      const queue = [...imageItems];
+      const results: { item: ProjectMediaItem; url: string }[] = [];
+      async function worker() {
+        while (queue.length) {
+          const item = queue.shift()!;
+          try {
+            const url = await generateOne(buildMediaPrompt(item, projectName, "image"));
+            results.push({ item, url });
+          } catch {
+            failed += 1;
+          } finally {
+            setBatch((b) => ({ ...b, done: b.done + 1 }));
+          }
+        }
+      }
+      await Promise.all([worker(), worker(), worker()]);
+      // Aplica em sequência (cada replace atualiza o projeto).
+      for (const { item, url } of results) {
+        await onReplace(item, url);
+        ok += 1;
+      }
+      if (ok) toast.success(`${ok} imagem(ns) gerada(s) e aplicada(s) no site`, { description: failed ? `${failed} não puderam ser geradas.` : undefined });
+      else toast.error("Nenhuma imagem pôde ser gerada agora.", { description: "Verifique sua chave do OpenRouter em Configurações." });
+    } catch (error: any) {
+      toast.error("Falha ao gerar as imagens", { description: error?.message });
+    } finally {
+      setBatch({ running: false, done: 0, total: 0 });
+    }
+  }
 
   useEffect(() => {
     if (!selectedId && items[0]) setSelectedId(items[0].id);
@@ -182,6 +243,15 @@ export function MediaPanel({ projectId, projectName, files, assets, focusSource,
             <p className="mt-1 text-sm text-muted-foreground">
               Escolha um bloco e <strong>gere a imagem aqui mesmo com IA</strong> (Nano Banana). Ou copie o prompt para o ChatGPT/Genspark e arraste o resultado.
             </p>
+            {imageItems.length > 0 && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="brand" onClick={generateAllImages} disabled={batch.running}>
+                  {batch.running ? <Loader2 className="animate-spin" /> : <WandSparkles />}
+                  {batch.running ? `Gerando ${batch.done}/${batch.total}…` : `Gerar todas as imagens com IA (${imageItems.length})`}
+                </Button>
+                <span className="text-xs text-muted-foreground">Cuida do site inteiro de uma vez, não só a imagem principal.</span>
+              </div>
+            )}
           </div>
 
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -195,7 +265,12 @@ export function MediaPanel({ projectId, projectName, files, assets, focusSource,
                 )}
               >
                 <div className="flex aspect-video items-center justify-center overflow-hidden bg-secondary">
-                  {item.kind === "image" && /^https?:\/\//i.test(item.source) ? (
+                  {item.isSvg ? (
+                    <div
+                      className="h-full w-full [&>svg]:h-full [&>svg]:w-full [&>svg]:object-contain"
+                      dangerouslySetInnerHTML={{ __html: item.source }}
+                    />
+                  ) : item.kind === "image" && /^https?:\/\//i.test(item.source) ? (
                     <img src={item.source} alt="" className="h-full w-full object-cover" />
                   ) : item.kind === "video" && /^https?:\/\//i.test(item.source) ? (
                     <video src={item.source} className="h-full w-full object-cover" muted />
@@ -210,7 +285,7 @@ export function MediaPanel({ projectId, projectName, files, assets, focusSource,
                 <div className="space-y-1 p-2.5">
                   <div className="flex items-center gap-2">
                     <Badge variant="secondary" className="text-[10px]">
-                      {item.kind === "video" ? "Vídeo" : item.kind === "audio" ? "Áudio" : "Imagem"}
+                      {item.isSvg ? "Desenho → foto" : item.kind === "video" ? "Vídeo" : item.kind === "audio" ? "Áudio" : "Imagem"}
                     </Badge>
                     <span className="truncate text-[11px] text-muted-foreground">{item.filePath}</span>
                   </div>

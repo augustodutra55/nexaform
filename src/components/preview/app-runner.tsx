@@ -55,7 +55,7 @@ function buildSrcDoc(code: string, projectId?: string | null, editorSession = fa
   // Babel no modo CLÁSSICO (React.createElement) — sem import de jsx-runtime,
   // que não existe no navegador sem bundler.
   const codeJson = JSON.stringify(code);
-  const adScript = adGlobalScript(projectId);
+  const adScript = adGlobalScript(projectId, { admin: editorSession });
   const auditSource = runtimeAuditSource();
   const selectionSource = editorSession ? visualSelectionSource() : "";
   return `<!doctype html>
@@ -117,7 +117,10 @@ ${adScript}
         + out + '\\n; return typeof App !== "undefined" ? App : null;');
       var App = factory(React, ReactDOM);
       if (!App) { showError('O código não definiu um componente App.'); nxReport('O código não definiu um componente App.'); return; }
-      ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+      var __adRoot = ReactDOM.createRoot(document.getElementById('root'));
+      window.__adRerender = function(){ try { __adRoot.render(React.createElement(App)); } catch(e){} };
+      window.addEventListener('ad:settings-changed', window.__adRerender);
+      __adRoot.render(React.createElement(App));
       setTimeout(function(){ nxPostAudit(); nxReady(); }, 500);
     } catch (err) {
       var m = (err && err.message) || String(err);

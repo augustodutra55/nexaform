@@ -9,6 +9,9 @@ export interface ProjectMediaItem {
   context: string;
   kind: MediaKind;
   offset: number;
+  /** true quando o "source" é um bloco <svg>…</svg> desenhado à mão (ilustração
+   *  que o dono pode trocar por uma foto real gerada por IA). */
+  isSvg?: boolean;
 }
 
 export interface ProjectMediaAsset {
@@ -99,6 +102,59 @@ export function findProjectMedia(files: AppFile[], projectName: string): Project
       });
     }
 
+    // Imagens de FUNDO: style={{ backgroundImage: "url(...)" }} e Tailwind bg-[url('...')].
+    // Cobre fundos de hero/seções que não são <img>, para o dono poder trocar todas
+    // as imagens do site (não só a principal).
+    const backgroundPattern = /(?:background(?:-image|Image)?\s*:\s*[\s"'`]*?url\(\s*|bg-\[url\(\s*)["'`]?((?:ADIMG:|https?:\/\/)[^)"'`]+?)["'`]?\s*\)/gi;
+    while ((match = backgroundPattern.exec(file.content))) {
+      const source = match[1];
+      if (!source) continue;
+      const relative = match[0].indexOf(source);
+      const offset = match.index + Math.max(relative, 0);
+      const key = `${file.path}:${offset}:${source}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push({
+        id: key,
+        filePath: file.path,
+        source,
+        context: contextFor(file.content, offset, match[0], projectName),
+        kind: "image",
+        offset,
+      });
+    }
+
+    // ILUSTRAÇÕES EM SVG desenhadas à mão (a "mão", mascotes, cenas): o dono
+    // precisa poder trocar por uma foto real. Detectamos blocos <svg>…</svg>
+    // "grandes" (com gradiente, várias paths ou tamanho relevante) e ignoramos
+    // ícones pequenos. O bloco inteiro vira o "source", trocável por <img> depois.
+    const svgPattern = /<svg\b[\s\S]*?<\/svg>/gi;
+    let svgCount = 0;
+    while ((match = svgPattern.exec(file.content))) {
+      if (svgCount >= 12) break;
+      const block = match[0];
+      const pathCount = (block.match(/<path\b/gi) || []).length;
+      const isIllustration =
+        block.length >= 500 ||
+        /<(?:linear|radial)gradient|<pattern\b|<image\b/i.test(block) ||
+        pathCount >= 3;
+      if (!isIllustration) continue;
+      const offset = match.index;
+      const key = `${file.path}:${offset}:svg`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      svgCount += 1;
+      items.push({
+        id: key,
+        filePath: file.path,
+        source: block,
+        context: contextFor(file.content, offset, block, projectName),
+        kind: "image",
+        offset,
+        isSvg: true,
+      });
+    }
+
     const propertyPattern = /(?:image|imagem|photo|foto|video|vídeo|audio|áudio|src)\s*:\s*["'`]([^"'`]+)["'`]/gi;
     while ((match = propertyPattern.exec(file.content))) {
       const source = match[1];
@@ -138,8 +194,21 @@ export function buildMediaPrompt(item: ProjectMediaItem | null, projectName: str
   return `Create a professional photorealistic image for ${projectName}. The image must accurately represent "${context}" and match that specific content block. ${aspect}, high-detail premium commercial photography, natural realistic lighting, clean composition, no text, no watermark, no logos.`;
 }
 
+/** Quando o bloco é um <svg> (ilustração), a troca não é um simples texto: o SVG
+ *  inteiro vira uma <img> com a foto gerada, herdando o className do <svg> (para
+ *  manter tamanho/proporção) e o contexto como alt. */
+function svgToImg(item: ProjectMediaItem, url: string): string {
+  const open = item.source.match(/<svg[^>]*>/i)?.[0] || "";
+  const classMatch = open.match(/className\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*`([^`]*)`\s*\})/i);
+  let cls = classMatch?.[1] || classMatch?.[2] || classMatch?.[3] || "";
+  if (!/object-(cover|contain)/.test(cls)) cls = (cls + " w-full h-full object-cover").trim();
+  const alt = (item.context || "").replace(/["<>]/g, "").slice(0, 120);
+  return `<img src="${url}" alt="${alt}" className="${cls}" />`;
+}
+
 export function replaceProjectMedia(files: AppFile[], item: ProjectMediaItem, nextUrl: string): AppFile[] | null {
   let changed = false;
+  const replacement = item.isSvg ? svgToImg(item, nextUrl) : nextUrl;
   const next = files.map((file) => {
     if (file.path !== item.filePath) return file;
     let offset = item.offset;
@@ -148,7 +217,7 @@ export function replaceProjectMedia(files: AppFile[], item: ProjectMediaItem, ne
     changed = true;
     return {
       ...file,
-      content: file.content.slice(0, offset) + nextUrl + file.content.slice(offset + item.source.length),
+      content: file.content.slice(0, offset) + replacement + file.content.slice(offset + item.source.length),
     };
   });
   return changed ? next : null;

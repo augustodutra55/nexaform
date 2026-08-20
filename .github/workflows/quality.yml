@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
-    name: Build e interações reais
+  core:
+    name: Build, contratos e componentes
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -56,10 +56,30 @@ jobs:
       - name: Compilar para produção
         run: npm run build
 
+  interactions:
+    name: Interações reais no navegador
+    needs: core
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
       - name: Instalar Chromium do Playwright
         run: npx playwright install --with-deps chromium
 
-      - name: Testar login, menus, formulários, CRUD e navegação
+      - name: Testar login, menus, formulários, CRUD, mobile e editor visual
         run: npm run test:e2e
 
       - name: Publicar relatório do Playwright em caso de falha

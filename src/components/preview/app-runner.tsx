@@ -19,6 +19,7 @@ import { bundleApp, buildBundledSrcDoc } from "@/lib/preview/bundler";
 import { buildMultiFileSrcDoc } from "@/lib/preview/multi-file-srcdoc";
 import { adGlobalScript } from "@/lib/preview/ad-global";
 import { runtimeAuditSource, type RuntimeAuditReport } from "@/lib/preview/runtime-audit";
+import { previewGateAction } from "@/lib/preview/quality-gate";
 import { usePreviewBridge } from "@/components/preview/use-preview-bridge";
 import {
   normalizePreviewSelection,
@@ -163,6 +164,7 @@ export function AppRunner({
   const desktopAuditRef = useRef<RuntimeAuditReport | null>(null);
   const mobileAuditRef = useRef<RuntimeAuditReport | null>(null);
   const pendingReadyRef = useRef(false);
+  const autoSmokeTriggeredRef = useRef(false);
   onErrorRef.current = onError;
   onReadyRef.current = onReady;
   onAuditRef.current = onAudit;
@@ -171,12 +173,9 @@ export function AppRunner({
     onErrorRef.current?.(message);
   }, []);
   const reportPreviewReady = useCallback(() => {
-    if (!desktopAuditRef.current || !mobileAuditRef.current) {
-      pendingReadyRef.current = true;
-      return;
-    }
-    setHealth("healthy");
-    onReadyRef.current?.();
+    // A montagem do React é somente o primeiro sinal. A aprovação acontece no
+    // callback de auditoria, depois de desktop, mobile e smoke automático.
+    pendingReadyRef.current = true;
   }, []);
   const reportPreviewAudit = useCallback((report: RuntimeAuditReport) => {
     const firstDesktop = report.viewport.width > 500 && !desktopAuditRef.current;
@@ -203,7 +202,21 @@ export function AppRunner({
     if (combined.smoke) setSmokeRunning(false);
     setAuditPhase("done");
     onAuditRef.current?.(combined);
-    if (pendingReadyRef.current && !combined.issues.some((issue) => issue.severity === "error")) {
+    const gate = previewGateAction({
+      pendingReady: pendingReadyRef.current,
+      hasDesktopAudit: !!desktopAuditRef.current,
+      hasMobileAudit: !!mobileAuditRef.current,
+      hasBlockingIssue: combined.issues.some((issue) => issue.severity === "error"),
+      hasSmokeResult: !!combined.smoke,
+      smokeTriggered: autoSmokeTriggeredRef.current,
+    });
+    if (gate === "run-smoke") {
+      autoSmokeTriggeredRef.current = true;
+      setSmokeRunning(true);
+      iframeRef.current?.contentWindow?.postMessage({ __nx_run_smoke: true }, "*");
+      return;
+    }
+    if (gate === "approve") {
       pendingReadyRef.current = false;
       setHealth("healthy");
       onReadyRef.current?.();
@@ -217,9 +230,14 @@ export function AppRunner({
 
   useEffect(() => {
     if (!smokeRunning) return;
-    const timeout = window.setTimeout(() => setSmokeRunning(false), 8_000);
+    const timeout = window.setTimeout(() => {
+      setSmokeRunning(false);
+      if (autoSmokeTriggeredRef.current && !auditReport?.smoke) {
+        reportPreviewError("O teste automático de navegação não terminou dentro do limite.");
+      }
+    }, 8_000);
     return () => window.clearTimeout(timeout);
-  }, [smokeRunning]);
+  }, [auditReport?.smoke, reportPreviewError, smokeRunning]);
   usePreviewBridge(iframeRef, projectId, reportPreviewError, editorSession, reportPreviewReady, reportPreviewAudit);
 
   useEffect(() => {
@@ -258,6 +276,8 @@ export function AppRunner({
     desktopAuditRef.current = null;
     mobileAuditRef.current = null;
     pendingReadyRef.current = false;
+    autoSmokeTriggeredRef.current = false;
+    setSmokeRunning(false);
     if (hasFiles) {
       setBundling(true);
       const list = files!;

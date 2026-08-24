@@ -24,10 +24,7 @@ async function assertRuntime(page: Page, fixture: GoldenFixture) {
   await expect(page.getByTestId("golden-runtime-ready")).toBeAttached({ timeout: 45_000 });
   await expect(page.getByTestId("golden-runtime-error")).toHaveCount(0);
   await expect(page.getByTestId("golden-runtime-audit")).toHaveText("0:0");
-
-  const smokeButton = page.getByRole("button", { name: "Testar navegação do aplicativo" });
-  await expect(smokeButton).toBeVisible();
-  await smokeButton.click();
+  // O gate só marca o preview como pronto depois de executar o smoke seguro.
   await expect(page.getByTestId("golden-runtime-smoke")).toHaveText(/^[1-9]\d*:\d+:\d+:\d+$/, { timeout: 15_000 });
 
   const frame = page.frameLocator('iframe[title="Preview do app"]');

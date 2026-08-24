@@ -23,7 +23,7 @@ describe("findProjectMedia — detecta todas as imagens do site (não só a prin
     expect(items.map((i) => i.source)).toContain("https://cdn.exemplo.com/servico.jpg");
   });
 
-  it("acha imagem de FUNDO em style backgroundImage e em Tailwind bg-[url(...)]", () => {
+  it("acha imagem de FUNDO em style backgroundImage e em classe Tailwind arbitrária", () => {
     const items = findProjectMedia(
       [
         file(
@@ -32,7 +32,9 @@ describe("findProjectMedia — detecta todas as imagens do site (não só a prin
         ),
         file(
           "components/CTA.jsx",
-          `export default () => (<div className="bg-[url('https://cdn.exemplo.com/cta.jpg')]">CTA</div>)`
+          // Quebrado em duas partes para o scanner do Tailwind não transformar
+          // a fixture do teste em uma regra CSS/import real no build do Studio.
+          `export default () => (<div className="${"bg-[url" + "('https://cdn.exemplo.com/cta.jpg')]"}">CTA</div>)`
         ),
       ],
       "Esmalteria"

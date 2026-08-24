@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compactProviderSystemPrompt, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairBaseFiles, qualityRepairInstruction, recoverStagedMissingImports, rollbackMissingImportFiles, shouldTryFreeModelsAfterPaidDiagnostics, stagedRuntimeQualityReport, streamAppWithOpenRouter, streamOpenRouter } from "./code-providers";
+import { compactProviderSystemPrompt, MAX_QUALITY_REPAIR_ATTEMPTS, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairBaseFiles, qualityRepairInstruction, recoverStagedMissingImports, rollbackMissingImportFiles, shouldContinueQualityRepair, shouldTryFreeModelsAfterPaidDiagnostics, stagedRuntimeQualityReport, streamAppWithOpenRouter, streamOpenRouter } from "./code-providers";
 import { BUDGET_MODEL_OPENROUTER, PREMIUM_MODEL_OPENROUTER } from "./models";
 import type { AppGenerationResult, ProjectQualityReport } from "./app-types";
 
@@ -16,6 +16,15 @@ const report: ProjectQualityReport = {
 };
 
 describe("reparo dirigido do quality gate", () => {
+  it("limita erros fatais a duas autocorreções e avisos a uma", () => {
+    expect(MAX_QUALITY_REPAIR_ATTEMPTS).toBe(2);
+    expect(shouldContinueQualityRepair(report, 0)).toBe(true);
+    expect(shouldContinueQualityRepair(report, 1)).toBe(true);
+    expect(shouldContinueQualityRepair(report, 2)).toBe(false);
+    const runnable = { ...report, errors: [{ code: "missing_required_section", message: "FAQ ausente" }] };
+    expect(shouldContinueQualityRepair(runnable, 0)).toBe(true);
+    expect(shouldContinueQualityRepair(runnable, 1)).toBe(false);
+  });
   it("mantém AD_FILE na fundação vazia da construção por etapas", () => {
     const instruction = qualityRepairInstruction({
       message: "CONSTRUÇÃO POR ETAPAS — ETAPA 1/7",

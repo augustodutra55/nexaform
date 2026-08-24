@@ -102,7 +102,7 @@ export function findProjectMedia(files: AppFile[], projectName: string): Project
       });
     }
 
-    // Imagens de FUNDO: style={{ backgroundImage: "url(...)" }} e Tailwind bg-[url('...')].
+    // Imagens de FUNDO: backgroundImage inline e classe arbitrária do Tailwind.
     // Cobre fundos de hero/seções que não são <img>, para o dono poder trocar todas
     // as imagens do site (não só a principal).
     const backgroundPattern = /(?:background(?:-image|Image)?\s*:\s*[\s"'`]*?url\(\s*|bg-\[url\(\s*)["'`]?((?:ADIMG:|https?:\/\/)[^)"'`]+?)["'`]?\s*\)/gi;

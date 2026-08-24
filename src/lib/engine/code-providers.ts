@@ -379,6 +379,19 @@ export function qualityRepairInstruction(a: Pick<Args, "message" | "currentFiles
   ].join("\n\n");
 }
 
+/** Limite de autocorreções dirigidas por resposta. Dois turnos cobrem erros
+ * fatais em cascata sem criar loops, latência ou cobrança imprevisíveis. */
+export const MAX_QUALITY_REPAIR_ATTEMPTS = 2;
+
+export function shouldContinueQualityRepair(
+  report: Pick<ProjectQualityReport, "valid" | "errors">,
+  completedAttempts: number
+): boolean {
+  if (report.valid) return false;
+  const limit = isRunnableReport(report) ? 1 : MAX_QUALITY_REPAIR_ATTEMPTS;
+  return completedAttempts < limit;
+}
+
 function qualityFailureSummary(report: ProjectQualityReport): string {
   return report.errors
     .slice(0, 6)
@@ -636,28 +649,33 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
     if (!text) { diag.push(`Claude: ${model} respondeu vazio.`); return null; }
     const r = parse(text, "claude", cost, model, a.currentFiles ?? null);
     if (r) {
-      const quality = assessCandidate(r, a);
-      if (quality.valid) return r;
-      diag.push(`Claude: ${model} gerou código estruturalmente inválido [${qualityFailureSummary(quality)}]; quality gate iniciou uma correção.`);
-      const qualityRes = await send([
-        ...initialMessages,
-        { role: "assistant", content: text.slice(0, 100_000) },
-        { role: "user", content: qualityRepairInstruction(a, quality) },
-      ], providerTimeoutMs(a, true, model));
-      if (!qualityRes.ok) {
-        diag.push(`Claude: correção estrutural com ${model} → HTTP ${qualityRes.status}. ${await errDetail(qualityRes)}`);
-        return null;
+      const initialQuality = assessCandidate(r, a);
+      if (initialQuality.valid) return r;
+      let candidate = r;
+      let quality = initialQuality;
+      let totalCost = cost;
+      const repairMessages: any[] = [...initialMessages, { role: "assistant", content: text.slice(0, 100_000) }];
+      diag.push(`Claude: ${model} gerou código estruturalmente inválido [${qualityFailureSummary(quality)}]; quality gate iniciou a autocorreção.`);
+      for (let attempt = 0; shouldContinueQualityRepair(quality, attempt); attempt++) {
+        const instruction = qualityRepairInstruction({ ...a, currentFiles: qualityRepairBaseFiles(candidate, a.currentFiles) }, quality);
+        const qualityRes = await send([...repairMessages, { role: "user", content: instruction }], providerTimeoutMs(a, true, model));
+        if (!qualityRes.ok) {
+          diag.push(`Claude: autocorreção ${attempt + 1}/${MAX_QUALITY_REPAIR_ATTEMPTS} com ${model} → HTTP ${qualityRes.status}. ${await errDetail(qualityRes)}`);
+          break;
+        }
+        const qualityData = await qualityRes.json();
+        const qualityText = responseText(qualityData?.content?.[0]?.text ?? qualityData?.content);
+        totalCost += estimateCost(model, qualityData?.usage?.input_tokens ?? 0, qualityData?.usage?.output_tokens ?? 0);
+        if (!qualityText) break;
+        const corrected = parse(qualityText, "claude", totalCost, model, qualityRepairBaseFiles(candidate, a.currentFiles));
+        if (!corrected) break;
+        candidate = corrected;
+        quality = assessCandidate(candidate, a, true);
+        if (quality.valid) return candidate;
+        repairMessages.push({ role: "user", content: instruction }, { role: "assistant", content: qualityText.slice(0, 100_000) });
+        diag.push(`Claude: autocorreção ${attempt + 1}/${MAX_QUALITY_REPAIR_ATTEMPTS} ainda deixou [${qualityFailureSummary(quality)}].`);
       }
-      const qualityData = await qualityRes.json();
-      const qualityText = responseText(qualityData?.content?.[0]?.text ?? qualityData?.content);
-      const qualityCost = estimateCost(model, qualityData?.usage?.input_tokens ?? 0, qualityData?.usage?.output_tokens ?? 0);
-      // A segunda resposta corrige o candidato imediatamente anterior. Aplicar
-      // esses patches sobre o snapshot original descartava arquivos recém-
-      // criados na etapa e fazia o mesmo quality gate falhar novamente.
-      const corrected = qualityText ? parse(qualityText, "claude", cost + qualityCost, model, qualityRepairBaseFiles(r, a.currentFiles)) : null;
-      const correctedQuality = corrected ? assessCandidate(corrected, a, true) : null;
-      if (corrected && correctedQuality?.valid) return corrected;
-      const recovered = recoverStagedMissingImports(corrected ?? r, a);
+      const recovered = recoverStagedMissingImports(candidate, a);
       if (recovered) {
         diag.push(`Claude: ${model} teve apenas arquivos com imports quebrados revertidos; alterações válidas da etapa foram preservadas.`);
         return recovered;
@@ -665,13 +683,13 @@ async function callClaude(apiKey: string, a: Args, model: string, diag: string[]
       // ENTREGAR EM VEZ DE FALHAR: se o site RODA (sem erro fatal), entregamos a
       // melhor versão mesmo com avisos de completude, para o usuário poder iterar,
       // em vez de recusar tudo e cobrar crédito. (Só falha quando o app não abre.)
-      const deliverable = corrected && correctedQuality && isRunnableReport(correctedQuality) ? corrected
-        : isRunnableReport(quality) ? r : null;
+      const deliverable = isRunnableReport(quality) ? candidate
+        : isRunnableReport(initialQuality) ? r : null;
       if (deliverable) {
         diag.push(`Claude: ${model} entregue com avisos de completude (roda), em vez de falhar.`);
         return deliverable;
       }
-      diag.push(`Claude: ${model} não passou no quality gate após uma correção automática${correctedQuality ? ` [${qualityFailureSummary(correctedQuality)}]` : ""}.`);
+      diag.push(`Claude: ${model} não passou no quality gate após a autocorreção [${qualityFailureSummary(quality)}].`);
       return null;
     }
 
@@ -749,29 +767,35 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
     }
     const r = parse(text, "openrouter", cost, model, a.currentFiles ?? null);
     if (r) {
-      const quality = assessCandidate(r, a);
-      if (quality.valid) return r;
-      diag.push(`OpenRouter: ${model} gerou código estruturalmente inválido [${qualityFailureSummary(quality)}]; quality gate iniciou uma correção.`);
-      const qualityRes = await send([
-        ...initialMessages,
-        { role: "assistant", content: text.slice(0, 100_000) },
-        { role: "user", content: qualityRepairInstruction(a, quality) },
-      ], providerTimeoutMs(a, true, model));
-      if (!qualityRes.ok) {
-        diag.push(`OpenRouter: correção estrutural com ${model} → HTTP ${qualityRes.status}. ${await errDetail(qualityRes)}`);
-        return null;
+      const initialQuality = assessCandidate(r, a);
+      if (initialQuality.valid) return r;
+      let candidate = r;
+      let quality = initialQuality;
+      let totalCost = cost;
+      const repairMessages: any[] = [...initialMessages, { role: "assistant", content: text.slice(0, 100_000) }];
+      diag.push(`OpenRouter: ${model} gerou código estruturalmente inválido [${qualityFailureSummary(quality)}]; quality gate iniciou a autocorreção.`);
+      for (let attempt = 0; shouldContinueQualityRepair(quality, attempt); attempt++) {
+        const instruction = qualityRepairInstruction({ ...a, currentFiles: qualityRepairBaseFiles(candidate, a.currentFiles) }, quality);
+        const qualityRes = await send([...repairMessages, { role: "user", content: instruction }], providerTimeoutMs(a, true, model));
+        if (!qualityRes.ok) {
+          diag.push(`OpenRouter: autocorreção ${attempt + 1}/${MAX_QUALITY_REPAIR_ATTEMPTS} com ${model} → HTTP ${qualityRes.status}. ${await errDetail(qualityRes)}`);
+          break;
+        }
+        const qualityData = await qualityRes.json();
+        const qualityText = responseText(qualityData?.choices?.[0]?.message?.content);
+        totalCost += typeof qualityData?.usage?.cost === "number"
+          ? qualityData.usage.cost
+          : estimateCost(model, qualityData?.usage?.prompt_tokens ?? 0, qualityData?.usage?.completion_tokens ?? 0);
+        if (!qualityText) break;
+        const corrected = parse(qualityText, "openrouter", totalCost, model, qualityRepairBaseFiles(candidate, a.currentFiles));
+        if (!corrected) break;
+        candidate = corrected;
+        quality = assessCandidate(candidate, a, true);
+        if (quality.valid) return candidate;
+        repairMessages.push({ role: "user", content: instruction }, { role: "assistant", content: qualityText.slice(0, 100_000) });
+        diag.push(`OpenRouter: autocorreção ${attempt + 1}/${MAX_QUALITY_REPAIR_ATTEMPTS} ainda deixou [${qualityFailureSummary(quality)}].`);
       }
-      const qualityData = await qualityRes.json();
-      const qualityText = responseText(qualityData?.choices?.[0]?.message?.content);
-      const qualityCost = typeof qualityData?.usage?.cost === "number"
-        ? qualityData.usage.cost
-        : estimateCost(model, qualityData?.usage?.prompt_tokens ?? 0, qualityData?.usage?.completion_tokens ?? 0);
-      // O reparo é incremental sobre o candidato, não sobre o snapshot anterior
-      // à geração. Assim um patch pode corrigir também um arquivo criado agora.
-      const corrected = qualityText ? parse(qualityText, "openrouter", cost + qualityCost, model, qualityRepairBaseFiles(r, a.currentFiles)) : null;
-      const correctedQuality = corrected ? assessCandidate(corrected, a, true) : null;
-      if (corrected && correctedQuality?.valid) return corrected;
-      const recovered = recoverStagedMissingImports(corrected ?? r, a);
+      const recovered = recoverStagedMissingImports(candidate, a);
       if (recovered) {
         diag.push(`OpenRouter: ${model} teve apenas arquivos com imports quebrados revertidos; alterações válidas da etapa foram preservadas.`);
         return recovered;
@@ -779,13 +803,13 @@ async function callOpenRouter(apiKey: string, a: Args, model: string, diag: stri
       // ENTREGAR EM VEZ DE FALHAR: se o site RODA (sem erro fatal), entregamos a
       // melhor versão mesmo com avisos de completude, para o usuário iterar, em vez
       // de recusar tudo e cobrar crédito. (Só falha quando o app não abre.)
-      const deliverable = corrected && correctedQuality && isRunnableReport(correctedQuality) ? corrected
-        : isRunnableReport(quality) ? r : null;
+      const deliverable = isRunnableReport(quality) ? candidate
+        : isRunnableReport(initialQuality) ? r : null;
       if (deliverable) {
         diag.push(`OpenRouter: ${model} entregue com avisos de completude (roda), em vez de falhar.`);
         return deliverable;
       }
-      diag.push(`OpenRouter: ${model} não passou no quality gate após uma correção automática${correctedQuality ? ` [${qualityFailureSummary(correctedQuality)}]` : ""}.`);
+      diag.push(`OpenRouter: ${model} não passou no quality gate após a autocorreção [${qualityFailureSummary(quality)}].`);
       return null;
     }
 

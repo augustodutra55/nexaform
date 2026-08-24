@@ -8,10 +8,18 @@ const PROTECTED_PREFIXES = ["/dashboard", "/projeto", "/settings", "/onboarding"
 /** Rotas de auth — usuário logado é redirecionado ao dashboard. */
 const AUTH_ROUTES = ["/login", "/cadastro", "/recuperar-senha"];
 
+/** O harness do Playwright não usa banco real. Mantemos o bypass restrito aos
+ * IDs reservados de E2E, sem afrouxar autenticação nas rotas normais. */
+export function shouldBypassSupabase(pathname: string, e2eMode = process.env.E2E_TEST_MODE): boolean {
+  return e2eMode === "1" && (
+    pathname.startsWith("/e2e-runtime") || pathname.startsWith("/preview/e2e/")
+  );
+}
+
 export async function updateSession(request: NextRequest) {
   // O harness de interação só existe durante a suíte Playwright e não depende
   // de credenciais reais do Supabase no CI.
-  if (process.env.E2E_TEST_MODE === "1" && request.nextUrl.pathname.startsWith("/e2e-runtime")) {
+  if (shouldBypassSupabase(request.nextUrl.pathname)) {
     return NextResponse.next({ request });
   }
 

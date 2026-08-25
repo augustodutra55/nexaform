@@ -116,7 +116,9 @@ export function buildGenerationPlan(message: string, mediaAssets: GenerationMedi
   if (has(normalized, /\bfaq\b|perguntas frequentes/)) requiredCapabilities.push("seção de FAQ realmente renderizada");
   if (has(normalized, /prova social|depoimentos?|testimonials?/)) requiredCapabilities.push("seção de prova social/depoimentos realmente renderizada");
   if (has(normalized, /benef[ií]cios?|vantagens?/)) requiredCapabilities.push("seção de benefícios realmente renderizada");
-  if (has(normalized, /\b(áudio|audio|voz|microfone|pron[uú]ncia|falar)/)) requiredCapabilities.push("voz pelo runtime AD.voice com fallback e feedback");
+  if (has(normalized, /\b(voz|microfone|pron[uú]ncia|ditado|falar)/)) requiredCapabilities.push("voz pelo runtime AD.voice com fallback e feedback");
+  if (has(normalized, /\b(podcast|epis[oó]dios?|feed rss|rss|player de [aá]udio)/)) requiredCapabilities.push("podcast com player, catálogo e fonte de áudio real");
+  if (has(normalized, /\b(transmiss[aã]o ao vivo|live|obs|youtube live|twitch)/)) requiredCapabilities.push("live externa responsiva, com estados ao vivo/offline e fallback");
   if (has(normalized, /\b(v[ií]deo|video|vsl)/)) requiredCapabilities.push("mídia em vídeo responsiva, com controles e fallback");
   if (has(normalized, /\b(3d|tr[eê]s dimens|imersiv|cinematogr[aá]fic)/)) visualDirection.push("3D ou profundidade visual somente onde trouxer impacto");
   if (has(normalized, /\b(premium|luxo|profissional|vend[aá]vel|moderno|ag[eê]ncia)/)) visualDirection.push("acabamento premium, autoral e comercial");

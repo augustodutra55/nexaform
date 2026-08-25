@@ -133,7 +133,8 @@ export function PreviewPane({ projectId, versionId, title }: PreviewPaneProps) {
             title="Preview do app"
             src={src}
             sandbox="allow-scripts allow-popups allow-modals allow-downloads"
-            allow="microphone; autoplay; clipboard-write"
+            allow="microphone; autoplay; encrypted-media; picture-in-picture; clipboard-write"
+            allowFullScreen
             onLoad={() => setLoading(false)}
             className="h-full w-full border-0 bg-white"
           />

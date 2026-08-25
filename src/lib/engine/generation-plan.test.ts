@@ -69,4 +69,11 @@ describe("buildGenerationPlan", () => {
     const plan = buildGenerationPlan("Landing com formulário de contato e FAQ");
     expect(plan.requiredCapabilities).not.toContain("autenticação e estados de sessão");
   });
+
+  it("distingue podcast de reconhecimento de voz e planeja live via OBS", () => {
+    const plan = buildGenerationPlan("Site com podcast, episódios em áudio e transmissão ao vivo usando OBS no YouTube Live");
+    expect(plan.requiredCapabilities).toContain("podcast com player, catálogo e fonte de áudio real");
+    expect(plan.requiredCapabilities).toContain("live externa responsiva, com estados ao vivo/offline e fallback");
+    expect(plan.requiredCapabilities).not.toContain("voz pelo runtime AD.voice com fallback e feedback");
+  });
 });

@@ -46,4 +46,12 @@ describe("prompt do motor — admin embutido (AD.settings) e imagens", () => {
     expect(CODE_REFINE_SYSTEM_PROMPT).toContain("AD.settings");
     expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/não crie painel de admin|__settings/i);
   });
+
+  it("trata podcast e live via OBS sem inventar mídia ou transmissão no navegador", () => {
+    expect(CODE_SYSTEM_PROMPT).toMatch(/PODCAST E TRANSMISSÃO AO VIVO/);
+    expect(CODE_SYSTEM_PROMPT).toMatch(/OBS transmite por RTMP/);
+    expect(CODE_SYSTEM_PROMPT).toMatch(/estados claros "ao vivo", "offline\/próxima transmissão"/);
+    expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/PODCAST\/LIVE/);
+    expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/não finja transmitir pelo navegador/);
+  });
 });

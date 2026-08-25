@@ -8,6 +8,7 @@ import {
   type CollectionAccess,
 } from "@/lib/engine/collection-access";
 import { validateDataRecord } from "@/lib/engine/data-contract";
+import { findDeleteReference, validateDataConstraints } from "@/lib/engine/data-constraints";
 
 /**
  * Backend de dados embutido dos apps gerados. A service role toca app_data
@@ -160,6 +161,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   if (!access.allowed) return denied(access);
   const invalid = validateRecord(data, access);
   if (invalid) return invalid;
+  const constraint = await validateDataConstraints(admin, projectId, data, access.permissions!.data_contract);
+  if (constraint) return NextResponse.json(
+    { error: "Dados conflitantes com as relações desta coleção.", fieldErrors: constraint.fieldErrors },
+    { status: 409 }
+  );
 
   const { count } = await admin
     .from("app_data")
@@ -220,6 +226,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ pr
   if (JSON.stringify(finalData).length > MAX_BYTES) return bad("Registro grande demais", 413);
   const invalid = validateRecord(finalData, access);
   if (invalid) return invalid;
+  const constraint = await validateDataConstraints(admin, projectId, finalData, access.permissions!.data_contract, id);
+  if (constraint) return NextResponse.json(
+    { error: "Dados conflitantes com as relações desta coleção.", fieldErrors: constraint.fieldErrors },
+    { status: 409 }
+  );
 
   const { data: row, error } = await admin
     .from("app_data")
@@ -261,6 +272,14 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
   if (!access.allowed) return denied(access);
   if (access.scopeToAppUser && existing.app_user_id !== access.appUserId) {
     return bad("Você só pode excluir seus próprios registros.", 403);
+  }
+
+  const referencedBy = await findDeleteReference(admin, projectId, existing.collection, id);
+  if (referencedBy) {
+    return NextResponse.json({
+      error: `Este registro ainda é usado por ${referencedBy.collection}.${referencedBy.field}.`,
+      fieldErrors: { id: "Remova ou altere os registros relacionados antes de excluir." },
+    }, { status: 409 });
   }
 
   const { error } = await admin.from("app_data").delete().eq("project_id", projectId).eq("id", id);

@@ -12,6 +12,11 @@ export type DataFieldType =
 export interface DataFieldRule {
   type: DataFieldType;
   required?: boolean;
+  unique?: boolean;
+  reference?: {
+    collection: string;
+    onDelete: "restrict";
+  };
   minLength?: number;
   maxLength?: number;
   min?: number;
@@ -33,6 +38,7 @@ export interface DataValidationResult {
 
 const FIELD_RE = /^[a-zA-Z][a-zA-Z0-9_]{0,79}$/;
 const ROLE_RE = /^[a-z][a-z0-9_-]{0,39}$/;
+const COLLECTION_RE = /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const TYPES: DataFieldType[] = [
@@ -115,7 +121,23 @@ export function normalizeDataContract(
     const normalized: DataFieldRule = {
       type: rule.type as DataFieldType,
       required: rule.required === true,
+      unique: rule.unique === true,
     };
+    if (rule.reference !== undefined) {
+      const reference = rule.reference as Record<string, unknown>;
+      if (
+        normalized.type !== "uuid" ||
+        !reference ||
+        typeof reference !== "object" ||
+        Array.isArray(reference) ||
+        typeof reference.collection !== "string" ||
+        !COLLECTION_RE.test(reference.collection)
+      ) {
+        errors[`${prefix}.reference`] = "Referência exige tipo uuid e uma coleção válida.";
+      } else {
+        normalized.reference = { collection: reference.collection, onDelete: "restrict" };
+      }
+    }
     for (const key of ["minLength", "maxLength", "min", "max"] as const) {
       if (rule[key] !== undefined) {
         if (!finiteNumber(rule[key]) || (key.includes("Length") && (rule[key] as number) < 0)) {

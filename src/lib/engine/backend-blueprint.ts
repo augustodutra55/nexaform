@@ -7,6 +7,7 @@ import {
 } from "./data-contract";
 import type { CollectionProfile } from "./collection-access";
 import { buildAutomationBlueprint, type AppAutomationBlueprint } from "./automation-blueprint";
+import { buildPaymentBlueprint, type AppPaymentBlueprint } from "./payment-blueprint";
 
 export interface BackendCollectionBlueprint {
   collection: string;
@@ -25,6 +26,7 @@ export interface BackendBlueprint {
   usesAuth: boolean;
   collections: BackendCollectionBlueprint[];
   automations: AppAutomationBlueprint[];
+  payments: AppPaymentBlueprint | null;
   warnings: string[];
   status: "ready" | "review";
 }
@@ -328,12 +330,15 @@ export function buildBackendBlueprint(app: AppCode): BackendBlueprint {
   }
   const automation = buildAutomationBlueprint(app);
   warnings.push(...automation.warnings);
+  const payment = buildPaymentBlueprint(app);
+  warnings.push(...payment.warnings);
 
   return {
     version: 1,
     usesAuth,
     collections,
     automations: automation.automations,
+    payments: payment.payments,
     warnings,
     status: warnings.length ? "review" : "ready",
   };

@@ -154,6 +154,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     usesAuth: blueprint.usesAuth,
     collections: configured,
     automations: blueprint.automations,
+    payments: blueprint.payments,
     warnings: blueprint.warnings,
     updatedAt,
   };

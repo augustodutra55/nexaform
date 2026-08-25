@@ -64,6 +64,8 @@ export interface BackendProvisioningMeta {
   status: "ready" | "review";
   usesAuth: boolean;
   collections: string[];
+  automations?: import("@/lib/engine/automation-blueprint").AppAutomationBlueprint[];
+  payments?: import("@/lib/engine/payment-blueprint").AppPaymentBlueprint | null;
   warnings: string[];
   updatedAt: string;
 }

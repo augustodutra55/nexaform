@@ -111,7 +111,7 @@ export function adGlobalScript(
       },Math.max(60,120-elapsed));
     } else play();
   }
-  if(!PID){ window.AD = { list:function(){return Promise.resolve([]);}, get:function(){return Promise.resolve(null);}, count:function(){return Promise.resolve(0);}, insert:noop, update:noop, remove:noop, email:noop, voice:{listen:function(){return Promise.reject(new Error('Voz indisponível fora de um projeto.'));},speak:noop,cancel:noop}, enabled:false }; return; }
+  if(!PID){ window.AD = { list:function(){return Promise.resolve([]);}, get:function(){return Promise.resolve(null);}, count:function(){return Promise.resolve(0);}, insert:noop, update:noop, remove:noop, email:noop, payments:{checkout:noop}, voice:{listen:function(){return Promise.reject(new Error('Voz indisponível fora de um projeto.'));},speak:noop,cancel:noop}, enabled:false }; return; }
   function req(method, opts){
     opts = opts || {};
     return bridge('data',{method:method,qs:opts.qs||'',body:opts.body});
@@ -149,6 +149,15 @@ export function adGlobalScript(
     // Ex.: await AD.email({ name, email, subject, message }) → { ok, saved, emailed }
     email: function(payload){
       return bridge('email',{method:'POST',body:payload||{}});
+    },
+    // Pagamento real: o app informa somente a chave declarada no AD_BACKEND.
+    // O servidor resolve o priceId e as URLs de retorno e redireciona a página.
+    payments: {
+      checkout: function(priceKey, opts){
+        opts=opts||{};
+        return bridge('integration',{method:'POST',body:{action:'stripe.checkout',priceKey:String(priceKey||''),customerEmail:opts.customerEmail}})
+          .then(function(r){return r.checkout||r;});
+      }
     },
     // O microfone usa a página principal, pois reconhecimento de voz costuma ser
     // bloqueado em iframes sandbox. A leitura em voz alta fica local e síncrona:

@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { authorizeProjectOwner, isUuid } from "@/lib/engine/data-guard";
 import {
   createStripeCheckoutSession,
   dispatchAutomationWebhook,
-  integrationStatuses,
 } from "@/lib/integrations/commercial";
+import {
+  getProjectIntegration,
+  projectIntegrationStatuses,
+  removeProjectIntegration,
+  saveProjectIntegration,
+  type ProjectIntegrationProvider,
+} from "@/lib/integrations/project-secrets";
 
 export const runtime = "nodejs";
 
@@ -20,14 +27,20 @@ async function ownerContext(projectId: string) {
   if (!user) return { response: bad("Não autenticado.", 401) };
   const access = await authorizeProjectOwner(supabase, projectId, user.id, false);
   if (!access.allowed) return { response: bad(access.error || "Acesso negado.", access.status || 403) };
-  return { user };
+  const admin = createAdminClient();
+  if (!admin) return { response: bad("Cofre de integrações indisponível.", 503) };
+  return { user, admin };
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const context = await ownerContext(projectId);
   if (context.response) return context.response;
-  return NextResponse.json({ integrations: integrationStatuses() });
+  try {
+    return NextResponse.json({ integrations: await projectIntegrationStatuses(context.admin!, projectId) });
+  } catch (error: any) {
+    return bad(String(error?.message || error), 500);
+  }
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
@@ -39,25 +52,38 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   try { body = await req.json(); } catch { return bad("Corpo inválido."); }
 
   try {
+    if (body?.action === "secret.save" || body?.action === "secret.remove") {
+      const provider = String(body.provider || "") as ProjectIntegrationProvider;
+      if (!["stripe", "resend", "automation"].includes(provider)) return bad("Provedor inválido.");
+      if (body.action === "secret.remove") {
+        await removeProjectIntegration(context.admin!, projectId, provider);
+        return NextResponse.json({ ok: true, integrations: await projectIntegrationStatuses(context.admin!, projectId) });
+      }
+      await saveProjectIntegration(context.admin!, projectId, provider, body.config);
+      return NextResponse.json({ ok: true, integrations: await projectIntegrationStatuses(context.admin!, projectId) });
+    }
+
     if (body?.action === "stripe.checkout") {
+      const projectStripe = await getProjectIntegration<{ provider: "stripe"; secretKey: string }>(context.admin!, projectId, "stripe");
       const session = await createStripeCheckoutSession({
         projectId,
         priceId: String(body.priceId || ""),
         successUrl: String(body.successUrl || ""),
         cancelUrl: String(body.cancelUrl || ""),
         customerEmail: typeof body.customerEmail === "string" ? body.customerEmail : undefined,
-      });
+      }, projectStripe?.secretKey);
       return NextResponse.json({ ok: true, checkout: session });
     }
 
     if (body?.action === "automation.dispatch") {
+      const projectAutomation = await getProjectIntegration<{ provider: "automation"; targets: string[] }>(context.admin!, projectId, "automation");
       const target = String(body.target || "");
       await dispatchAutomationWebhook(target, {
         projectId,
         event: typeof body.event === "string" ? body.event.slice(0, 120) : "manual",
         data: body.data ?? null,
         sentAt: new Date().toISOString(),
-      });
+      }, projectAutomation?.targets);
       return NextResponse.json({ ok: true });
     }
 

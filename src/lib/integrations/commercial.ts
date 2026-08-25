@@ -105,8 +105,14 @@ export async function createStripeCheckoutSession(input: StripeCheckoutInput, se
   return { id: payload.id, url: payload.url };
 }
 
-export async function dispatchAutomationWebhook(target: string, payload: unknown, env: NodeJS.ProcessEnv = process.env): Promise<void> {
-  const url = assertAllowedAutomationTarget(target, env);
+export async function dispatchAutomationWebhook(target: string, payload: unknown, projectTargets?: string[], env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  const url = projectTargets
+    ? (() => {
+        const normalized = safeHttpsUrl(target, "Webhook");
+        if (!new Set(projectTargets.map((item) => safeHttpsUrl(item, "Webhook"))).has(normalized)) throw new Error("Webhook não autorizado.");
+        return normalized;
+      })()
+    : assertAllowedAutomationTarget(target, env);
   const response = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },

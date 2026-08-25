@@ -23,7 +23,8 @@ export function PrebuiltRunner({ bundle, projectId }: { bundle: string; projectI
       title="App publicado"
       ref={iframeRef}
       sandbox="allow-scripts allow-pointer-lock allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads"
-      allow="microphone; autoplay; clipboard-write"
+      allow="microphone; autoplay; encrypted-media; picture-in-picture; clipboard-write"
+      allowFullScreen
       srcDoc={srcDoc}
       className="h-full w-full border-0 bg-white"
     />

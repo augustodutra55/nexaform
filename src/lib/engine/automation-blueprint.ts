@@ -55,7 +55,16 @@ export function buildAutomationBlueprint(app: AppCode): { automations: AppAutoma
   return { automations, warnings };
 }
 
-export function automationWindow(now: Date, leadMinutes: number, intervalMinutes = 5) {
-  const start = new Date(now.getTime() + leadMinutes * 60_000);
-  return { start: start.toISOString(), end: new Date(start.getTime() + intervalMinutes * 60_000).toISOString() };
+export function automationWindow(now: Date, leadMinutes: number, intervalMinutes = 5, lookbackMinutes = 7 * 24 * 60) {
+  const target = now.getTime() + leadMinutes * 60_000;
+  return {
+    start: new Date(target - lookbackMinutes * 60_000).toISOString(),
+    end: new Date(target + intervalMinutes * 60_000).toISOString(),
+  };
+}
+
+/** Backoff curto o bastante para permanecer dentro da janela de recuperação. */
+export function automationRetryDelayMinutes(attemptCount: number): number | null {
+  const delays = [1, 5, 15, 60];
+  return delays[attemptCount - 1] ?? null;
 }

@@ -54,4 +54,11 @@ describe("prompt do motor — admin embutido (AD.settings) e imagens", () => {
     expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/PODCAST\/LIVE/);
     expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/não finja transmitir pelo navegador/);
   });
+
+  it("ensina automações agendadas idempotentes no manifesto do backend", () => {
+    expect(CODE_SYSTEM_PROMPT).toMatch(/AUTOMAÇÕES AGENDADAS/);
+    expect(CODE_SYSTEM_PROMPT).toContain('"automations"');
+    expect(CODE_SYSTEM_PROMPT).toContain('"leadMinutes":1440');
+    expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/AUTOMAÇÕES:/);
+  });
 });

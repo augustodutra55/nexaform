@@ -112,3 +112,29 @@ export async function dispatchAutomationWebhook(target: string, payload: unknown
   });
   if (!response.ok) throw new Error(`Webhook respondeu HTTP ${response.status}.`);
 }
+
+export async function sendAutomationEmail(input: {
+  to: string;
+  subject: string;
+  message: string;
+}, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  const key = env.RESEND_API_KEY?.trim();
+  const from = env.RESEND_FROM?.trim() || "AD Studio <onboarding@resend.dev>";
+  if (!key) throw new Error("Resend não configurado.");
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(input.to)) throw new Error("Destinatário inválido.");
+  const escape = (value: string) => value.replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[char] || char);
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      from,
+      to: [input.to],
+      subject: input.subject.slice(0, 160),
+      html: `<div style="font-family:Arial,sans-serif;line-height:1.6">${escape(input.message).replace(/\n/g, "<br>")}</div>`,
+    }),
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`Resend respondeu HTTP ${response.status}.`);
+}

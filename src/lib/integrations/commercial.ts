@@ -13,6 +13,7 @@ export interface StripeCheckoutInput {
   successUrl: string;
   cancelUrl: string;
   customerEmail?: string;
+  mode?: "payment" | "subscription";
 }
 
 const PRICE_ID_RE = /^price_[A-Za-z0-9]+$/;
@@ -56,7 +57,9 @@ function safeHttpsUrl(raw: string, field: string): string {
   let url: URL;
   try { url = new URL(raw); } catch { throw new Error(`${field} inválida.`); }
   if (url.protocol !== "https:" || url.username || url.password) throw new Error(`${field} deve usar HTTPS.`);
-  return url.toString();
+  // O placeholder oficial do Stripe é seguro e precisa chegar literal para que
+  // a sessão substitua o id no retorno. URL.toString() o codifica por padrão.
+  return url.toString().replace(/%7BCHECKOUT_SESSION_ID%7D/gi, "{CHECKOUT_SESSION_ID}");
 }
 
 export function allowedAutomationTargets(env: NodeJS.ProcessEnv = process.env): string[] {
@@ -78,7 +81,7 @@ export async function createStripeCheckoutSession(input: StripeCheckoutInput, se
   if (!secret?.trim()) throw new Error("Stripe não configurado.");
   const normalized = normalizeStripeCheckoutInput(input);
   const body = new URLSearchParams();
-  body.set("mode", "payment");
+  body.set("mode", normalized.mode === "subscription" ? "subscription" : "payment");
   body.set("success_url", normalized.successUrl);
   body.set("cancel_url", normalized.cancelUrl);
   body.set("line_items[0][price]", normalized.priceId);

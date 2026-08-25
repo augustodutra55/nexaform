@@ -45,6 +45,18 @@ describe("commercial integrations", () => {
     })).toThrow(/HTTPS/);
   });
 
+  it("preserva o placeholder oficial e o modo de assinatura", () => {
+    const normalized = normalizeStripeCheckoutInput({
+      projectId: "project-1",
+      priceId: "price_PRO123",
+      mode: "subscription",
+      successUrl: "https://app.example.com/sucesso?session_id={CHECKOUT_SESSION_ID}",
+      cancelUrl: "https://app.example.com/cancelado",
+    });
+    expect(normalized.mode).toBe("subscription");
+    expect(normalized.successUrl).toContain("{CHECKOUT_SESSION_ID}");
+  });
+
   it("limita webhooks a uma allowlist HTTPS exata", () => {
     const env = {
       AUTOMATION_WEBHOOK_ALLOWLIST: "https://hooks.example.com/ad, https://n8n.example.com/webhook/abc",

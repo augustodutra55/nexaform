@@ -2,11 +2,12 @@
 import { useEffect, type RefObject } from "react";
 import type { RuntimeAuditIssue, RuntimeAuditReport } from "@/lib/preview/runtime-audit";
 
-type BridgeKind = "data" | "upload" | "email" | "view" | "auth" | "voice" | "telemetry" | "settings";
+type BridgeKind = "data" | "upload" | "email" | "view" | "auth" | "voice" | "telemetry" | "settings" | "integration";
 const METHODS: Record<BridgeKind, string[]> = {
   data: ["GET", "POST", "PATCH", "DELETE"], upload: ["POST"],
   email: ["POST"], view: ["POST"], auth: ["GET", "POST"], voice: ["POST"], telemetry: ["POST"],
   settings: ["GET", "POST"],
+  integration: ["POST"],
 };
 const sessionKey = (projectId: string) => `adstudio:app-token:${projectId}`;
 
@@ -250,6 +251,7 @@ export function usePreviewBridge(
         email: `/api/email/${projectId}`, view: `/api/view/${projectId}`,
         auth: `/api/app-auth/${projectId}`, telemetry: `/api/telemetry/${projectId}`,
         settings: `/api/app-settings/${projectId}`,
+        integration: `/api/app-integrations/${projectId}`,
       };
       try {
         const headers = new Headers();
@@ -273,6 +275,9 @@ export function usePreviewBridge(
           const action = event.data.body?.action;
           if ((action === "signup" || action === "login") && typeof payload.token === "string") localStorage.setItem(sessionKey(projectId), payload.token);
           else if (action === "logout") localStorage.removeItem(sessionKey(projectId));
+        }
+        if (kind === "integration" && response.ok && typeof payload?.checkout?.url === "string") {
+          window.location.assign(payload.checkout.url);
         }
         reply(source, id, { ok: response.ok, status: response.status, payload,
           error: response.ok ? undefined : payload?.error || `Erro ${response.status}` });

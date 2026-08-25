@@ -24,6 +24,15 @@ export type DirectVisualStylePreset =
 
 export type DirectVisualStructureAction = "moveUp" | "moveDown" | "duplicate" | "remove";
 
+export interface DirectVisualStyleValues {
+  textColor?: string;
+  backgroundColor?: string;
+  fontSize?: number;
+  borderRadius?: number;
+  padding?: number;
+  textAlign?: "left" | "center" | "right";
+}
+
 export interface DirectVisualEditResult {
   changed: boolean;
   files: AppFile[];
@@ -240,6 +249,72 @@ function updateStaticClassName(opening: string, preset: DirectVisualStylePreset)
   const next = Array.from(new Set(retained.concat(config.add))).join(" ");
   if (match) return opening.replace(match[0], `className=${match[1]}${next}${match[1]}`);
   return opening.replace(/>$/, ` className="${next}">`);
+}
+
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+function customStyleConfig(values: DirectVisualStyleValues): { add: string[]; remove: RegExp[] } | null {
+  const add: string[] = [];
+  const remove: RegExp[] = [];
+  if (values.textColor) {
+    if (!HEX_COLOR.test(values.textColor)) return null;
+    add.push(`text-[${values.textColor.toLowerCase()}]`);
+    remove.push(/^text-(?:black|white|slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)(?:-\d{2,3})?(?:\/\d+)?$/, /^text-\[#[0-9a-f]{6}\]$/i);
+  }
+  if (values.backgroundColor) {
+    if (!HEX_COLOR.test(values.backgroundColor)) return null;
+    add.push(`bg-[${values.backgroundColor.toLowerCase()}]`);
+    remove.push(/^bg-(?:black|white|slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)(?:-\d{2,3})?(?:\/\d+)?$/, /^bg-\[#[0-9a-f]{6}\]$/i);
+  }
+  if (values.fontSize !== undefined) {
+    if (!Number.isInteger(values.fontSize) || values.fontSize < 10 || values.fontSize > 96) return null;
+    add.push(`text-[${values.fontSize}px]`);
+    remove.push(/^text-(?:xs|sm|base|lg|xl|[2-9]xl)$/, /^text-\[\d+px\]$/);
+  }
+  if (values.borderRadius !== undefined) {
+    if (!Number.isInteger(values.borderRadius) || values.borderRadius < 0 || values.borderRadius > 64) return null;
+    add.push(`rounded-[${values.borderRadius}px]`);
+    remove.push(/^rounded(?:-(?:none|sm|md|lg|xl|2xl|3xl|full))?$/, /^rounded-\[\d+px\]$/);
+  }
+  if (values.padding !== undefined) {
+    if (!Number.isInteger(values.padding) || values.padding < 0 || values.padding > 96) return null;
+    add.push(`p-[${values.padding}px]`);
+    remove.push(/^p-(?:px|\d+(?:\.5)?)$/, /^p-\[\d+px\]$/);
+  }
+  if (values.textAlign) {
+    if (!["left", "center", "right"].includes(values.textAlign)) return null;
+    add.push(`text-${values.textAlign}`);
+    remove.push(/^text-(?:left|center|right|justify|start|end)$/);
+  }
+  return add.length ? { add, remove } : null;
+}
+
+/** Aplica valores exatos como classes arbitrárias do Tailwind, após validação estrita. */
+export function applyDirectVisualStyleValues(
+  files: AppFile[],
+  selection: PreviewElementSelection,
+  values: DirectVisualStyleValues
+): DirectVisualEditResult {
+  const currentText = selection.text.trim();
+  const config = customStyleConfig(values);
+  if (!currentText || !config) return { changed: false, files, reason: "unsafe_value" };
+  const matches = files.flatMap((file) => Array.from(file.content.matchAll(openingTagPattern(currentText, selection.tag))).map((match) => ({ file, match })));
+  if (!matches.length) return { changed: false, files, reason: "source_not_found" };
+  if (matches.length > 1) return { changed: false, files, reason: "ambiguous_source" };
+  const target = matches[0];
+  const opening = target.match[1];
+  if (/\bclassName\s*=\s*\{/.test(opening)) return { changed: false, files, reason: "unsupported_element" };
+  const match = opening.match(/\bclassName\s*=\s*(["'])([^"']*)\1/);
+  const current = match ? match[2].split(/\s+/).filter(Boolean) : [];
+  const next = Array.from(new Set(current.filter((token) => !config.remove.some((pattern) => pattern.test(token))).concat(config.add))).join(" ");
+  const updated = match
+    ? opening.replace(match[0], `className=${match[1]}${next}${match[1]}`)
+    : opening.replace(/>$/, ` className="${next}">`);
+  const start = target.match.index ?? 0;
+  const edited = files.map((file) => file.path === target.file.path
+    ? { ...file, content: file.content.slice(0, start) + target.match[0].replace(opening, updated) + file.content.slice(start + target.match[0].length) }
+    : file);
+  return { changed: true, files: edited, path: target.file.path, reason: "changed" };
 }
 
 /**

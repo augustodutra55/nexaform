@@ -47,7 +47,7 @@ import {
   createVisualRefinementBaseline,
   verifyVisualRefinementBaseline,
 } from "@/lib/preview/visual-refinement";
-import type { DirectVisualStructureAction, DirectVisualStylePreset } from "@/lib/preview/direct-visual-edit";
+import type { DirectVisualStructureAction, DirectVisualStylePreset, DirectVisualStyleValues } from "@/lib/preview/direct-visual-edit";
 
 interface Message {
   id: string;
@@ -126,6 +126,7 @@ interface ChatPanelProps {
   onClearVisualSelection?: () => void;
   onDirectVisualEdit?: (text: string) => Promise<boolean>;
   onDirectVisualStyleEdit?: (preset: DirectVisualStylePreset) => Promise<boolean>;
+  onDirectVisualStyleValues?: (values: DirectVisualStyleValues) => Promise<boolean>;
   onOpenSelectedMedia?: () => void;
   onDirectVisualLinkEdit?: (href: string) => Promise<boolean>;
   onDirectVisualStructureEdit?: (action: DirectVisualStructureAction) => Promise<boolean>;
@@ -232,6 +233,7 @@ export function ChatPanel({
   onClearVisualSelection,
   onDirectVisualEdit,
   onDirectVisualStyleEdit,
+  onDirectVisualStyleValues,
   onOpenSelectedMedia,
   onDirectVisualLinkEdit,
   onDirectVisualStructureEdit,
@@ -251,6 +253,8 @@ export function ChatPanel({
   const [visualTextDraft, setVisualTextDraft] = useState(visualSelection?.text ?? "");
   const [applyingVisualText, setApplyingVisualText] = useState(false);
   const [applyingVisualStyle, setApplyingVisualStyle] = useState<DirectVisualStylePreset | null>(null);
+  const [visualStyleValues, setVisualStyleValues] = useState<DirectVisualStyleValues>({});
+  const [applyingVisualStyleValues, setApplyingVisualStyleValues] = useState(false);
   const [visualHrefDraft, setVisualHrefDraft] = useState(visualSelection?.href ?? "");
   const [applyingVisualHref, setApplyingVisualHref] = useState(false);
   const [applyingVisualStructure, setApplyingVisualStructure] = useState<DirectVisualStructureAction | null>(null);
@@ -258,6 +262,7 @@ export function ChatPanel({
   useEffect(() => {
     setVisualTextDraft(visualSelection?.text ?? "");
     setVisualHrefDraft(visualSelection?.href ?? "");
+    setVisualStyleValues({});
   }, [visualSelection]);
   const recoveredFailureKey = `adstudio:recovered-failures:${threadId}`;
   const [recoveredFailureIds, setRecoveredFailureIds] = useState<string[]>(() => {
@@ -1482,6 +1487,67 @@ export function ChatPanel({
                   ))}
                 </div>
               </div>
+            )}
+            {visualSelection.text && onDirectVisualStyleValues && (
+              <details className="mt-2 rounded-md border bg-background/70 p-2">
+                <summary className="cursor-pointer text-[10px] font-medium text-foreground">Ajustes personalizados</summary>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <label className="text-[9px] text-muted-foreground">
+                    Cor do texto
+                    <input
+                      type="color"
+                      value={visualStyleValues.textColor ?? "#111827"}
+                      onChange={(event) => setVisualStyleValues((current) => ({ ...current, textColor: event.target.value }))}
+                      className="mt-1 h-7 w-full cursor-pointer rounded border bg-background p-0.5"
+                    />
+                  </label>
+                  <label className="text-[9px] text-muted-foreground">
+                    Cor do fundo
+                    <input
+                      type="color"
+                      value={visualStyleValues.backgroundColor ?? "#ffffff"}
+                      onChange={(event) => setVisualStyleValues((current) => ({ ...current, backgroundColor: event.target.value }))}
+                      className="mt-1 h-7 w-full cursor-pointer rounded border bg-background p-0.5"
+                    />
+                  </label>
+                  <label className="text-[9px] text-muted-foreground">
+                    Texto (px)
+                    <input type="number" min={10} max={96} placeholder="16" value={visualStyleValues.fontSize ?? ""}
+                      onChange={(event) => setVisualStyleValues((current) => ({ ...current, fontSize: event.target.value ? Number(event.target.value) : undefined }))}
+                      className="mt-1 h-7 w-full rounded border bg-background px-2 text-[11px] text-foreground" />
+                  </label>
+                  <label className="text-[9px] text-muted-foreground">
+                    Arredondar (px)
+                    <input type="number" min={0} max={64} placeholder="12" value={visualStyleValues.borderRadius ?? ""}
+                      onChange={(event) => setVisualStyleValues((current) => ({ ...current, borderRadius: event.target.value ? Number(event.target.value) : undefined }))}
+                      className="mt-1 h-7 w-full rounded border bg-background px-2 text-[11px] text-foreground" />
+                  </label>
+                  <label className="text-[9px] text-muted-foreground">
+                    Espaçamento (px)
+                    <input type="number" min={0} max={96} placeholder="16" value={visualStyleValues.padding ?? ""}
+                      onChange={(event) => setVisualStyleValues((current) => ({ ...current, padding: event.target.value ? Number(event.target.value) : undefined }))}
+                      className="mt-1 h-7 w-full rounded border bg-background px-2 text-[11px] text-foreground" />
+                  </label>
+                  <label className="text-[9px] text-muted-foreground">
+                    Alinhamento
+                    <select value={visualStyleValues.textAlign ?? ""}
+                      onChange={(event) => setVisualStyleValues((current) => ({ ...current, textAlign: (event.target.value || undefined) as DirectVisualStyleValues["textAlign"] }))}
+                      className="mt-1 h-7 w-full rounded border bg-background px-1 text-[11px] text-foreground">
+                      <option value="">Manter</option><option value="left">Esquerda</option><option value="center">Centro</option><option value="right">Direita</option>
+                    </select>
+                  </label>
+                </div>
+                <Button type="button" size="sm" variant="brand" className="mt-2 h-7 w-full gap-1 text-[11px]"
+                  disabled={applyingVisualStyleValues || !Object.values(visualStyleValues).some((value) => value !== undefined)}
+                  onClick={async () => {
+                    setApplyingVisualStyleValues(true);
+                    try { await onDirectVisualStyleValues(visualStyleValues); }
+                    finally { setApplyingVisualStyleValues(false); }
+                  }}>
+                  {applyingVisualStyleValues ? <Loader2 className="h-3 w-3 animate-spin" /> : <Palette className="h-3 w-3" />}
+                  Aplicar ajustes
+                </Button>
+              </details>
             )}
             {visualSelection.src && onOpenSelectedMedia && (
               <Button

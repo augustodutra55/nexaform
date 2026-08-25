@@ -36,7 +36,7 @@ import { acceptanceRepairFingerprint, buildAcceptanceRepairPrompt } from "@/lib/
 import { appCodeFingerprint, blockingIssueCodes, evaluateRepairCandidate, mergeBlockingIssueCodes } from "@/lib/engine/acceptance-repair-cycle";
 import type { RuntimeAuditReport } from "@/lib/preview/runtime-audit";
 import { findPreviewSourceCandidates, type PreviewElementSelection } from "@/lib/preview/visual-selection";
-import { applyDirectVisualLinkEdit, applyDirectVisualStructureEdit, applyDirectVisualStyleEdit, applyDirectVisualTextEdit, type DirectVisualStructureAction, type DirectVisualStylePreset } from "@/lib/preview/direct-visual-edit";
+import { applyDirectVisualLinkEdit, applyDirectVisualStructureEdit, applyDirectVisualStyleEdit, applyDirectVisualStyleValues, applyDirectVisualTextEdit, type DirectVisualStructureAction, type DirectVisualStylePreset, type DirectVisualStyleValues } from "@/lib/preview/direct-visual-edit";
 
 interface ProjectRow {
   id: string;
@@ -744,6 +744,25 @@ export default function ProjectPage() {
     return true;
   }
 
+  async function handleDirectVisualStyleValues(values: DirectVisualStyleValues): Promise<boolean> {
+    if (!visualSelection) return false;
+    const result = applyDirectVisualStyleValues(codeFiles, visualSelection, values);
+    if (!result.changed) {
+      toast.info("Use o refinamento assistido para este elemento", {
+        description: result.reason === "unsafe_value"
+          ? "Revise os valores de aparência informados."
+          : "O elemento usa estilo dinâmico ou não pôde ser localizado de forma única.",
+      });
+      return false;
+    }
+    setVisualSelection(null);
+    await handleApplyCode(result.files);
+    toast.success("Estilo personalizado aplicado", {
+      description: `${result.path} será salvo após a verificação automática.`,
+    });
+    return true;
+  }
+
   function handleOpenSelectedMedia() {
     if (!visualSelection?.src) return;
     setFocusedMediaSource(visualSelection.src);
@@ -1234,6 +1253,7 @@ export default function ProjectPage() {
             onClearVisualSelection={() => setVisualSelection(null)}
             onDirectVisualEdit={handleDirectVisualEdit}
             onDirectVisualStyleEdit={handleDirectVisualStyleEdit}
+            onDirectVisualStyleValues={handleDirectVisualStyleValues}
             onOpenSelectedMedia={handleOpenSelectedMedia}
             onDirectVisualLinkEdit={handleDirectVisualLinkEdit}
             onDirectVisualStructureEdit={appFiles?.length && appEntry ? handleDirectVisualStructureEdit : undefined}

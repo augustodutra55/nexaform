@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyDirectVisualLinkEdit, applyDirectVisualStructureEdit, applyDirectVisualStyleEdit, applyDirectVisualTextEdit } from "./direct-visual-edit";
+import { applyDirectVisualLinkEdit, applyDirectVisualStructureEdit, applyDirectVisualStyleEdit, applyDirectVisualStyleValues, applyDirectVisualTextEdit } from "./direct-visual-edit";
 
 const selection = {
   tag: "h2",
@@ -151,6 +151,32 @@ describe("direct visual style edit", () => {
     const full = applyDirectVisualStyleEdit(compact.files, selection, "fullWidth");
     expect(full.changed).toBe(true);
     expect(full.files[0].content).toContain('className="p-3 w-full"');
+  });
+});
+
+describe("direct visual custom style values", () => {
+  it("aplica valores exatos e remove somente classes conflitantes", () => {
+    const result = applyDirectVisualStyleValues(
+      [{ path: "Hero.jsx", content: 'export default () => <h2 className="text-red-500 bg-white text-lg rounded-lg p-4 text-left font-bold">Nossos serviços</h2>' }],
+      selection,
+      { textColor: "#123456", backgroundColor: "#abcdef", fontSize: 28, borderRadius: 18, padding: 24, textAlign: "center" }
+    );
+    expect(result.changed).toBe(true);
+    expect(result.files[0].content).toContain("font-bold text-[#123456] bg-[#abcdef] text-[28px] rounded-[18px] p-[24px] text-center");
+  });
+
+  it("recusa cores e medidas fora dos limites", () => {
+    const files = [{ path: "Hero.jsx", content: "export default () => <h2>Nossos serviços</h2>" }];
+    expect(applyDirectVisualStyleValues(files, selection, { textColor: "red;display:none" }).reason).toBe("unsafe_value");
+    expect(applyDirectVisualStyleValues(files, selection, { fontSize: 500 }).reason).toBe("unsafe_value");
+  });
+
+  it("recusa className dinâmico sem modificar o arquivo", () => {
+    const files = [{ path: "Hero.jsx", content: "export default () => <h2 className={active ? 'a' : 'b'}>Nossos serviços</h2>" }];
+    const result = applyDirectVisualStyleValues(files, selection, { padding: 20 });
+    expect(result.changed).toBe(false);
+    expect(result.reason).toBe("unsupported_element");
+    expect(result.files).toEqual(files);
   });
 });
 

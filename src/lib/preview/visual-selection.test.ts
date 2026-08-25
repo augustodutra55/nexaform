@@ -51,6 +51,29 @@ describe("visual selection", () => {
     expect(selection?.src).toBe("https://cdn.example.com/equipe.webp");
   });
 
+  it("normaliza os estilos calculados do elemento", () => {
+    const selection = normalizePreviewSelection({
+      tag: "h1",
+      selector: "h1.hero",
+      computedStyle: {
+        color: "rgb(17, 24, 39)",
+        backgroundColor: "rgba(0, 0, 0, 0)",
+        fontSize: "48px",
+        borderRadius: "16px",
+        padding: "24px",
+        textAlign: "center",
+      },
+    });
+    expect(selection?.computedStyle).toEqual({
+      color: "rgb(17, 24, 39)",
+      backgroundColor: "rgba(0, 0, 0, 0)",
+      fontSize: "48px",
+      borderRadius: "16px",
+      padding: "24px",
+      textAlign: "center",
+    });
+  });
+
   it("recusa mensagens sem elemento identificável", () => {
     expect(normalizePreviewSelection({ text: "sem seletor" })).toBeNull();
     expect(normalizePreviewSelection(null)).toBeNull();

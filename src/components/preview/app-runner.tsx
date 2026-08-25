@@ -163,6 +163,7 @@ export function AppRunner({
   const onAuditRef = useRef(onAudit);
   const desktopAuditRef = useRef<RuntimeAuditReport | null>(null);
   const mobileAuditRef = useRef<RuntimeAuditReport | null>(null);
+  const combinedAuditRef = useRef<RuntimeAuditReport | null>(null);
   const pendingReadyRef = useRef(false);
   const autoSmokeTriggeredRef = useRef(false);
   onErrorRef.current = onError;
@@ -172,11 +173,33 @@ export function AppRunner({
     setHealth("error");
     onErrorRef.current?.(message);
   }, []);
-  const reportPreviewReady = useCallback(() => {
-    // A montagem do React é somente o primeiro sinal. A aprovação acontece no
-    // callback de auditoria, depois de desktop, mobile e smoke automático.
-    pendingReadyRef.current = true;
+  const evaluatePreviewGate = useCallback((report = combinedAuditRef.current) => {
+    const gate = previewGateAction({
+      pendingReady: pendingReadyRef.current,
+      hasDesktopAudit: !!desktopAuditRef.current,
+      hasMobileAudit: !!mobileAuditRef.current,
+      hasBlockingIssue: !!report?.issues.some((issue) => issue.severity === "error"),
+      hasSmokeResult: !!report?.smoke,
+      smokeTriggered: autoSmokeTriggeredRef.current,
+    });
+    if (gate === "run-smoke") {
+      autoSmokeTriggeredRef.current = true;
+      setSmokeRunning(true);
+      iframeRef.current?.contentWindow?.postMessage({ __nx_run_smoke: true }, "*");
+      return;
+    }
+    if (gate === "approve") {
+      pendingReadyRef.current = false;
+      setHealth("healthy");
+      onReadyRef.current?.();
+    }
   }, []);
+  const reportPreviewReady = useCallback(() => {
+    // Ready e auditorias podem chegar em qualquer ordem. Reavaliar aqui evita
+    // perder a aprovação quando desktop/mobile terminam antes da montagem React.
+    pendingReadyRef.current = true;
+    evaluatePreviewGate();
+  }, [evaluatePreviewGate]);
   const reportPreviewAudit = useCallback((report: RuntimeAuditReport) => {
     const firstDesktop = report.viewport.width > 500 && !desktopAuditRef.current;
     if (report.viewport.width > 500) desktopAuditRef.current = report;
@@ -198,30 +221,13 @@ export function AppRunner({
       viewport: mobileAuditRef.current.viewport,
       checkedAt: Math.max(desktopAuditRef.current.checkedAt, mobileAuditRef.current.checkedAt),
     };
+    combinedAuditRef.current = combined;
     setAuditReport(combined);
     if (combined.smoke) setSmokeRunning(false);
     setAuditPhase("done");
     onAuditRef.current?.(combined);
-    const gate = previewGateAction({
-      pendingReady: pendingReadyRef.current,
-      hasDesktopAudit: !!desktopAuditRef.current,
-      hasMobileAudit: !!mobileAuditRef.current,
-      hasBlockingIssue: combined.issues.some((issue) => issue.severity === "error"),
-      hasSmokeResult: !!combined.smoke,
-      smokeTriggered: autoSmokeTriggeredRef.current,
-    });
-    if (gate === "run-smoke") {
-      autoSmokeTriggeredRef.current = true;
-      setSmokeRunning(true);
-      iframeRef.current?.contentWindow?.postMessage({ __nx_run_smoke: true }, "*");
-      return;
-    }
-    if (gate === "approve") {
-      pendingReadyRef.current = false;
-      setHealth("healthy");
-      onReadyRef.current?.();
-    }
-  }, []);
+    evaluatePreviewGate(combined);
+  }, [evaluatePreviewGate]);
 
   const runSmokeTest = useCallback(() => {
     setSmokeRunning(true);
@@ -275,6 +281,7 @@ export function AppRunner({
     setAuditReport(null);
     desktopAuditRef.current = null;
     mobileAuditRef.current = null;
+    combinedAuditRef.current = null;
     pendingReadyRef.current = false;
     autoSmokeTriggeredRef.current = false;
     setSmokeRunning(false);

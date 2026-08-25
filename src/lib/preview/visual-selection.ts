@@ -10,6 +10,16 @@ export interface PreviewElementSelection {
   className?: string;
   src?: string;
   href?: string;
+  computedStyle?: PreviewComputedStyle;
+}
+
+export interface PreviewComputedStyle {
+  color: string;
+  backgroundColor: string;
+  fontSize: string;
+  borderRadius: string;
+  padding: string;
+  textAlign: string;
 }
 
 export interface PreviewSourceCandidate {
@@ -88,6 +98,7 @@ export function normalizePreviewSelection(value: unknown): PreviewElementSelecti
   const tag = clean(raw.tag, 40).toLowerCase();
   const selector = clean(raw.selector, 300);
   if (!tag || !selector) return null;
+  const computedStyle = normalizeComputedStyle(raw.computedStyle);
   return {
     tag,
     selector,
@@ -98,6 +109,20 @@ export function normalizePreviewSelection(value: unknown): PreviewElementSelecti
     className: clean(raw.className, 600),
     src: clean(raw.src, 1200),
     href: clean(raw.href, 1200),
+    ...(computedStyle ? { computedStyle } : {}),
+  };
+}
+
+function normalizeComputedStyle(value: unknown): PreviewComputedStyle | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  return {
+    color: clean(raw.color, 40),
+    backgroundColor: clean(raw.backgroundColor, 40),
+    fontSize: clean(raw.fontSize, 20),
+    borderRadius: clean(raw.borderRadius, 40),
+    padding: clean(raw.padding, 80),
+    textAlign: clean(raw.textAlign, 20),
   };
 }
 
@@ -166,6 +191,7 @@ export function visualSelectionSource(): string {
     var aria=el.getAttribute&&el.getAttribute('aria-label');
     var title=el.getAttribute&&el.getAttribute('title');
     var own=nxText(el,240);
+    var computed=window.getComputedStyle?window.getComputedStyle(el):null;
     return {
       tag:String(el.tagName||'').toLowerCase(),
       selector:nxSelector(el),
@@ -176,6 +202,11 @@ export function visualSelectionSource(): string {
       ,className:String((el.getAttribute&&el.getAttribute('class'))||'').slice(0,600)
       ,src:String((el.getAttribute&&el.getAttribute('src'))||'').slice(0,1200)
       ,href:String((el.getAttribute&&el.getAttribute('href'))||'').slice(0,1200)
+      ,computedStyle:computed?{
+        color:String(computed.color||''),backgroundColor:String(computed.backgroundColor||''),
+        fontSize:String(computed.fontSize||''),borderRadius:String(computed.borderRadius||''),
+        padding:String(computed.padding||''),textAlign:String(computed.textAlign||'')
+      }:undefined
     };
   }
   function nxSetMode(enabled){

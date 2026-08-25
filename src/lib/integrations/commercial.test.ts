@@ -4,6 +4,7 @@ import {
   assertAllowedAutomationTarget,
   integrationStatuses,
   normalizeStripeCheckoutInput,
+  sendAutomationEmail,
 } from "./commercial";
 
 describe("commercial integrations", () => {
@@ -51,5 +52,13 @@ describe("commercial integrations", () => {
     expect(allowedAutomationTargets(env)).toHaveLength(2);
     expect(assertAllowedAutomationTarget("https://hooks.example.com/ad", env)).toBe("https://hooks.example.com/ad");
     expect(() => assertAllowedAutomationTarget("https://evil.example.com/hook", env)).toThrow(/não autorizado/);
+  });
+
+  it("não tenta enviar automação sem Resend configurado", async () => {
+    await expect(sendAutomationEmail({
+      to: "cliente@example.com",
+      subject: "Lembrete",
+      message: "Sua consulta é amanhã.",
+    }, {} as NodeJS.ProcessEnv)).rejects.toThrow("Resend não configurado");
   });
 });

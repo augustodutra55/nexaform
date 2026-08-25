@@ -16,6 +16,10 @@
     {
       "path": "/api/generation-jobs/worker",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/automations/worker",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

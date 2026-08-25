@@ -6,6 +6,7 @@ import {
   type DataFieldRule,
 } from "./data-contract";
 import type { CollectionProfile } from "./collection-access";
+import { buildAutomationBlueprint, type AppAutomationBlueprint } from "./automation-blueprint";
 
 export interface BackendCollectionBlueprint {
   collection: string;
@@ -23,6 +24,7 @@ export interface BackendBlueprint {
   version: 1;
   usesAuth: boolean;
   collections: BackendCollectionBlueprint[];
+  automations: AppAutomationBlueprint[];
   warnings: string[];
   status: "ready" | "review";
 }
@@ -324,11 +326,14 @@ export function buildBackendBlueprint(app: AppCode): BackendBlueprint {
   if (usesAuth && collections.length === 0) {
     warnings.push("O aplicativo usa login, mas nenhuma coleção de dados foi encontrada.");
   }
+  const automation = buildAutomationBlueprint(app);
+  warnings.push(...automation.warnings);
 
   return {
     version: 1,
     usesAuth,
     collections,
+    automations: automation.automations,
     warnings,
     status: warnings.length ? "review" : "ready",
   };

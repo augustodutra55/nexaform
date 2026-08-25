@@ -64,4 +64,31 @@ describe("contratos de dados", () => {
       expect.arrayContaining(["fields.id", "fields.nome.type"])
     );
   });
+
+  it("normaliza unicidade e relações entre coleções", () => {
+    const result = normalizeDataContract({
+      fields: {
+        email: { type: "email", required: true, unique: true },
+        clienteId: { type: "uuid", reference: { collection: "clientes" } },
+      },
+    });
+    expect(result.errors).toEqual({});
+    expect(result.contract?.fields.email.unique).toBe(true);
+    expect(result.contract?.fields.clienteId.reference).toEqual({
+      collection: "clientes",
+      onDelete: "restrict",
+    });
+  });
+
+  it("recusa referência sem uuid ou com coleção inválida", () => {
+    const result = normalizeDataContract({
+      fields: {
+        cliente: { type: "string", reference: { collection: "clientes" } },
+        produtoId: { type: "uuid", reference: { collection: "../produtos" } },
+      },
+    });
+    expect(result.contract).toBeUndefined();
+    expect(result.errors).toHaveProperty("fields.cliente.reference");
+    expect(result.errors).toHaveProperty("fields.produtoId.reference");
+  });
 });

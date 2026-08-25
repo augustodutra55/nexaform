@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { consumeRateLimit, isUuid, requestRateKey } from "@/lib/engine/data-guard";
 import { createStripeCheckoutSession } from "@/lib/integrations/commercial";
+import { getProjectIntegration } from "@/lib/integrations/project-secrets";
 
 export const runtime = "nodejs";
 
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   if (!price || typeof price.priceId !== "string") return bad("Preço não autorizado para este projeto.", 403);
 
   try {
+    const projectStripe = await getProjectIntegration<{ provider: "stripe"; secretKey: string }>(admin, projectId, "stripe");
     const base = publicBase(req);
     const publishedUrl = `${base}/p/${encodeURIComponent(project.share_slug)}`;
     const checkout = await createStripeCheckoutSession({
@@ -54,7 +56,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
       successUrl: `${publishedUrl}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: `${publishedUrl}?checkout=cancelled`,
       customerEmail: typeof body.customerEmail === "string" ? body.customerEmail : undefined,
-    });
+    }, projectStripe?.secretKey);
     return NextResponse.json({ ok: true, checkout });
   } catch (checkoutError: any) {
     return bad(String(checkoutError?.message || checkoutError), 422);

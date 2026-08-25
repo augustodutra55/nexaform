@@ -42,6 +42,7 @@ import { ProjectMeta, ProjectStatus, STATUS_LABEL, STATUS_ORDER, STATUS_STYLE } 
 import { cn } from "@/lib/utils";
 import { DeliveryPanel } from "@/components/project/delivery-panel";
 import { GitHubProjectButton } from "@/components/project/github-project-button";
+import { IntegrationsPanel } from "@/components/project/integrations-panel";
 import { VersionHistoryPanel } from "@/components/project/version-history-panel";
 
 export interface VersionRow {
@@ -175,6 +176,7 @@ export function ProjectTopbar({
         <Button variant="ghost" size="icon" onClick={() => setVersionsOpen(true)} aria-label="Histórico de versões" title="Histórico de versões"><History /></Button>
         <Button variant="ghost" size="icon" onClick={onExport} aria-label="Exportar projeto" title="Exportar projeto"><Download /></Button>
         {studio && <GitHubProjectButton />}
+        {studio && <IntegrationsPanel projectId={projectId} />}
         {studio && (
           <DeliveryPanel
             projectName={name}

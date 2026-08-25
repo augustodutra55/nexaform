@@ -6,6 +6,7 @@ import {
   type AppAutomationBlueprint,
 } from "@/lib/engine/automation-blueprint";
 import { sendAutomationEmail } from "@/lib/integrations/commercial";
+import { getProjectIntegration } from "@/lib/integrations/project-secrets";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -42,6 +43,8 @@ export async function GET(req: NextRequest) {
   for (const project of projects ?? []) {
     const automations = project?.meta?.backendProvisioning?.automations;
     if (!Array.isArray(automations)) continue;
+    let resend: { provider: "resend"; apiKey: string; from?: string } | null = null;
+    try { resend = await getProjectIntegration(admin, project.id, "resend"); } catch { /* usa fallback da plataforma */ }
     for (const automation of automations as AppAutomationBlueprint[]) {
       if (sent + failed >= MAX_DELIVERIES_PER_RUN) break;
       const window = automationWindow(now, automation.leadMinutes);
@@ -108,7 +111,7 @@ export async function GET(req: NextRequest) {
             to: recipient,
             subject: render(automation.subject, record.data),
             message: render(automation.message, record.data),
-          });
+          }, resend ? { ...process.env, RESEND_API_KEY: resend.apiKey, RESEND_FROM: resend.from } : process.env);
           await admin.from("app_automation_deliveries").update({ status: "sent", sent_at: new Date().toISOString(), error: null, next_attempt_at: null, lease_expires_at: null }).eq("id", delivery.id);
           sent++;
         } catch (sendError) {

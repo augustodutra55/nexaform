@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Loader2, Monitor, Smartphone, RefreshCw, Cpu, Layout, Maximize2, Minimize2, ScanSearch, TestTube2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AppFile, EngineMode } from "@/lib/engine/app-types";
-import { bundleApp, buildBundledSrcDoc } from "@/lib/preview/bundler";
+import { bundleAppCached, buildBundledSrcDoc, previewSourceFingerprint } from "@/lib/preview/bundler";
 import { buildMultiFileSrcDoc } from "@/lib/preview/multi-file-srcdoc";
 import { adGlobalScript } from "@/lib/preview/ad-global";
 import { runtimeAuditSource, type RuntimeAuditReport } from "@/lib/preview/runtime-audit";
@@ -137,7 +137,6 @@ export function AppRunner({
   code,
   files,
   entry,
-  version,
   engineMode,
   projectId,
   onError,
@@ -151,8 +150,14 @@ export function AppRunner({
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
   const [srcDoc, setSrcDoc] = useState("");
+  const [settledSource, setSettledSource] = useState<{ code?: string; files?: AppFile[]; entry?: string; fingerprint: string }>(() => ({
+    code, files: files || undefined, entry: entry || undefined,
+    fingerprint: Array.isArray(files) && files.length
+      ? previewSourceFingerprint(files, entry || files[0].path)
+      : previewSourceFingerprint([{ path: "App.jsx", content: code || "" }], "App.jsx"),
+  }));
   const [bundling, setBundling] = useState(false);
-  const [health, setHealth] = useState<"checking" | "healthy" | "error">("checking");
+  const [health, setHealth] = useState<"checking" | "healthy" | "error" | "recovered">("checking");
   const [auditPhase, setAuditPhase] = useState<"desktop" | "mobile" | "done">("desktop");
   const [auditReport, setAuditReport] = useState<RuntimeAuditReport | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -166,12 +171,25 @@ export function AppRunner({
   const combinedAuditRef = useRef<RuntimeAuditReport | null>(null);
   const pendingReadyRef = useRef(false);
   const autoSmokeTriggeredRef = useRef(false);
+  const srcDocRef = useRef("");
+  const lastHealthySrcDocRef = useRef("");
+  const recoveredDisplayRef = useRef(false);
+  srcDocRef.current = srcDoc;
   onErrorRef.current = onError;
   onReadyRef.current = onReady;
   onAuditRef.current = onAudit;
   const reportPreviewError = useCallback((message: string) => {
+    if (recoveredDisplayRef.current) return;
     setHealth("error");
     onErrorRef.current?.(message);
+    const healthy = lastHealthySrcDocRef.current;
+    if (healthy && healthy !== srcDocRef.current) {
+      recoveredDisplayRef.current = true;
+      setSrcDoc(healthy);
+      setHealth("recovered");
+      setLoading(false);
+      setBundling(false);
+    }
   }, []);
   const evaluatePreviewGate = useCallback((report = combinedAuditRef.current) => {
     const gate = previewGateAction({
@@ -191,16 +209,19 @@ export function AppRunner({
     if (gate === "approve") {
       pendingReadyRef.current = false;
       setHealth("healthy");
+      lastHealthySrcDocRef.current = srcDocRef.current;
       onReadyRef.current?.();
     }
   }, []);
   const reportPreviewReady = useCallback(() => {
+    if (recoveredDisplayRef.current) return;
     // Ready e auditorias podem chegar em qualquer ordem. Reavaliar aqui evita
     // perder a aprovação quando desktop/mobile terminam antes da montagem React.
     pendingReadyRef.current = true;
     evaluatePreviewGate();
   }, [evaluatePreviewGate]);
   const reportPreviewAudit = useCallback((report: RuntimeAuditReport) => {
+    if (recoveredDisplayRef.current) return;
     const firstDesktop = report.viewport.width > 500 && !desktopAuditRef.current;
     if (report.viewport.width > 500) desktopAuditRef.current = report;
     else mobileAuditRef.current = report;
@@ -270,11 +291,26 @@ export function AppRunner({
 
   const hasFiles = Array.isArray(files) && files.length > 0;
   const hasContent = hasFiles || !!code;
+  const sourceFingerprint = hasFiles
+    ? previewSourceFingerprint(files!, entry || files![0].path)
+    : previewSourceFingerprint([{ path: "App.jsx", content: code || "" }], "App.jsx");
+
+  // Edições visuais consecutivas costumam chegar em rajadas. Compilar somente
+  // após uma janela curta evita reconstruir versões intermediárias invisíveis.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSettledSource((current) => current.fingerprint === sourceFingerprint
+        ? current
+        : { code, files: files || undefined, entry: entry || undefined, fingerprint: sourceFingerprint });
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [code, entry, files, sourceFingerprint]);
 
   // Monta o preview: multi-arquivo passa pelo bundler esbuild (npm arbitrário via
   // esm.sh); se o esbuild falhar, cai no runtime Babel. Single-file legado usa Babel.
   useEffect(() => {
     let cancelled = false;
+    recoveredDisplayRef.current = false;
     setLoading(true);
     setHealth("checking");
     setAuditPhase("desktop");
@@ -285,26 +321,35 @@ export function AppRunner({
     pendingReadyRef.current = false;
     autoSmokeTriggeredRef.current = false;
     setSmokeRunning(false);
-    if (hasFiles) {
+    const settledFiles = settledSource.files;
+    const settledHasFiles = Array.isArray(settledFiles) && settledFiles.length > 0;
+    if (settledHasFiles) {
       setBundling(true);
-      const list = files!;
-      const ent = entry || list[0].path;
-      bundleApp(list, ent)
+      const list = settledFiles!;
+      const ent = settledSource.entry || list[0].path;
+      bundleAppCached(list, ent)
         .then(({ code: bundled }) => {
           if (cancelled) return;
           setSrcDoc(buildBundledSrcDoc(bundled, projectId, { editorSession }));
         })
-        .catch(() => {
+        .catch((error) => {
           // Fallback resiliente: runtime Babel (React + libs via CDN).
           if (cancelled) return;
-          setSrcDoc(buildMultiFileSrcDoc(list, ent, projectId, editorSession));
+          if (lastHealthySrcDocRef.current) {
+            recoveredDisplayRef.current = true;
+            setSrcDoc(lastHealthySrcDocRef.current);
+            setHealth("recovered");
+            onErrorRef.current?.(`A nova alteração não compilou; o último preview aprovado foi preservado. ${error instanceof Error ? error.message : ""}`.trim());
+          } else {
+            setSrcDoc(buildMultiFileSrcDoc(list, ent, projectId, editorSession));
+          }
         })
         .finally(() => {
           if (!cancelled) setBundling(false);
         });
-    } else if (code) {
+    } else if (settledSource.code) {
       setBundling(false);
-      setSrcDoc(buildSrcDoc(code, projectId, editorSession));
+      setSrcDoc(buildSrcDoc(settledSource.code, projectId, editorSession));
     } else {
       setBundling(false);
       setSrcDoc("");
@@ -313,7 +358,7 @@ export function AppRunner({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code, files, entry, version, reloadKey, projectId, editorSession]);
+  }, [settledSource, reloadKey, projectId, editorSession]);
 
   useEffect(() => {
     if (!expanded) return;
@@ -336,9 +381,9 @@ export function AppRunner({
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className={cn(
             "flex h-2 w-2 rounded-full",
-            health === "healthy" ? "bg-emerald-500" : health === "error" ? "bg-red-500" : "animate-pulse bg-amber-400"
+            health === "healthy" ? "bg-emerald-500" : health === "error" ? "bg-red-500" : health === "recovered" ? "bg-amber-500" : "animate-pulse bg-amber-400"
           )} />
-          {health === "healthy" ? "Preview aprovado" : health === "error" ? "Erro no preview" : "Verificando preview…"}
+          {health === "healthy" ? "Preview aprovado" : health === "error" ? "Erro no preview" : health === "recovered" ? "Versão saudável preservada" : "Verificando preview…"}
           {auditReport && auditReport.issues.some((issue) => issue.severity === "warning") && (
             <span
               className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
@@ -396,7 +441,7 @@ export function AppRunner({
             <button
               type="button"
               onClick={runSmokeTest}
-              disabled={smokeRunning || health === "error" || loading}
+              disabled={smokeRunning || health === "error" || health === "recovered" || loading}
               aria-label="Testar navegação do aplicativo"
               title="Percorre menus e abas sem enviar formulários nem executar ações destrutivas"
               className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"

@@ -122,6 +122,37 @@ export interface BundleResult {
   packages: string[];
 }
 
+const bundleCache = new Map<string, Promise<BundleResult>>();
+const MAX_BUNDLE_CACHE = 12;
+
+/** Fingerprint determinístico e barato para deduplicar builds no navegador. */
+export function previewSourceFingerprint(files: AppFile[], entry: string): string {
+  let hash = 2166136261;
+  const source = `${entry}\0${files.map((file) => `${file.path}\0${file.content}`).join("\0")}`;
+  for (let index = 0; index < source.length; index++) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${files.length}:${source.length}:${(hash >>> 0).toString(36)}`;
+}
+
+/** Reutiliza builds idênticos e compartilha uma compilação ainda em andamento. */
+export function bundleAppCached(files: AppFile[], entry: string): Promise<BundleResult> {
+  const key = previewSourceFingerprint(files, entry);
+  const existing = bundleCache.get(key);
+  if (existing) return existing;
+  const build = bundleApp(files, entry).catch((error) => {
+    bundleCache.delete(key);
+    throw error;
+  });
+  bundleCache.set(key, build);
+  while (bundleCache.size > MAX_BUNDLE_CACHE) {
+    const oldest = bundleCache.keys().next().value;
+    if (oldest) bundleCache.delete(oldest); else break;
+  }
+  return build;
+}
+
 /**
  * Empacota o projeto em um único módulo ESM. Bare imports ficam externos
  * (react via import map; demais via esm.sh com ?external=react,react-dom).

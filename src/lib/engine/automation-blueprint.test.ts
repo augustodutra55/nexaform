@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { automationWindow, buildAutomationBlueprint } from "./automation-blueprint";
+import { automationRetryDelayMinutes, automationWindow, buildAutomationBlueprint } from "./automation-blueprint";
 
 describe("blueprint de automações", () => {
   it("extrai lembrete de e-mail declarado pelo app", () => {
@@ -19,8 +19,12 @@ describe("blueprint de automações", () => {
 
   it("calcula a janela futura de execução", () => {
     expect(automationWindow(new Date("2026-01-01T10:00:00.000Z"), 60)).toEqual({
-      start: "2026-01-01T11:00:00.000Z",
+      start: "2025-12-25T11:00:00.000Z",
       end: "2026-01-01T11:05:00.000Z",
     });
+  });
+
+  it("aplica backoff e encerra depois de cinco tentativas", () => {
+    expect([1, 2, 3, 4, 5].map(automationRetryDelayMinutes)).toEqual([1, 5, 15, 60, null]);
   });
 });

@@ -15,9 +15,12 @@ describe("adGlobalScript — primitivo AD.settings (admin no motor)", () => {
     expect(adGlobalScript(PID)).toContain("admin:false");
   });
 
-  it("sem projeto, o AD mínimo tem enabled:false (early-return em runtime)", () => {
+  it("sem projeto, mantém AD.settings síncrono e devolve o fallback", () => {
     const s = adGlobalScript("");
     expect(s).toContain("enabled:false");
+    expect(s).toContain("settings:{");
+    expect(s).toContain("get:function(key,fallback){return fallback;}");
+    expect(s).toContain("ready:function(){return Promise.resolve();}");
   });
 
   it("tem fluxo de PIN: dono define, cliente usa no site publicado", () => {

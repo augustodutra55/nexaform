@@ -120,6 +120,7 @@ ${adScript}
 
     // ── Bibliotecas externas (CDN globals) ────────────────────────────────
     var __lucideCache = null;
+    var __framerMotionCache = null;
     function lucideShim(){
       if(__lucideCache) return __lucideCache;
       var L = window.lucide;
@@ -143,6 +144,44 @@ ${adScript}
         : out;
       return __lucideCache;
     }
+    // Fallback resiliente para quando o bundler real/esbuild fica
+    // indisponível. Mantém o contrato mais usado de framer-motion e renderiza
+    // o estilo final da animação, sem esconder ou quebrar o conteúdo.
+    function framerMotionShim(){
+      if(__framerMotionCache)return __framerMotionCache;
+      function finalStyle(value){
+        if(!value||typeof value!=='object')return {};
+        var style={}, transforms=[];
+        Object.keys(value).forEach(function(key){
+          var item=value[key];
+          if(key==='x')transforms.push('translateX('+(typeof item==='number'?item+'px':item)+')');
+          else if(key==='y')transforms.push('translateY('+(typeof item==='number'?item+'px':item)+')');
+          else if(key==='scale'||key==='scaleX'||key==='scaleY'||key==='rotate')transforms.push(key+'('+(key==='rotate'&&typeof item==='number'?item+'deg':item)+')');
+          else if(key!=='transition')style[key]=item;
+        });
+        if(transforms.length)style.transform=transforms.join(' ');
+        return style;
+      }
+      function component(tag){
+        return React.forwardRef(function(props,ref){
+          props=props||{};
+          var children=props.children, animate=props.animate, variants=props.variants;
+          var target=typeof animate==='string'&&variants?variants[animate]:animate;
+          var clean={};
+          Object.keys(props).forEach(function(key){
+            if(['children','initial','animate','exit','variants','transition','whileHover','whileTap','whileFocus','whileInView','viewport','layout','layoutId'].indexOf(key)<0)clean[key]=props[key];
+          });
+          clean.ref=ref;
+          clean.style=Object.assign({},props.style||{},finalStyle(target));
+          return React.createElement(tag,clean,children);
+        });
+      }
+      var motion=typeof Proxy==='function'
+        ? new Proxy({}, {get:function(target,key){if(!target[key])target[key]=component(key);return target[key];}})
+        : {div:component('div'),span:component('span'),section:component('section'),button:component('button'),a:component('a'),img:component('img')};
+      __framerMotionCache={motion:motion,AnimatePresence:function(props){return React.createElement(React.Fragment,null,props&&props.children);},MotionConfig:function(props){return React.createElement(React.Fragment,null,props&&props.children);}};
+      return __framerMotionCache;
+    }
     function external(spec){
       if(spec==='react') return React;
       if(spec==='react-dom'||spec==='react-dom/client') return ReactDOM;
@@ -151,6 +190,7 @@ ${adScript}
       if(spec==='clsx') return window.clsx;
       if(spec==='prop-types') return window.PropTypes;
       if(spec==='lucide-react') return lucideShim();
+      if(spec==='framer-motion'||spec==='motion/react') return framerMotionShim();
       return undefined;
     }
 
@@ -177,7 +217,7 @@ ${adScript}
         return ex;
       }
       var key = resolve(from, spec);
-      if(!key) throw new Error('Módulo não encontrado: "'+spec+'" (só são suportados imports relativos e as libs: react, react-dom, recharts, lucide-react, lodash, clsx).');
+      if(!key) throw new Error('Módulo não encontrado: "'+spec+'" (só são suportados imports relativos e as libs: react, react-dom, recharts, lucide-react, framer-motion, motion/react, lodash, clsx).');
       if(__cache[key]) return __cache[key].exports;
       var module = { exports: {} };
       __cache[key] = module;

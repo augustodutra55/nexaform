@@ -328,6 +328,21 @@ export function AppRunner({
       const list = settledFiles!;
       const ent = settledSource.entry || list[0].path;
       bundleAppCached(list, ent)
+        .catch(async (firstError) => {
+          // O carregamento do esbuild/wasm e dos módulos CDN pode falhar de
+          // forma transitória. A cache remove builds rejeitados, portanto uma
+          // segunda tentativa curta ainda usa o bundler real e evita degradar
+          // imediatamente para o runtime Babel.
+          await new Promise((resolve) => window.setTimeout(resolve, 250));
+          return bundleAppCached(list, ent).catch((secondError) => {
+            const detail = secondError instanceof Error
+              ? secondError.message
+              : firstError instanceof Error
+                ? firstError.message
+                : String(secondError || firstError || "falha desconhecida");
+            throw new Error(detail);
+          });
+        })
         .then(({ code: bundled }) => {
           if (cancelled) return;
           setSrcDoc(buildBundledSrcDoc(bundled, projectId, { editorSession }));

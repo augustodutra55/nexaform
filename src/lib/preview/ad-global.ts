@@ -111,7 +111,26 @@ export function adGlobalScript(
       },Math.max(60,120-elapsed));
     } else play();
   }
-  if(!PID){ window.AD = { list:function(){return Promise.resolve([]);}, get:function(){return Promise.resolve(null);}, count:function(){return Promise.resolve(0);}, insert:noop, update:noop, remove:noop, email:noop, payments:{checkout:noop}, actions:{run:noop}, voice:{listen:function(){return Promise.reject(new Error('Voz indisponível fora de um projeto.'));},speak:noop,cancel:noop}, enabled:false }; return; }
+  if(!PID){
+    window.AD = {
+      list:function(){return Promise.resolve([]);},
+      get:function(){return Promise.resolve(null);},
+      count:function(){return Promise.resolve(0);},
+      insert:noop, update:noop, remove:noop, email:noop,
+      payments:{checkout:noop}, actions:{run:noop},
+      voice:{listen:function(){return Promise.reject(new Error('Voz indisponível fora de um projeto.'));},speak:noop,cancel:noop},
+      // Apps recém-gerados já podem usar conteúdo editável antes de o projeto
+      // ter um id persistido. Nesse estágio não há overrides; o contrato
+      // síncrono de settings devolve o fallback em vez de quebrar o preview.
+      settings:{
+        get:function(key,fallback){return fallback;},
+        all:function(){return {};},
+        ready:function(){return Promise.resolve();}
+      },
+      enabled:false
+    };
+    return;
+  }
   function req(method, opts){
     opts = opts || {};
     return bridge('data',{method:method,qs:opts.qs||'',body:opts.body});

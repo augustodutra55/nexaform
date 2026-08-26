@@ -1,6 +1,10 @@
 name: Temporary Golden 2.0 production certification
 
 on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/golden-certification-trigger"
   push:
     branches: [main]
     paths:
@@ -10,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: golden-production-acceptance
+  group: golden-production-certification-v2
   cancel-in-progress: false
 
 jobs:

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { consumeRateLimit, isUuid, requestRateKey } from "@/lib/engine/data-guard";
-import { createStripeCheckoutSession } from "@/lib/integrations/commercial";
+import { createStripeCheckoutSession, dispatchAutomationWebhook } from "@/lib/integrations/commercial";
 import { getProjectIntegration } from "@/lib/integrations/project-secrets";
 
 export const runtime = "nodejs";
@@ -22,12 +22,8 @@ function publicBase(req: NextRequest): string {
 export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   if (!isUuid(projectId)) return bad("projectId inválido.");
-  if (!(await consumeRateLimit(`app-checkout:${projectId}:${requestRateKey(req)}`, 20, 10 * 60_000))) {
-    return bad("Muitas tentativas de pagamento. Aguarde um instante.", 429);
-  }
   let body: any;
   try { body = await req.json(); } catch { return bad("Corpo inválido."); }
-  if (body?.action !== "stripe.checkout") return bad("Ação de integração inválida.");
 
   const admin = createAdminClient();
   if (!admin) return bad("Integrações indisponíveis.", 503);
@@ -40,6 +36,35 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   if (error) return bad("Não foi possível validar o projeto.", 500);
   if (!project?.share_slug) return bad("Projeto publicado não encontrado.", 404);
 
+  if (body?.action === "backend.run") {
+    if (!(await consumeRateLimit(`app-action:${projectId}:${requestRateKey(req)}`, 30, 10 * 60_000))) {
+      return bad("Muitas execuções desta função. Aguarde um instante.", 429);
+    }
+    const name = typeof body?.name === "string" ? body.name.trim() : "";
+    const actions = Array.isArray(project.meta?.backendProvisioning?.actions) ? project.meta.backendProvisioning.actions : [];
+    const declared = actions.find((item: any) => item?.name === name);
+    if (!declared || typeof declared.target !== "string") return bad("Função não autorizada para este aplicativo.", 403);
+    const encoded = JSON.stringify(body?.data ?? null);
+    if (encoded.length > 20_000) return bad("Dados da função excedem o limite.", 413);
+    try {
+      const integration = await getProjectIntegration<{ provider: "automation"; targets: string[] }>(admin, projectId, "automation");
+      if (!integration) return bad("Configure o webhook desta função no cofre do projeto.", 422);
+      await dispatchAutomationWebhook(declared.target, {
+        projectId,
+        action: name,
+        data: body?.data ?? null,
+        sentAt: new Date().toISOString(),
+      }, integration.targets);
+      return NextResponse.json({ ok: true, action: name });
+    } catch (actionError: any) {
+      return bad(String(actionError?.message || actionError), 422);
+    }
+  }
+
+  if (body?.action !== "stripe.checkout") return bad("Ação de integração inválida.");
+  if (!(await consumeRateLimit(`app-checkout:${projectId}:${requestRateKey(req)}`, 20, 10 * 60_000))) {
+    return bad("Muitas tentativas de pagamento. Aguarde um instante.", 429);
+  }
   const prices = project.meta?.backendProvisioning?.payments?.prices;
   const key = typeof body?.priceKey === "string" ? body.priceKey.trim() : "";
   const price = Array.isArray(prices) ? prices.find((item: any) => item?.key === key) : null;

@@ -25,6 +25,10 @@ describe("religar edição do dono automaticamente no refinamento", () => {
 });
 
 describe("prompt do motor — admin embutido (AD.settings) e imagens", () => {
+  it("ensina funções HTTP declarativas sem expor segredos", () => {
+    expect(CODE_SYSTEM_PROMPT).toContain("AD.actions.run");
+    expect(CODE_SYSTEM_PROMPT).toContain("Nunca use fetch cru");
+  });
   it("ensina o modelo a usar AD.settings.get para conteúdo editável", () => {
     expect(CODE_SYSTEM_PROMPT).toContain("AD.settings.get");
     // reforça que é síncrono e sem efeito (evita o loop de recarregamento)

@@ -9,6 +9,8 @@ export interface BackendChangePlan {
     removedFields: string[];
     accessChanged: boolean;
   }>;
+  addedActions: string[];
+  removedActions: string[];
   destructive: boolean;
   changed: boolean;
 }
@@ -19,8 +21,8 @@ function byName(collections: BackendCollectionBlueprint[]): Map<string, BackendC
 
 /** Compara o contrato aplicado com o contrato atual sem executar SQL arbitrário. */
 export function buildBackendChangePlan(
-  previous: Pick<BackendBlueprint, "collections"> | null | undefined,
-  next: Pick<BackendBlueprint, "collections">
+  previous: Pick<BackendBlueprint, "collections" | "actions"> | null | undefined,
+  next: Pick<BackendBlueprint, "collections" | "actions">
 ): BackendChangePlan {
   const before = byName(previous?.collections ?? []);
   const after = byName(next.collections);
@@ -41,12 +43,18 @@ export function buildBackendChangePlan(
       ? [{ collection, addedFields, removedFields, accessChanged }]
       : [];
   });
-  const destructive = removedCollections.length > 0 || changedCollections.some((item) => item.removedFields.length > 0);
+  const previousActions = new Set((previous?.actions ?? []).map((item) => item.name));
+  const nextActions = new Set((next.actions ?? []).map((item) => item.name));
+  const addedActions = Array.from(nextActions).filter((name) => !previousActions.has(name)).sort();
+  const removedActions = Array.from(previousActions).filter((name) => !nextActions.has(name)).sort();
+  const destructive = removedCollections.length > 0 || removedActions.length > 0 || changedCollections.some((item) => item.removedFields.length > 0);
   return {
     addedCollections,
     removedCollections,
     changedCollections,
+    addedActions,
+    removedActions,
     destructive,
-    changed: addedCollections.length > 0 || removedCollections.length > 0 || changedCollections.length > 0,
+    changed: addedCollections.length > 0 || removedCollections.length > 0 || changedCollections.length > 0 || addedActions.length > 0 || removedActions.length > 0,
   };
 }

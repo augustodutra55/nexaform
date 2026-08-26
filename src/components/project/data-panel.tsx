@@ -64,6 +64,7 @@ interface BackendBlueprint {
     confidence: "high" | "review";
     reason: string;
   }>;
+  actions: Array<{ name: string; target: string }>;
 }
 
 interface BackendProvisioning {
@@ -77,6 +78,8 @@ interface BackendChangePlan {
   addedCollections: string[];
   removedCollections: string[];
   changedCollections: Array<{ collection: string; addedFields: string[]; removedFields: string[]; accessChanged: boolean }>;
+  addedActions: string[];
+  removedActions: string[];
   destructive: boolean;
   changed: boolean;
 }
@@ -193,6 +196,7 @@ export function DataPanel({ projectId }: { projectId: string }) {
     if (backendChangePlan?.destructive) {
       const details = [
         backendChangePlan.removedCollections.length ? `Coleções removidas: ${backendChangePlan.removedCollections.join(", ")}` : "",
+        backendChangePlan.removedActions.length ? `Funções removidas: ${backendChangePlan.removedActions.join(", ")}` : "",
         ...backendChangePlan.changedCollections.filter((item) => item.removedFields.length).map((item) => `${item.collection}: campos removidos ${item.removedFields.join(", ")}`),
       ].filter(Boolean).join("\n");
       if (!window.confirm(`Esta alteração reduz o contrato do backend. Os dados existentes serão preservados, mas deixarão de ser expostos pelo aplicativo.\n\n${details}\n\nDeseja aprovar?`)) return;
@@ -438,6 +442,15 @@ export function DataPanel({ projectId }: { projectId: string }) {
             ))}
           </div>
         )}
+        {backendBlueprint && backendBlueprint.actions.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {backendBlueprint.actions.map((action) => (
+              <span key={action.name} title={action.target} className="rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">
+                Função · {action.name}
+              </span>
+            ))}
+          </div>
+        )}
         {backendChangePlan?.changed && (
           <div className={cn(
             "mt-2 rounded-md border px-2 py-1.5 text-[10px]",
@@ -446,6 +459,8 @@ export function DataPanel({ projectId }: { projectId: string }) {
             <p className="font-semibold">Mudanças do backend</p>
             {backendChangePlan.addedCollections.length > 0 && <p>Novas coleções: {backendChangePlan.addedCollections.join(", ")}</p>}
             {backendChangePlan.removedCollections.length > 0 && <p>Coleções retiradas: {backendChangePlan.removedCollections.join(", ")}</p>}
+            {backendChangePlan.addedActions.length > 0 && <p>Novas funções: {backendChangePlan.addedActions.join(", ")}</p>}
+            {backendChangePlan.removedActions.length > 0 && <p>Funções retiradas: {backendChangePlan.removedActions.join(", ")}</p>}
             {backendChangePlan.changedCollections.map((item) => (
               <p key={item.collection}>
                 {item.collection}: {[

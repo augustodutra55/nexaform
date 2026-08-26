@@ -66,6 +66,7 @@ export interface BackendProvisioningMeta {
   collections: string[];
   automations?: import("@/lib/engine/automation-blueprint").AppAutomationBlueprint[];
   payments?: import("@/lib/engine/payment-blueprint").AppPaymentBlueprint | null;
+  actions?: import("@/lib/engine/backend-action-blueprint").AppBackendAction[];
   warnings: string[];
   blueprint?: import("@/lib/engine/backend-blueprint").BackendBlueprint;
   changePlan?: import("@/lib/engine/backend-change-plan").BackendChangePlan;

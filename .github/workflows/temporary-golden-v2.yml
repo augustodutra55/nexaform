@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   golden:
-    name: 5 apps reais · semântica e runtime
+    name: 5 apps + refinamento · semântica e runtime
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -60,13 +60,13 @@ jobs:
             exit 1
           fi
 
-      - name: Gerar e avaliar requisitos
+      - name: Gerar, refinar e avaliar requisitos
         run: node scripts/golden-production.mjs
 
       - name: Instalar Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Compilar e exercitar os cinco apps gerados
+      - name: Compilar e exercitar os cinco apps certificados
         env:
           E2E_TEST_MODE: "1"
           GOLDEN_FIXTURE_PATH: artifacts/golden-apps.json

@@ -111,7 +111,7 @@ export function adGlobalScript(
       },Math.max(60,120-elapsed));
     } else play();
   }
-  if(!PID){ window.AD = { list:function(){return Promise.resolve([]);}, get:function(){return Promise.resolve(null);}, count:function(){return Promise.resolve(0);}, insert:noop, update:noop, remove:noop, email:noop, payments:{checkout:noop}, voice:{listen:function(){return Promise.reject(new Error('Voz indisponível fora de um projeto.'));},speak:noop,cancel:noop}, enabled:false }; return; }
+  if(!PID){ window.AD = { list:function(){return Promise.resolve([]);}, get:function(){return Promise.resolve(null);}, count:function(){return Promise.resolve(0);}, insert:noop, update:noop, remove:noop, email:noop, payments:{checkout:noop}, actions:{run:noop}, voice:{listen:function(){return Promise.reject(new Error('Voz indisponível fora de um projeto.'));},speak:noop,cancel:noop}, enabled:false }; return; }
   function req(method, opts){
     opts = opts || {};
     return bridge('data',{method:method,qs:opts.qs||'',body:opts.body});
@@ -157,6 +157,13 @@ export function adGlobalScript(
         opts=opts||{};
         return bridge('integration',{method:'POST',body:{action:'stripe.checkout',priceKey:String(priceKey||''),customerEmail:opts.customerEmail}})
           .then(function(r){return r.checkout||r;});
+      }
+    },
+    // Funções declarativas: o navegador envia apenas nome e dados. O servidor
+    // resolve o endpoint aprovado no manifesto e confere o cofre do projeto.
+    actions: {
+      run: function(name, data){
+        return bridge('integration',{method:'POST',body:{action:'backend.run',name:String(name||''),data:data||{}}});
       }
     },
     // O microfone usa a página principal, pois reconhecimento de voz costuma ser

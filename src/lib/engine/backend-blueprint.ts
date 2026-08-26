@@ -8,6 +8,7 @@ import {
 import type { CollectionProfile } from "./collection-access";
 import { buildAutomationBlueprint, type AppAutomationBlueprint } from "./automation-blueprint";
 import { buildPaymentBlueprint, type AppPaymentBlueprint } from "./payment-blueprint";
+import { buildBackendActionBlueprint, type AppBackendAction } from "./backend-action-blueprint";
 
 export interface BackendCollectionBlueprint {
   collection: string;
@@ -27,6 +28,7 @@ export interface BackendBlueprint {
   collections: BackendCollectionBlueprint[];
   automations: AppAutomationBlueprint[];
   payments: AppPaymentBlueprint | null;
+  actions: AppBackendAction[];
   warnings: string[];
   status: "ready" | "review";
 }
@@ -332,6 +334,8 @@ export function buildBackendBlueprint(app: AppCode): BackendBlueprint {
   warnings.push(...automation.warnings);
   const payment = buildPaymentBlueprint(app);
   warnings.push(...payment.warnings);
+  const action = buildBackendActionBlueprint(app);
+  warnings.push(...action.warnings);
 
   return {
     version: 1,
@@ -339,6 +343,7 @@ export function buildBackendBlueprint(app: AppCode): BackendBlueprint {
     collections,
     automations: automation.automations,
     payments: payment.payments,
+    actions: action.actions,
     warnings,
     status: warnings.length ? "review" : "ready",
   };

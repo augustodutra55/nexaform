@@ -5,6 +5,10 @@ import { expect, test, type Page } from "@playwright/test";
 interface GoldenFixture {
   id: string;
   name: string;
+  refinement?: {
+    passed?: boolean;
+    targetText?: string;
+  } | null;
 }
 
 function fixtures(): GoldenFixture[] {
@@ -37,11 +41,14 @@ async function assertRuntime(page: Page, fixture: GoldenFixture) {
   expect(changed + fieldsEditable).toBeGreaterThan(0);
 
   const frame = page.frameLocator('iframe[title="Preview do app"]');
+  if (fixture.refinement?.passed && fixture.refinement.targetText) {
+    await expect(frame.getByText(fixture.refinement.targetText, { exact: true }).first()).toBeVisible();
+  }
   const overflow = await frame.locator("html").evaluate((html) => html.scrollWidth - window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(8);
 }
 
-test.describe("Golden 2.0 · projetos realmente gerados", () => {
+test.describe("Golden 3.0 · criação, refinamento e runtime reais", () => {
   test.describe.configure({ mode: "serial" });
   const cases = fixtures();
   test.skip(cases.length === 0, "Executado somente pelo workflow Golden com artefatos reais.");

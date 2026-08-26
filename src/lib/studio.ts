@@ -60,13 +60,15 @@ export interface CommercialDeliveryMeta {
 }
 
 export interface BackendProvisioningMeta {
-  version: 1;
+  version: 1 | 2;
   status: "ready" | "review";
   usesAuth: boolean;
   collections: string[];
   automations?: import("@/lib/engine/automation-blueprint").AppAutomationBlueprint[];
   payments?: import("@/lib/engine/payment-blueprint").AppPaymentBlueprint | null;
   warnings: string[];
+  blueprint?: import("@/lib/engine/backend-blueprint").BackendBlueprint;
+  changePlan?: import("@/lib/engine/backend-change-plan").BackendChangePlan;
   updatedAt: string;
 }
 

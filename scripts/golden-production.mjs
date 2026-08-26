@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { evaluateGoldenCandidate } from "./lib/golden-evaluator.mjs";
+import { evaluateRefinementPreservation, filesForRefinement } from "./lib/golden-refinement.mjs";
 
 const baseUrl = String(process.env.PRODUCTION_URL || "https://nexaform-rho.vercel.app").replace(/\/$/, "");
 const projectId = String(process.env.AD_GOLDEN_PROJECT_ID || "").trim();
@@ -17,6 +18,8 @@ const cases = [
   ["commerce", "E-commerce orientado à conversão", "Crie um site e-commerce para produtos de cuidado pessoal, com catálogo, cards de produto, busca, benefícios, preço, carrinho demonstrativo, jornada de checkout sem simular pagamento real, prova social e FAQ. Foco máximo em conversão e confiança.", true],
   ["media", "Experiência com mídia", "Crie um site institucional premium para uma empresa de arquitetura e inclua uma área de vídeo responsiva com controles. Se não houver vídeo enviado, mostre o placeholder correto para mídia sem inventar URL.", false],
 ];
+const refinementTarget = "Agendar diagnóstico estratégico";
+const refinementMessage = `Altere somente o texto do CTA principal para "${refinementTarget}". Preserve todos os demais textos, arquivos, seções, estilos e comportamentos exatamente como estão.`;
 function hasGeneratedCode(data) { const app = data?.app; return !!app && ((Array.isArray(app.files) && app.files.length > 0) || (typeof app.code === "string" && app.code.trim().length > 0)); }
 async function requestGeneration(payload, timeoutMs) { const response = await fetch(`${baseUrl}/api/golden/generate`, { method: "POST", headers: signedHeaders(), body: JSON.stringify(payload), signal: AbortSignal.timeout(timeoutMs) }); const data = await response.json().catch(() => null); return { response, data }; }
 async function requestStageWithRecovery(id, stageIndex, payload) {
@@ -55,6 +58,85 @@ async function runSimpleCase(id, name, message) {
   }
   return { status: last?.response?.status || 0, data: last?.data || null, error: "Falha após a recuperação Golden." };
 }
+async function certifyLandingRefinement(initialData) {
+  const started = Date.now();
+  const currentFiles = filesForRefinement(initialData?.app);
+  try {
+    const { response, data } = await requestGeneration({
+      projectId,
+      message: refinementMessage,
+      name: "Golden Landing refinada",
+      currentFiles,
+    }, 290_000);
+    const transportPassed = response.ok && data?.engineMode === "real" && hasGeneratedCode(data);
+    const preservation = hasGeneratedCode(data)
+      ? evaluateRefinementPreservation(initialData.app, data.app, refinementTarget)
+      : {
+          passed: false,
+          targetPresent: false,
+          preservationRate: 0,
+          minimumPreservationRate: 90,
+          changedFiles: [],
+          missingFiles: currentFiles.map((file) => file.path),
+        };
+    const evaluation = hasGeneratedCode(data)
+      ? evaluateGoldenCandidate("landing", data)
+      : { passed: false, score: 0, semanticRate: 0, checks: [], blockers: ["generated-code"] };
+    const failedChecks = evaluation.checks.filter((item) => !item.passed).map((item) => item.id);
+    const passed = transportPassed && preservation.passed && evaluation.passed;
+    const error = passed
+      ? null
+      : String(data?.error || [
+          !transportPassed ? `HTTP ${response.status} ou motor real ausente` : "",
+          !preservation.targetPresent ? "CTA alvo ausente" : "",
+          preservation.missingFiles.length ? `arquivos removidos: ${preservation.missingFiles.join(", ")}` : "",
+          preservation.preservationRate < preservation.minimumPreservationRate
+            ? `preservação ${preservation.preservationRate}% < ${preservation.minimumPreservationRate}%`
+            : "",
+          !evaluation.passed ? `semântica recusada: ${failedChecks.join(", ") || evaluation.blockers.join(", ")}` : "",
+        ].filter(Boolean).join("; "));
+    return {
+      passed,
+      data,
+      report: {
+        passed,
+        status: response.status,
+        durationMs: Date.now() - started,
+        provider: data?.provider || null,
+        model: data?.model || null,
+        targetText: refinementTarget,
+        ...preservation,
+        evaluatorScore: evaluation.score,
+        semanticRate: evaluation.semanticRate,
+        failedChecks,
+        error,
+      },
+    };
+  } catch (reason) {
+    const error = reason instanceof Error ? reason.message : String(reason);
+    return {
+      passed: false,
+      data: null,
+      report: {
+        passed: false,
+        status: 0,
+        durationMs: Date.now() - started,
+        provider: null,
+        model: null,
+        targetText: refinementTarget,
+        targetPresent: false,
+        preservationRate: 0,
+        minimumPreservationRate: 90,
+        changedFiles: [],
+        missingFiles: currentFiles.map((file) => file.path),
+        evaluatorScore: 0,
+        semanticRate: 0,
+        failedChecks: [],
+        error,
+      },
+    };
+  }
+}
 async function runStagedCase(id, name, message) { let currentFiles = null; let lastData = null; let lastStatus = 0; const totalStages = 7; for (let stageIndex = 0; stageIndex < totalStages; stageIndex += 1) { const stageStarted = Date.now(); try { const { response, data } = await requestStageWithRecovery(id, stageIndex, { projectId, message, name: `Golden ${name}`, currentFiles, stageIndex }); lastStatus = response.status; lastData = data; const elapsed = ((Date.now() - stageStarted) / 1000).toFixed(1); if (!response.ok || data?.engineMode !== "real" || !hasGeneratedCode(data)) { const error = String(data?.error || `HTTP ${response.status}`); console.log(`  STAGE FAIL ${id} ${stageIndex + 1}/${totalStages} HTTP ${response.status} ${elapsed}s — ${error}`); return { status: response.status, data, error: `etapa ${stageIndex + 1}/${totalStages}: ${error}` }; } currentFiles = Array.isArray(data?.app?.files) ? data.app.files : currentFiles; console.log(`  STAGE PASS ${id} ${stageIndex + 1}/${totalStages} HTTP ${response.status} ${elapsed}s${data?.stage?.label ? ` — ${data.stage.label}` : ""}${data?.stage?.snapshotRecovery ? " — snapshot recovery" : ""}`); } catch (reason) { const error = reason instanceof Error ? reason.message : String(reason); console.log(`  STAGE FAIL ${id} ${stageIndex + 1}/${totalStages} HTTP - ${((Date.now() - stageStarted) / 1000).toFixed(1)}s — ${error}`); return { status: 0, data: lastData, error: `etapa ${stageIndex + 1}/${totalStages}: ${error}` }; } } return { status: lastStatus, data: lastData, error: "" }; }
 const rows = [];
 const generatedApps = [];
@@ -76,7 +158,17 @@ for (const [id, name, message, staged] of cases) {
   const evaluation = hasGeneratedCode(data)
     ? evaluateGoldenCandidate(id, data)
     : { passed: false, score: 0, semanticRate: 0, checks: [], blockers: ["generated-code"] };
-  const passed = transportPassed && evaluation.passed;
+  let passed = transportPassed && evaluation.passed;
+  let finalData = data;
+  let refinement = null;
+  if (id === "landing" && passed) {
+    const certifiedRefinement = await certifyLandingRefinement(data);
+    refinement = certifiedRefinement.report;
+    passed = passed && certifiedRefinement.passed;
+    if (hasGeneratedCode(certifiedRefinement.data)) finalData = certifiedRefinement.data;
+    if (!certifiedRefinement.passed) error = certifiedRefinement.report.error || "Refinamento Golden recusado.";
+    console.log(`${certifiedRefinement.passed ? "REFINE PASS" : "REFINE FAIL"} landing ${(certifiedRefinement.report.durationMs / 1000).toFixed(1)}s PRESERVE ${certifiedRefinement.report.preservationRate}% SEM ${certifiedRefinement.report.semanticRate}%${certifiedRefinement.report.error ? ` — ${certifiedRefinement.report.error}` : ""}`);
+  }
   const failedChecks = evaluation.checks.filter((item) => !item.passed).map((item) => item.id);
   rows.push({
     id,
@@ -90,16 +182,17 @@ for (const [id, name, message, staged] of cases) {
     evaluatorScore: evaluation.score,
     semanticRate: evaluation.semanticRate,
     failedChecks,
+    refinement,
     error: error || (!evaluation.passed ? `Golden 2.0 recusou: ${failedChecks.join(", ") || evaluation.blockers.join(", ")}` : null),
   });
-  if (hasGeneratedCode(data)) generatedApps.push({ id, name, app: data.app, evaluation });
+  if (hasGeneratedCode(finalData)) generatedApps.push({ id, name, app: finalData.app, evaluation, refinement });
   console.log(`${passed ? "PASS" : "FAIL"} ${id} HTTP ${status || "-"} ${(durationMs / 1000).toFixed(1)}s${staged ? " staged" : ""} EVAL ${evaluation.score}% SEM ${evaluation.semanticRate}%${error ? ` — ${error}` : failedChecks.length ? ` — ${failedChecks.join(", ")}` : ""}`);
 }
 const passed = rows.filter((row) => row.passed).length;
 const successRate = Math.round((passed / rows.length) * 1000) / 10;
-const report = { validationVersion: 2, productionUrl: baseUrl, generatedAt: new Date().toISOString(), total: rows.length, passed, successRate, targetSuccessRate: 90, rows };
+const report = { validationVersion: 3, productionUrl: baseUrl, generatedAt: new Date().toISOString(), total: rows.length, passed, successRate, targetSuccessRate: 90, rows };
 fs.mkdirSync("artifacts", { recursive: true });
 fs.writeFileSync("artifacts/golden-production.json", JSON.stringify(report, null, 2));
 fs.writeFileSync("artifacts/golden-apps.json", JSON.stringify(generatedApps, null, 2));
-console.log(`Golden 2.0 static suite: ${passed}/${rows.length} = ${successRate}% (meta >= 90%)`);
+console.log(`Golden 3.0 creation + refinement suite: ${passed}/${rows.length} = ${successRate}% (meta >= 90%)`);
 if (successRate < 90) process.exitCode = 1;

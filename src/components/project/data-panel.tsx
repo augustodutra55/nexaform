@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 interface Row {
   id: string;
@@ -70,6 +71,14 @@ interface BackendProvisioning {
   collections: string[];
   warnings: string[];
   updatedAt: string;
+}
+
+interface BackendChangePlan {
+  addedCollections: string[];
+  removedCollections: string[];
+  changedCollections: Array<{ collection: string; addedFields: string[]; removedFields: string[]; accessChanged: boolean }>;
+  destructive: boolean;
+  changed: boolean;
 }
 
 const PRIVATE_SETTINGS: AccessSettings = {
@@ -162,6 +171,7 @@ export function DataPanel({ projectId }: { projectId: string }) {
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [backendBlueprint, setBackendBlueprint] = useState<BackendBlueprint | null>(null);
   const [backendProvisioning, setBackendProvisioning] = useState<BackendProvisioning | null>(null);
+  const [backendChangePlan, setBackendChangePlan] = useState<BackendChangePlan | null>(null);
   const [provisioningBackend, setProvisioningBackend] = useState(false);
 
   const base = `/api/data/${projectId}`;
@@ -173,23 +183,32 @@ export function DataPanel({ projectId }: { projectId: string }) {
       if (!res.ok) throw new Error(json?.error || "Falha ao analisar o backend");
       setBackendBlueprint(json.blueprint || null);
       setBackendProvisioning(json.provisioning || null);
+      setBackendChangePlan(json.changePlan || null);
     } catch (error: any) {
       toast.error("Não foi possível analisar o backend", { description: error?.message });
     }
   }, [projectId]);
 
   async function provisionBackend() {
+    if (backendChangePlan?.destructive) {
+      const details = [
+        backendChangePlan.removedCollections.length ? `Coleções removidas: ${backendChangePlan.removedCollections.join(", ")}` : "",
+        ...backendChangePlan.changedCollections.filter((item) => item.removedFields.length).map((item) => `${item.collection}: campos removidos ${item.removedFields.join(", ")}`),
+      ].filter(Boolean).join("\n");
+      if (!window.confirm(`Esta alteração reduz o contrato do backend. Os dados existentes serão preservados, mas deixarão de ser expostos pelo aplicativo.\n\n${details}\n\nDeseja aprovar?`)) return;
+    }
     setProvisioningBackend(true);
     try {
       const res = await fetch(`/api/backend/${projectId}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ apply: true, force: true }),
+        body: JSON.stringify({ apply: true, force: true, allowDestructive: backendChangePlan?.destructive === true }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "Falha ao configurar o backend");
       setBackendBlueprint(json.blueprint || null);
       setBackendProvisioning(json.provisioning || null);
+      setBackendChangePlan(json.changePlan || null);
       if (json.blueprint?.status === "review") {
         toast.warning("Backend protegido e configurado", {
           description: "Uma ou mais coleções ficaram privadas e precisam de revisão antes do uso público.",
@@ -417,6 +436,26 @@ export function DataPanel({ projectId }: { projectId: string }) {
                 {item.collection} · {PROFILE_COPY[item.profile].label}
               </span>
             ))}
+          </div>
+        )}
+        {backendChangePlan?.changed && (
+          <div className={cn(
+            "mt-2 rounded-md border px-2 py-1.5 text-[10px]",
+            backendChangePlan.destructive ? "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300" : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+          )}>
+            <p className="font-semibold">Mudanças do backend</p>
+            {backendChangePlan.addedCollections.length > 0 && <p>Novas coleções: {backendChangePlan.addedCollections.join(", ")}</p>}
+            {backendChangePlan.removedCollections.length > 0 && <p>Coleções retiradas: {backendChangePlan.removedCollections.join(", ")}</p>}
+            {backendChangePlan.changedCollections.map((item) => (
+              <p key={item.collection}>
+                {item.collection}: {[
+                  item.addedFields.length ? `+ ${item.addedFields.join(", ")}` : "",
+                  item.removedFields.length ? `− ${item.removedFields.join(", ")}` : "",
+                  item.accessChanged ? "acesso alterado" : "",
+                ].filter(Boolean).join(" · ")}
+              </p>
+            ))}
+            {backendChangePlan.destructive && <p className="mt-1 font-medium">Exige aprovação explícita; nenhum dado será apagado.</p>}
           </div>
         )}
         {backendBlueprint?.warnings.map((warning) => (

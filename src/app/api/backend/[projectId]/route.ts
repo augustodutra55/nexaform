@@ -6,6 +6,7 @@ import { authorizeProjectOwner, isUuid } from "@/lib/engine/data-guard";
 import { buildBackendBlueprint, type BackendCollectionBlueprint } from "@/lib/engine/backend-blueprint";
 import { PRIVATE_PERMISSIONS } from "@/lib/engine/collection-access";
 import { isAppCode } from "@/lib/engine/app-types";
+import { buildBackendChangePlan } from "@/lib/engine/backend-change-plan";
 
 function bad(error: string, status = 400) {
   return NextResponse.json({ error }, { status });
@@ -75,8 +76,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ pro
   const resolved = await context(projectId);
   if (resolved.response) return resolved.response;
   const blueprint = buildBackendBlueprint(resolved.project!.schema);
+  const changePlan = buildBackendChangePlan(resolved.project!.meta?.backendProvisioning?.blueprint, blueprint);
   return NextResponse.json({
     blueprint,
+    changePlan,
     provisioning: resolved.project!.meta?.backendProvisioning || null,
   });
 }
@@ -84,7 +87,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ pro
 export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   if (!isUuid(projectId)) return bad("projectId inválido.");
-  let body: { apply?: boolean; force?: boolean } = {};
+  let body: { apply?: boolean; force?: boolean; allowDestructive?: boolean } = {};
   try {
     body = await req.json();
   } catch {
@@ -93,7 +96,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   const resolved = await context(projectId);
   if (resolved.response) return resolved.response;
   const blueprint = buildBackendBlueprint(resolved.project!.schema);
-  if (body.apply !== true) return NextResponse.json({ blueprint, applied: false });
+  const changePlan = buildBackendChangePlan(resolved.project!.meta?.backendProvisioning?.blueprint, blueprint);
+  if (body.apply !== true) return NextResponse.json({ blueprint, changePlan, applied: false });
+  if (changePlan.destructive && body.allowDestructive !== true) {
+    return NextResponse.json({
+      error: "O novo backend remove coleções ou campos. Revise e aprove explicitamente na aba Dados.",
+      code: "backend_destructive_approval_required",
+      blueprint,
+      changePlan,
+      applied: false,
+    }, { status: 409 });
+  }
 
   const previousManaged = Array.isArray(resolved.project!.meta?.backendProvisioning?.collections)
     ? resolved.project!.meta.backendProvisioning.collections.filter(
@@ -149,13 +162,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
 
   const updatedAt = new Date().toISOString();
   const provisioning = {
-    version: 1,
+    version: 2,
     status: blueprint.status,
     usesAuth: blueprint.usesAuth,
     collections: configured,
     automations: blueprint.automations,
     payments: blueprint.payments,
     warnings: blueprint.warnings,
+    blueprint,
+    changePlan,
     updatedAt,
   };
   const currentMeta =
@@ -173,6 +188,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
 
   return NextResponse.json({
     blueprint,
+    changePlan,
     provisioning,
     applied: true,
     preservedManual: body.force !== true,

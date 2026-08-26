@@ -1,4 +1,4 @@
-name: Temporary Golden 2.0 snapshot-safe runtime
+name: Temporary Golden 2.0 production certification
 
 on:
   push:
@@ -20,7 +20,9 @@ jobs:
     timeout-minutes: 60
     env:
       PRODUCTION_URL: https://nexaform-rho.vercel.app
-      AD_GOLDEN_PROJECT_ID: 726260de-8056-4ad2-841d-b235bcaf7021
+      # Projeto antigo, não publicado e pertencente ao owner. A rota Golden
+      # apenas valida a propriedade; ela não persiste o app gerado no projeto.
+      AD_GOLDEN_PROJECT_ID: f7f68e5d-08ea-4c3f-b1fa-fc127b46a92e
       AD_GOLDEN_SERVICE_SECRET: ${{ secrets.AD_GOLDEN_SERVICE_SECRET }}
     steps:
       - name: Baixar o código
@@ -59,7 +61,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: golden-v2-snapshot-safe-runtime-report
+          name: golden-v2-production-certification-report
           path: |
             artifacts/golden-production.json
             artifacts/golden-apps.json

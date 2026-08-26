@@ -25,7 +25,16 @@ async function assertRuntime(page: Page, fixture: GoldenFixture) {
   await expect(page.getByTestId("golden-runtime-error")).toHaveCount(0);
   await expect(page.getByTestId("golden-runtime-audit")).toHaveText("0:0");
   // O gate só marca o preview como pronto depois de executar o smoke seguro.
-  await expect(page.getByTestId("golden-runtime-smoke")).toHaveText(/^[1-9]\d*:\d+:\d+:\d+$/, { timeout: 15_000 });
+  // Uma tela inicial pode oferecer navegação (landing/dashboard) ou apenas
+  // campos editáveis (login). Ambos provam interação real sem enviar dados.
+  const smoke = page.getByTestId("golden-runtime-smoke");
+  await expect(smoke).toHaveText(/^\d+:\d+:\d+:\d+$/, { timeout: 15_000 });
+  const [attempted, changed, fieldsAttempted, fieldsEditable] = (await smoke.innerText())
+    .split(":")
+    .map(Number);
+  expect(changed).toBeLessThanOrEqual(attempted);
+  expect(fieldsEditable).toBe(fieldsAttempted);
+  expect(changed + fieldsEditable).toBeGreaterThan(0);
 
   const frame = page.frameLocator('iframe[title="Preview do app"]');
   const overflow = await frame.locator("html").evaluate((html) => html.scrollWidth - window.innerWidth);

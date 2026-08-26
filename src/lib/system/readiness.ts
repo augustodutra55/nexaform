@@ -64,31 +64,31 @@ const capabilityGates = [
   { number: 1, id: "architecture", label: "Arquitetura e código multi-arquivo", evidence: [
     "Planejamento determinístico antes da geração",
     "App.jsx fino e componentes pequenos por seção",
-  ] },
+  ], requiredIds: ["release-core-ci"] },
   { number: 2, id: "model-routing", label: "Roteamento de IA previsível", evidence: [
     "Modos econômico, automático e premium",
     "Sem rebaixamento silencioso de modelo",
-  ] },
+  ], requiredIds: ["release-core-ci"] },
   { number: 4, id: "quality-repair", label: "Qualidade e autorreparo", evidence: [
     "Quality gate estrutural antes de salvar",
     "Auditoria de runtime e correção cirúrgica",
-  ] },
+  ], requiredIds: ["release-core-ci"] },
   { number: 5, id: "interaction-tests", label: "Testes reais de interação", evidence: [
     "Playwright cobre login, menus, formulário, CRUD e mobile",
     "TypeScript, unitários, build e E2E executados no CI",
-  ] },
+  ], requiredIds: ["release-core-ci", "release-e2e-ci"] },
   { number: 8, id: "visual-engine", label: "Motor visual premium", evidence: [
     "Blueprint visual por segmento",
     "Movimento, mídia e 3D com orçamento de performance",
-  ] },
+  ], requiredIds: ["release-core-ci"] },
   { number: 9, id: "visual-editor", label: "Editor visual clicável", evidence: [
     "Seleção de elemento diretamente no preview",
     "Refinamento preserva e verifica o alvo visual",
-  ] },
+  ], requiredIds: ["release-core-ci", "release-e2e-ci"] },
   { number: 10, id: "versions-portability", label: "Versões e portabilidade", evidence: [
     "Histórico, desfazer e retomada por etapas",
     "Importação e exportação React + Vite",
-  ] },
+  ], requiredIds: ["release-core-ci"] },
 ] as const;
 
 function gate(number: number, id: string, label: string, evidence: string[]): ReleaseGate {
@@ -128,7 +128,7 @@ function checkGate(
 
 export function buildReleaseCertification(checks: ReadinessCheck[]): ReleaseCertification {
   const verifiedCapabilityGates = capabilityGates.map((item) =>
-    checkGate(item.number, item.id, item.label, checks, ["release-ci"], Array.from(item.evidence))
+    checkGate(item.number, item.id, item.label, checks, Array.from(item.requiredIds), Array.from(item.evidence))
   );
   const dynamicGates = [
     checkGate(3, "durable-generation", "Fila durável de geração", checks,

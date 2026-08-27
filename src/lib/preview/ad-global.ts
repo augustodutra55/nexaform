@@ -441,9 +441,24 @@ export function adGlobalScript(
     opts = opts || {};
     return bridge('auth',{method:opts.method||'POST',qs:opts.qs||'',body:opts.body});
   }
+  function authCredentials(email,password,name){
+    if(email && typeof email==='object'){
+      return {
+        email:String(email.email||''),
+        password:String(email.password||''),
+        name:email.name==null?undefined:String(email.name)
+      };
+    }
+    return {
+      email:String(email||''),
+      password:String(password||''),
+      name:name==null?undefined:String(name)
+    };
+  }
   window.AD.auth = {
-    signUp: function(email, password, name){ return authFetch({ body:{ action:'signup', email:email, password:password, name:name } }).then(function(j){ setTok(j.token); return j.user; }); },
-    signIn: function(email, password){ return authFetch({ body:{ action:'login', email:email, password:password } }).then(function(j){ setTok(j.token); return j.user; }); },
+    // Aceita argumentos separados ou um objeto com email, password e name.
+    signUp: function(email, password, name){ var c=authCredentials(email,password,name); return authFetch({ body:{ action:'signup', email:c.email, password:c.password, name:c.name } }).then(function(j){ setTok(j.token); return j.user; }); },
+    signIn: function(email, password){ var c=authCredentials(email,password); return authFetch({ body:{ action:'login', email:c.email, password:c.password } }).then(function(j){ setTok(j.token); return j.user; }); },
     signOut: function(){ return authFetch({ body:{ action:'logout' } }).catch(function(){}).then(function(){ setTok(null); return true; }); },
     me: function(){ return authFetch({ method:'GET', qs:'?me=1' }).then(function(j){ if(j.user)setTok('bridge-session'); return j.user; }).catch(function(){ return null; }); },
     token: getTok

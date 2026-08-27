@@ -60,6 +60,7 @@ jobs:
         env:
           E2E_TEST_MODE: "1"
           GOLDEN_FIXTURE_PATH: artifacts/golden-apps.json
+          GOLDEN_RUNTIME_API_URL: ${{ inputs.production_url }}
         run: npx playwright test tests/e2e/golden-generated.spec.ts
 
       - name: Publicar relatório

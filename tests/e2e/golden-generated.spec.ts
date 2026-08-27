@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 
 interface GoldenFixture {
@@ -81,6 +82,30 @@ function crudTarget(fixture: GoldenFixture): { collection: string; data: Record<
   return { collection: selected.name, data };
 }
 
+async function installGoldenBackendProxy(page: Page) {
+  const base = process.env.GOLDEN_RUNTIME_API_URL?.trim();
+  const secret = process.env.AD_GOLDEN_SERVICE_SECRET?.trim();
+  if (!base || !secret) return;
+
+  await page.route("**/api/**", async (route) => {
+    const requestUrl = new URL(route.request().url());
+    if (!/^\/api\/(?:app-auth|data)\//.test(requestUrl.pathname)) {
+      await route.continue();
+      return;
+    }
+    const timestamp = String(Date.now());
+    const signature = crypto.createHmac("sha256", secret).update(timestamp).digest("hex");
+    const headers = { ...route.request().headers() };
+    delete headers.host;
+    delete headers.cookie;
+    headers["x-ad-golden-timestamp"] = timestamp;
+    headers["x-ad-golden-signature"] = signature;
+    const target = new URL(requestUrl.pathname + requestUrl.search, base);
+    const response = await route.fetch({ url: target.toString(), headers });
+    await route.fulfill({ response });
+  });
+}
+
 async function assertAgendaAuthAndCrud(page: Page, fixture: GoldenFixture) {
   const frame = page.frameLocator('iframe[title="Preview do app"]');
   const body = frame.locator("body");
@@ -127,6 +152,7 @@ async function assertAgendaAuthAndCrud(page: Page, fixture: GoldenFixture) {
 }
 
 async function assertRuntime(page: Page, fixture: GoldenFixture) {
+  await installGoldenBackendProxy(page);
   await page.goto(`/e2e-runtime/golden?id=${encodeURIComponent(fixture.id)}`);
   await expect(page.getByTestId("golden-case")).toHaveText(fixture.id);
   await expect(page.getByTestId("golden-runtime-ready")).toBeAttached({ timeout: 45_000 });

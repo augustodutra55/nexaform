@@ -8,8 +8,10 @@ on:
       - ".github/workflows/temporary-golden-v2.yml"
       - "scripts/golden-production.mjs"
       - "tests/e2e/golden-generated.spec.ts"
+      - "src/app/api/app-auth/**"
       - "src/app/e2e-runtime/golden/**"
       - "src/components/preview/**"
+      - "src/lib/golden-auth.ts"
       - "src/lib/preview/**"
   push:
     branches: [main]
@@ -17,12 +19,15 @@ on:
       - ".github/workflows/temporary-golden-v2.yml"
       - "scripts/golden-production.mjs"
       - "tests/e2e/golden-generated.spec.ts"
+      - "src/app/api/app-auth/**"
       - "src/app/e2e-runtime/golden/**"
       - "src/components/preview/**"
+      - "src/lib/golden-auth.ts"
       - "src/lib/preview/**"
 
 permissions:
   contents: read
+  deployments: read
 
 concurrency:
   group: golden-production-certification-v2-${{ github.ref }}
@@ -59,6 +64,34 @@ jobs:
             echo "::error::AD_GOLDEN_SERVICE_SECRET ausente."
             exit 1
           fi
+
+      - name: Resolver backend real da revisão Vercel
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          TARGET_ENV: ${{ github.event_name == 'pull_request' && 'preview' || 'production' }}
+        shell: bash
+        run: |
+          for attempt in $(seq 1 60); do
+            deployment_id="$(gh api "repos/$GITHUB_REPOSITORY/deployments?sha=$TARGET_SHA&per_page=100" \
+              --jq "[.[] | select((.environment | ascii_downcase) == \"$TARGET_ENV\")][0].id // empty")"
+            if [ -n "$deployment_id" ]; then
+              runtime_url="$(gh api "repos/$GITHUB_REPOSITORY/deployments/$deployment_id/statuses?per_page=100" \
+                --jq '[.[] | select(.state == "success" and (.environment_url // "") != "")][0].environment_url // empty')"
+              if [ -n "$runtime_url" ]; then
+                echo "GOLDEN_RUNTIME_API_URL=$runtime_url" >> "$GITHUB_ENV"
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo "::error::Preview Vercel verde não foi encontrado para $TARGET_SHA."
+          exit 1
+
+      - name: Usar produção no disparo manual
+        if: github.event_name == 'workflow_dispatch'
+        run: echo "GOLDEN_RUNTIME_API_URL=$PRODUCTION_URL" >> "$GITHUB_ENV"
 
       - name: Gerar e avaliar requisitos
         run: node scripts/golden-production.mjs

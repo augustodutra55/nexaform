@@ -163,7 +163,12 @@ test.describe("Golden 2.0 · projetos realmente gerados", () => {
     expect(cases.map((item) => item.id).sort()).toEqual(["agenda", "commerce", "dashboard", "landing", "media"]);
   });
 
-  for (const fixture of cases) {
+  // Autenticação e CRUD são o risco funcional mais crítico. Execute agenda
+  // primeiro para que uma regressão não fique escondida atrás de landings.
+  const prioritizedCases = [...cases].sort((left, right) =>
+    Number(right.id === "agenda") - Number(left.id === "agenda"));
+
+  for (const fixture of prioritizedCases) {
     test(`${fixture.id} compila, monta, audita e aceita interação segura`, async ({ page }) => {
       test.setTimeout(90_000);
       await assertRuntime(page, fixture);

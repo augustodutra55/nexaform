@@ -39,6 +39,7 @@ interface ManifestCollection {
   name: string;
   profile?: string;
   access?: string;
+  permissions?: Record<string, string>;
   fields?: ManifestField[] | Record<string, Omit<ManifestField, "name">>;
 }
 
@@ -62,7 +63,9 @@ function fieldsOf(collection: ManifestCollection): ManifestField[] {
 function crudTarget(fixture: GoldenFixture): { collection: string; data: Record<string, unknown> } {
   const candidates = manifestCollections(fixture).filter((collection) => {
     const profile = collection.profile || collection.access;
-    return profile === "authenticated" && !fieldsOf(collection).some((field) => field.required && field.reference?.collection);
+    const authenticated = profile === "authenticated"
+      || Object.values(collection.permissions || {}).some((value) => value === "authenticated");
+    return authenticated && !fieldsOf(collection).some((field) => field.required && field.reference?.collection);
   });
   const selected = candidates[0];
   if (!selected?.name) throw new Error("O app agenda não declarou uma coleção autenticada sem dependência para o CRUD Golden.");
@@ -82,6 +85,32 @@ function crudTarget(fixture: GoldenFixture): { collection: string; data: Record<
   return { collection: selected.name, data };
 }
 
+function goldenServiceHeaders(secret: string) {
+  const timestamp = String(Date.now());
+  return {
+    "x-ad-golden-timestamp": timestamp,
+    "x-ad-golden-signature": crypto.createHmac("sha256", secret).update(timestamp).digest("hex"),
+  };
+}
+
+async function provisionGoldenBackend(fixture: GoldenFixture) {
+  const base = process.env.GOLDEN_RUNTIME_API_URL?.trim();
+  const secret = process.env.AD_GOLDEN_SERVICE_SECRET?.trim();
+  const projectId = process.env.AD_GOLDEN_PROJECT_ID?.trim();
+  if (!base || !secret || !projectId) {
+    throw new Error("Golden funcional requer URL, segredo e projeto para provisionar o backend real.");
+  }
+  const response = await fetch(new URL(`/api/backend/${projectId}`, base), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...goldenServiceHeaders(secret) },
+    body: JSON.stringify({ apply: true, force: true, allowDestructive: true, app: fixture.app }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.applied !== true) {
+    throw new Error(payload?.error || `Backend Golden não foi provisionado (HTTP ${response.status}).`);
+  }
+}
+
 async function installGoldenBackendProxy(page: Page) {
   const base = process.env.GOLDEN_RUNTIME_API_URL?.trim();
   const secret = process.env.AD_GOLDEN_SERVICE_SECRET?.trim();
@@ -93,13 +122,10 @@ async function installGoldenBackendProxy(page: Page) {
       await route.continue();
       return;
     }
-    const timestamp = String(Date.now());
-    const signature = crypto.createHmac("sha256", secret).update(timestamp).digest("hex");
     const headers = { ...route.request().headers() };
     delete headers.host;
     delete headers.cookie;
-    headers["x-ad-golden-timestamp"] = timestamp;
-    headers["x-ad-golden-signature"] = signature;
+    Object.assign(headers, goldenServiceHeaders(secret));
     const target = new URL(requestUrl.pathname + requestUrl.search, base);
     const response = await route.fetch({ url: target.toString(), headers });
     await route.fulfill({ response });
@@ -152,6 +178,7 @@ async function assertAgendaAuthAndCrud(page: Page, fixture: GoldenFixture) {
 }
 
 async function assertRuntime(page: Page, fixture: GoldenFixture) {
+  if (fixture.id === "agenda") await provisionGoldenBackend(fixture);
   await installGoldenBackendProxy(page);
   await page.goto(`/e2e-runtime/golden?id=${encodeURIComponent(fixture.id)}`);
   await expect(page.getByTestId("golden-case")).toHaveText(fixture.id);

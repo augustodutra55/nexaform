@@ -7,12 +7,25 @@ import { buildBackendBlueprint, type BackendCollectionBlueprint } from "@/lib/en
 import { PRIVATE_PERMISSIONS } from "@/lib/engine/collection-access";
 import { isAppCode } from "@/lib/engine/app-types";
 import { buildBackendChangePlan } from "@/lib/engine/backend-change-plan";
+import { verifyGoldenOwnerProject } from "@/lib/golden-auth";
 
 function bad(error: string, status = 400) {
   return NextResponse.json({ error }, { status });
 }
 
-async function context(projectId: string) {
+async function context(projectId: string, req?: NextRequest, goldenApp?: unknown) {
+  const admin = createAdminClient();
+  if (!admin) return { response: bad("Backend de dados não configurado.", 501) };
+  if (req && isAppCode(goldenApp) && await verifyGoldenOwnerProject(req, projectId, admin)) {
+    const { data: project, error } = await admin
+      .from("projects")
+      .select("id, schema, meta")
+      .eq("id", projectId)
+      .maybeSingle();
+    if (error) return { response: bad(error.message, 500) };
+    if (!project) return { response: bad("Projeto Golden não encontrado.", 404) };
+    return { admin, project: { ...project, schema: goldenApp } };
+  }
   const supabase = await createClient();
   const {
     data: { user },
@@ -26,8 +39,6 @@ async function context(projectId: string) {
     isOwner({ role: profile?.role, email: user.email })
   );
   if (!access.allowed) return { response: bad(access.error || "Acesso negado.", access.status || 403) };
-  const admin = createAdminClient();
-  if (!admin) return { response: bad("Backend de dados não configurado.", 501) };
   const { data: project, error } = await admin
     .from("projects")
     .select("id, schema, meta")
@@ -87,13 +98,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ pro
 export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   if (!isUuid(projectId)) return bad("projectId inválido.");
-  let body: { apply?: boolean; force?: boolean; allowDestructive?: boolean } = {};
+  let body: { apply?: boolean; force?: boolean; allowDestructive?: boolean; app?: unknown } = {};
   try {
     body = await req.json();
   } catch {
     // Corpo vazio equivale a uma análise sem escrita.
   }
-  const resolved = await context(projectId);
+  const resolved = await context(projectId, req, body.app);
   if (resolved.response) return resolved.response;
   const blueprint = buildBackendBlueprint(resolved.project!.schema);
   const changePlan = buildBackendChangePlan(resolved.project!.meta?.backendProvisioning?.blueprint, blueprint);

@@ -46,4 +46,13 @@ describe("adGlobalScript — autenticação de apps gerados", () => {
     expect(source).toContain("var c=authCredentials(email,password,name)");
     expect(source).toContain("var c=authCredentials(email,password)");
   });
+
+  it("mantém aliases de dados emitidos por gerações legadas", () => {
+    const source = adGlobalScript(PID);
+
+    expect(source).toContain("query: listData");
+    expect(source).toContain("select: listData");
+    expect(source).toContain("delete: removeData");
+    expect(source).toContain("third===undefined?first:second");
+  });
 });

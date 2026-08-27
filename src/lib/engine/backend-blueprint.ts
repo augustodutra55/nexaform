@@ -99,10 +99,20 @@ function manifestFrom(files: AppFile[]): { collections: ManifestCollection[] } |
 }
 
 function normalizeFields(raw: unknown): DataContract {
+  const fields = Array.isArray(raw)
+    ? Object.fromEntries(raw
+        .filter((item): item is Record<string, unknown> =>
+          !!item && typeof item === "object" && typeof (item as Record<string, unknown>).name === "string")
+        .map((item) => {
+          const { name, ...rule } = item;
+          if (rule.type === "text") rule.type = "string";
+          return [String(name), rule];
+        }))
+    : raw;
   const result = normalizeDataContract({
     version: 1,
     allowUnknown: true,
-    fields: raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {},
+    fields: fields && typeof fields === "object" && !Array.isArray(fields) ? fields : {},
   });
   return result.contract || EMPTY_DATA_CONTRACT;
 }

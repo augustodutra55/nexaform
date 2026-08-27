@@ -172,4 +172,16 @@ describe("validateAppProject conclusão funcional", () => {
     expect(missing).toHaveLength(3);
     expect(missing.join(" ")).toContain("FAQ");
   });
+
+  it("reconhece componente Benefits alcançável como seção de benefícios", () => {
+    const app = appWith(
+      "export default function Benefits(){ return <section><h2>Qualidade certificada</h2></section>; }"
+    );
+    app.files![0].content =
+      "import Benefits from './components/Screen'; export default function App(){ return <Benefits />; }";
+
+    const report = validateAppProject(app, buildGenerationPlan("crie uma loja com benefícios"));
+
+    expect(report.errors).not.toContainEqual(expect.objectContaining({ code: "missing_required_section" }));
+  });
 });

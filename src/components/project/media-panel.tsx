@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { browserAiProvider } from "@/lib/engine/browser-provider";
 
 interface MediaPanelProps {
   projectId: string;
@@ -58,7 +59,7 @@ export function MediaPanel({ projectId, projectName, files, assets, focusSource,
       body: JSON.stringify({
         prompt: text,
         userKey: localStorage.getItem("nexaform:ai-key") || null,
-        userProvider: localStorage.getItem("nexaform:ai-provider") || null,
+        userProvider: browserAiProvider(localStorage),
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -146,7 +147,7 @@ export function MediaPanel({ projectId, projectName, files, assets, focusSource,
         body: JSON.stringify({
           prompt: text,
           userKey: localStorage.getItem("nexaform:ai-key") || null,
-          userProvider: localStorage.getItem("nexaform:ai-provider") || null,
+          userProvider: browserAiProvider(localStorage),
         }),
       });
       const data = await response.json().catch(() => ({}));

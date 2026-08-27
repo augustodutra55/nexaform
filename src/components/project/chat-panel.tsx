@@ -48,6 +48,7 @@ import {
   verifyVisualRefinementBaseline,
 } from "@/lib/preview/visual-refinement";
 import type { DirectVisualStructureAction, DirectVisualStylePreset, DirectVisualStyleValues } from "@/lib/preview/direct-visual-edit";
+import { browserAiProvider } from "@/lib/engine/browser-provider";
 
 interface Message {
   id: string;
@@ -846,7 +847,7 @@ export function ChatPanel({
         currentFiles,
         name: projectName,
         userKey: localStorage.getItem("nexaform:ai-key") || null,
-        userProvider: localStorage.getItem("nexaform:ai-provider") || null,
+        userProvider: browserAiProvider(localStorage),
         costMode,
         forceReal: genModeRef.current === "real",
         allowTemplate: genModeRef.current === "template",
@@ -1019,7 +1020,7 @@ export function ChatPanel({
             message: contextualContent,
             schema: schemaRef.current,
             userKey: localStorage.getItem("nexaform:ai-key") || null,
-            userProvider: localStorage.getItem("nexaform:ai-provider") || null,
+            userProvider: browserAiProvider(localStorage),
             costMode,
           };
       // Streaming SSE primeiro (tokens em tempo real via /api/chat); se a rota

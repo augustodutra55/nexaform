@@ -32,6 +32,7 @@ import {
 import { replaceProjectMedia, type ProjectMediaAsset, type ProjectMediaItem } from "@/lib/media/project-media";
 import { sanitizePromptAttachments, type PromptAttachment } from "@/lib/engine/prompt-attachments";
 import { buildAcceptanceReport } from "@/lib/engine/acceptance-report";
+import { projectGenerationPlan } from "@/lib/engine/generation-contract";
 import { acceptanceRepairFingerprint, buildAcceptanceRepairPrompt } from "@/lib/engine/acceptance-repair";
 import { appCodeFingerprint, blockingIssueCodes, evaluateRepairCandidate, mergeBlockingIssueCodes } from "@/lib/engine/acceptance-repair-cycle";
 import type { RuntimeAuditReport } from "@/lib/preview/runtime-audit";
@@ -356,7 +357,7 @@ export default function ProjectPage() {
           // Um refinamento curto (ex.: "troque a cor") não deve apagar o
           // contrato original do produto. Em um projeto novo, usamos o plano
           // recém-criado pelo motor.
-          plan: previous && existingAcceptance?.plan ? existingAcceptance.plan : result.generationPlan || existingAcceptance?.plan,
+          plan: projectGenerationPlan(existingAcceptance?.plan, result.generationPlan, !!previous),
           structural: result.quality,
           repair: currentRepair,
           updatedAt: new Date().toISOString(),

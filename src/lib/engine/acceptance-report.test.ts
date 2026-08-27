@@ -39,4 +39,27 @@ describe("buildAcceptanceReport interaction smoke", () => {
     });
     expect(report.items.find((item) => item.id === "interaction-smoke")).toMatchObject({ status: "warning" });
   });
+
+  it("não confunde campos editáveis com fluxo funcional", () => {
+    const report = buildAcceptanceReport({
+      app,
+      previewHealth: "healthy",
+      runtime: { ...runtime, smoke: { attempted: 0, changed: 0, labels: [], fieldsAttempted: 2, fieldsEditable: 2, fieldLabels: ["E-mail", "Senha"], completedAt: Date.now() } },
+    });
+    expect(report.items.find((item) => item.id === "interaction-smoke")).toMatchObject({ status: "warning" });
+  });
+
+  it("bloqueia publicação quando dados autenticados não possuem entrada", () => {
+    const broken = {
+      ...app,
+      files: [{
+        path: "App.jsx",
+        content: '// AD_BACKEND: {"collections":[{"name":"patients","access":"authenticated"}]}\nexport default function App(){ AD.auth.me(); return <h1>Pacientes</h1> }',
+      }],
+    };
+    const report = buildAcceptanceReport({ app: broken, runtime, previewHealth: "healthy" });
+
+    expect(report.items.find((item) => item.id === "backend-access")).toMatchObject({ status: "blocked" });
+    expect(report.blockers).toBeGreaterThan(0);
+  });
 });

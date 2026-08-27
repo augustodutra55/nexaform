@@ -33,5 +33,5 @@ export default async function GoldenRuntimePage({
   const { id } = await searchParams;
   const fixture = loadFixtures().find((item) => item?.id === id && item?.app?.kind === "app");
   if (!fixture) notFound();
-  return <GoldenRuntimeHarness fixture={fixture} />;
+  return <GoldenRuntimeHarness fixture={fixture} projectId={process.env.AD_GOLDEN_PROJECT_ID || null} />;
 }

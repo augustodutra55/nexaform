@@ -1,7 +1,7 @@
 /**
  * Provedores de geração de CÓDIGO (server-only) — o núcleo do clone do Lovable.
  *
- * Ordem: chave do usuário → ANTHROPIC_API_KEY → OPENROUTER_API_KEY → template.
+ * Ordem: chave do usuário → OPENROUTER_API_KEY → ANTHROPIC_API_KEY → template.
  * Com roteamento de modelo (econômico/premium) e captura de custo real, para
  * o Studio operar barato.
  */
@@ -13,6 +13,7 @@ import type { PromptAttachment } from "./prompt-attachments";
 import { applyFileOperations, parseOperationBlocks } from "./operation-blocks";
 import { buildGenerationPlan, renderGenerationPlan } from "./generation-plan";
 import { issueKey, validateAppProject, isRunnableReport } from "./project-validator";
+import { environmentProviderOrder } from "./provider-order";
 
 interface Args {
   message: string;
@@ -282,7 +283,7 @@ export function stagedRuntimeQualityReport(
   isFinalStage = false
 ): ProjectQualityReport {
   if (!isStagedBuild) return report;
-  const finalStageBlockers = new Set(["orphan_component", "missing_auth", "missing_commercial_flow", "missing_required_section"]);
+  const finalStageBlockers = new Set(["orphan_component", "missing_auth", "auth_dead_end", "missing_commercial_flow", "missing_required_section"]);
   const blocks = (code: string) => STAGED_RUNTIME_BLOCKERS.has(code) || (isFinalStage && finalStageBlockers.has(code));
   const errors = report.errors.filter((value) => blocks(value.code));
   const advisory = report.errors.filter((value) => !blocks(value.code));
@@ -948,13 +949,18 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
   const allowEnvironmentFallback = !explicitProvider || !isRefinement;
   const repeatedAnthropicKey = a.userProvider === "claude" && a.userKey === process.env.ANTHROPIC_API_KEY;
   const repeatedOpenRouterKey = a.userProvider === "openrouter" && a.userKey === process.env.OPENROUTER_API_KEY;
-  if (allowEnvironmentFallback && !repeatedAnthropicKey && process.env.ANTHROPIC_API_KEY && a.userProvider !== "local") {
-    const r = await tryChain("claude", process.env.ANTHROPIC_API_KEY, callClaude);
-    if (r) return r;
-  }
-  if (allowEnvironmentFallback && !repeatedOpenRouterKey && process.env.OPENROUTER_API_KEY && a.userProvider !== "local") {
-    const r = await tryChain("openrouter", process.env.OPENROUTER_API_KEY, callOpenRouter);
-    if (r) return r;
+  if (allowEnvironmentFallback && a.userProvider !== "local") {
+    const order = environmentProviderOrder(a.userProvider);
+    for (const provider of order) {
+      if (provider === "openrouter" && !repeatedOpenRouterKey && process.env.OPENROUTER_API_KEY) {
+        const r = await tryChain("openrouter", process.env.OPENROUTER_API_KEY, callOpenRouter);
+        if (r) return r;
+      }
+      if (provider === "claude" && !repeatedAnthropicKey && process.env.ANTHROPIC_API_KEY) {
+        const r = await tryChain("claude", process.env.ANTHROPIC_API_KEY, callClaude);
+        if (r) return r;
+      }
+    }
   }
   // Em MODO REAL forçado, nunca entregamos template/demo disfarçado:
   // devolvemos o demo explícito e a rota converte em erro claro (needsKey).

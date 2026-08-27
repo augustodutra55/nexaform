@@ -3,8 +3,8 @@
  *
  * Ordem de resolução:
  *   1. Chave trazida pelo usuário (settings) — Claude ou OpenRouter
- *   2. ANTHROPIC_API_KEY do ambiente
- *   3. OPENROUTER_API_KEY do ambiente
+ *   2. OPENROUTER_API_KEY do ambiente (padrão automático)
+ *   3. ANTHROPIC_API_KEY do ambiente (ou primeiro quando escolhido)
  *   4. Motor local (sempre disponível — modo demo)
  *
  * Qualquer falha de rede/parse cai automaticamente para o próximo nível.
@@ -13,6 +13,7 @@ import { generateLocal } from "./local";
 import { SYSTEM_PROMPT, buildUserPrompt } from "./prompts";
 import { AppSchema, GenerationResult, isValidSchema } from "./types";
 import { CostMode, pickTier, modelFor, estimateCost } from "./models";
+import { environmentProviderOrder } from "./provider-order";
 
 interface GenerateArgs {
   message: string;
@@ -113,15 +114,20 @@ export async function generateWithProviders(args: GenerateArgs): Promise<Generat
       if (r2) return r2;
     }
   }
-  // 2) ambiente — Anthropic
-  if (process.env.ANTHROPIC_API_KEY && args.userProvider !== "local") {
-    const r = await callClaude(process.env.ANTHROPIC_API_KEY, args, modelFor(tier, "claude"));
-    if (r) return r;
-  }
-  // 3) ambiente — OpenRouter
-  if (process.env.OPENROUTER_API_KEY && args.userProvider !== "local") {
-    const r = await callOpenRouter(process.env.OPENROUTER_API_KEY, args, modelFor(tier, "openrouter"));
-    if (r) return r;
+  // 2/3) ambiente. OpenRouter é o automático; Claude só assume a frente
+  // quando o usuário o escolhe explicitamente.
+  if (args.userProvider !== "local") {
+    const order = environmentProviderOrder(args.userProvider);
+    for (const provider of order) {
+      if (provider === "openrouter" && process.env.OPENROUTER_API_KEY) {
+        const r = await callOpenRouter(process.env.OPENROUTER_API_KEY, args, modelFor(tier, "openrouter"));
+        if (r) return r;
+      }
+      if (provider === "claude" && process.env.ANTHROPIC_API_KEY) {
+        const r = await callClaude(process.env.ANTHROPIC_API_KEY, args, modelFor(tier, "claude"));
+        if (r) return r;
+      }
+    }
   }
   // 4) motor local — nunca falha (modo demo)
   return generateLocal(args.message, args.schema);

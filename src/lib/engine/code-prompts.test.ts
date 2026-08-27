@@ -65,4 +65,9 @@ describe("prompt do motor — admin embutido (AD.settings) e imagens", () => {
     expect(CODE_SYSTEM_PROMPT).toContain('"leadMinutes":1440');
     expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/AUTOMAÇÕES:/);
   });
+
+  it("mantém login e manifesto do backend coerentes", () => {
+    expect(CODE_SYSTEM_PROMPT).toMatch(/nunca deixe uma coleção "authenticated".*signIn \+ signUp/i);
+    expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/ao remover login.*me\/signOut.*profile:"private"/i);
+  });
 });

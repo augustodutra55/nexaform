@@ -13,11 +13,12 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { SystemReadinessCard } from "@/components/settings/system-readiness-card";
+import { browserAiProvider, saveBrowserAiProvider } from "@/lib/engine/browser-provider";
 
 const PROVIDERS = [
-  { id: "local", name: "Motor local", desc: "Grátis e offline. Geração por templates — ótimo para começar." },
+  { id: "openrouter", name: "Automático · OpenRouter", desc: "Usa os modelos da plataforma automaticamente. Chave pessoal opcional." },
   { id: "claude", name: "Claude (Anthropic)", desc: "Melhor qualidade. Use sua própria API key." },
-  { id: "openrouter", name: "OpenRouter", desc: "Acesso a vários modelos com uma única chave." },
+  { id: "local", name: "Template local", desc: "Modo demo por templates. Só é usado quando você escolher explicitamente." },
 ];
 
 export default function SettingsPage() {
@@ -25,7 +26,7 @@ export default function SettingsPage() {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
-  const [provider, setProvider] = useState("local");
+  const [provider, setProvider] = useState("openrouter");
   const [apiKey, setApiKey] = useState("");
   const [costMode, setCostMode] = useState("auto");
   const [access, setAccess] = useState<AccessProfile>({});
@@ -38,7 +39,7 @@ export default function SettingsPage() {
         setEmail(data.user.email ?? "");
         setName((data.user.user_metadata?.full_name as string) ?? "");
       }
-      setProvider(localStorage.getItem("nexaform:ai-provider") || "local");
+      setProvider(browserAiProvider(localStorage));
       setApiKey(localStorage.getItem("nexaform:ai-key") || "");
       setCostMode(localStorage.getItem("nexaform:cost-mode") || "auto");
 
@@ -73,15 +74,21 @@ export default function SettingsPage() {
   }
 
   function saveProvider() {
-    localStorage.setItem("nexaform:ai-provider", provider);
+    saveBrowserAiProvider(localStorage, provider as "openrouter" | "claude" | "local");
     if (provider === "local") {
       localStorage.removeItem("nexaform:ai-key");
+    } else if (apiKey.trim()) {
+      localStorage.setItem("nexaform:ai-key", apiKey.trim());
     } else {
-      localStorage.setItem("nexaform:ai-key", apiKey);
+      localStorage.removeItem("nexaform:ai-key");
     }
     localStorage.setItem("nexaform:cost-mode", costMode);
     toast.success("Preferências de IA salvas", {
-      description: provider === "local" ? "Usando o motor local (grátis)." : "Sua chave fica apenas no seu navegador.",
+      description: provider === "local"
+        ? "Modo template local ativado explicitamente."
+        : provider === "openrouter" && !apiKey.trim()
+        ? "OpenRouter automático da plataforma ativado."
+        : "Sua chave fica apenas no seu navegador.",
     });
   }
 
@@ -129,8 +136,8 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Cpu className="h-4 w-4" /> Motor de IA</CardTitle>
           <CardDescription>
-            O AD Studio funciona sem chave nenhuma (motor local). Conecte a sua para gerações mais inteligentes — a
-            chave fica somente no seu navegador e é enviada direto ao provedor.
+            O padrão é o OpenRouter automático da plataforma. Você pode informar uma chave pessoal ou escolher
+            conscientemente o modo template local; nunca há rebaixamento silencioso para demo.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -151,7 +158,7 @@ export default function SettingsPage() {
           </div>
           {provider !== "local" && (
             <div className="space-y-2">
-              <Label htmlFor="apikey">API key {provider === "claude" ? "da Anthropic" : "do OpenRouter"}</Label>
+              <Label htmlFor="apikey">API key {provider === "claude" ? "da Anthropic" : "do OpenRouter (opcional)"}</Label>
               <Input
                 id="apikey"
                 type="password"
@@ -159,6 +166,9 @@ export default function SettingsPage() {
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder={provider === "claude" ? "sk-ant-…" : "sk-or-…"}
               />
+              {provider === "openrouter" && (
+                <p className="text-xs text-muted-foreground">Sem chave pessoal, o AD Studio usa o OpenRouter configurado na plataforma.</p>
+              )}
             </div>
           )}
 

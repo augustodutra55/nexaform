@@ -14,6 +14,7 @@ describe("isRunnableReport — entregar quando roda, falhar só quando não abre
     expect(isRunnableReport({ errors: [{ code: "syntax_error", message: "" }] })).toBe(false);
     expect(isRunnableReport({ errors: [{ code: "missing_import", message: "" }] })).toBe(false);
     expect(isRunnableReport({ errors: [{ code: "missing_entry", message: "" }] })).toBe(false);
+    expect(isRunnableReport({ errors: [{ code: "auth_dead_end", message: "" }] })).toBe(false);
   });
 
   it("sem erros, é entregável", () => {
@@ -119,6 +120,30 @@ describe("validateAppProject conclusão funcional", () => {
     );
 
     expect(report.errors.some((entry) => entry.code === "missing_auth")).toBe(true);
+  });
+
+  it("reprova o caso odontológico: me/signOut sem entrar ou criar conta", () => {
+    const candidate = appWith(`
+      export default function Screen(){
+        React.useEffect(() => { AD.auth.me(); }, []);
+        return <main><button onClick={() => AD.auth.signOut()}>Sair</button></main>;
+      }
+    `);
+    candidate.files![0].content = `// AD_BACKEND: {"collections":[{"name":"patients","access":"authenticated"},{"name":"appointments","access":"authenticated"}]}\n${candidate.files![0].content}`;
+
+    const report = validateAppProject(candidate, buildGenerationPlan("programa odontológico com pacientes e agenda"));
+
+    expect(report.errors).toContainEqual(expect.objectContaining({ code: "auth_dead_end" }));
+    expect(report.valid).toBe(false);
+  });
+
+  it("exige entrar e criar conta quando a especificação pede autenticação", () => {
+    const report = validateAppProject(
+      appWith('export default function Screen(){ return <button onClick={() => AD.auth.signIn(email, senha)}>Entrar</button>; }'),
+      buildGenerationPlan("programa com login e cadastro")
+    );
+
+    expect(report.errors).toContainEqual(expect.objectContaining({ code: "missing_auth" }));
   });
 
   it("reprova jornada comercial obrigatória sem checkout", () => {

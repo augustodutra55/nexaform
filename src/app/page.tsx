@@ -89,7 +89,7 @@ const faqs = [
   },
   {
     q: "Posso usar minha própria chave de IA?",
-    a: "Sim. Nas configurações você conecta sua chave da Anthropic ou OpenRouter — ela fica apenas no seu navegador. Sem chave, o motor local do AD Studio gera tudo em modo demo, sem custo.",
+    a: "Sim. O padrão é o OpenRouter automático da plataforma. Se preferir, você pode usar sua própria chave da Anthropic ou OpenRouter — ela fica apenas no seu navegador. O template local é um modo demo opcional e nunca substitui uma geração real silenciosamente.",
   },
   {
     q: "O que acontece quando atinjo o limite do plano Free?",

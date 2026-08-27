@@ -1,5 +1,6 @@
 import type { AppCode, AppFile, GenerationPlan, ProjectQualityIssue, ProjectQualityReport } from "./app-types";
 import ts from "typescript";
+import { buildBackendBlueprint } from "./backend-blueprint";
 
 const SCRIPT_EXTENSIONS = ["", ".jsx", ".js", ".tsx", ".ts"];
 const FORBIDDEN_IMPORTS = new Set([
@@ -42,6 +43,9 @@ export const FATAL_ISSUE_CODES = new Set<string>([
   "missing_default_export",
   "react_router",
   "location_navigation",
+  // O React pode montar, mas nenhum usuário consegue alcançar os dados. Para um
+  // produto de gestão isto é tão terminal quanto um import quebrado.
+  "auth_dead_end",
 ]);
 
 /** true quando o app RODA (nenhum erro fatal), mesmo que falte completude. */
@@ -195,9 +199,24 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
   }
   if (plan?.requiredCapabilities.some((capability) => /autentica|sess[aã]o/i.test(capability))) {
     const joined = reachableSource || files.map((file) => file.content).join("\n");
-    if (!/(?:window\.)?AD\s*\.\s*auth|\b(?:signIn|signUp|login|logout)\b/i.test(joined)) {
-      errors.push(issue("missing_auth", "O pedido exige autenticação, mas nenhum fluxo de sessão foi implementado."));
+    const hasSignIn = /(?:window\.)?AD\s*\.\s*auth\s*\.\s*signIn\s*\(/i.test(joined);
+    const hasSignUp = /(?:window\.)?AD\s*\.\s*auth\s*\.\s*signUp\s*\(/i.test(joined);
+    if (!hasSignIn || !hasSignUp) {
+      errors.push(issue(
+        "missing_auth",
+        "O pedido exige autenticação, mas o aplicativo precisa oferecer tanto entrar quanto criar a primeira conta."
+      ));
     }
+  }
+  const backend = buildBackendBlueprint(app);
+  const protectedCollections = backend.collections.filter((collection) => collection.profile === "authenticated");
+  const joinedForAuth = reachableSource || files.map((file) => file.content).join("\n");
+  const hasAuthEntry = /(?:window\.)?AD\s*\.\s*auth\s*\.\s*(?:signIn|signUp)\s*\(/i.test(joinedForAuth);
+  if (protectedCollections.length && !hasAuthEntry) {
+    errors.push(issue(
+      "auth_dead_end",
+      `Os dados protegidos (${protectedCollections.map((collection) => collection.collection).join(", ")}) não podem ser acessados: falta uma tela funcional de entrar/criar conta.`
+    ));
   }
   if (plan?.requiredCapabilities.some((capability) => /jornada comercial|pagamento/i.test(capability))) {
     const joined = reachableSource || files.map((file) => file.content).join("\n");

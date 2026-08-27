@@ -68,6 +68,39 @@ describe("buildBackendBlueprint", () => {
     expect(blueprint.collections[0].dataContract.allowUnknown).toBe(false);
   });
 
+  it("provisiona campos quando o gerador usa a forma de lista", () => {
+    const blueprint = buildBackendBlueprint(
+      app(
+        '// AD_BACKEND: {"collections":[{"name":"clients","fields":[{"name":"name","type":"string","required":true},{"name":"notes","type":"text"}]}]}\n' +
+        "await AD.auth.signUp(email, password, name); await AD.query('clients')"
+      )
+    );
+
+    expect(blueprint.collections[0]).toMatchObject({
+      collection: "clients",
+      profile: "authenticated",
+      dataContract: {
+        fields: {
+          name: { type: "string", required: true },
+          notes: { type: "string" },
+        },
+      },
+    });
+  });
+
+  it("entende o alias legado access e denuncia dados protegidos sem entrada", () => {
+    const blueprint = buildBackendBlueprint(
+      app(
+        '// AD_BACKEND: {"collections":[{"name":"patients","access":"authenticated"}]}\n' +
+        "await AD.auth.me(); await AD.list('patients')"
+      )
+    );
+
+    expect(blueprint.collections[0].profile).toBe("authenticated");
+    expect(blueprint.status).toBe("review");
+    expect(blueprint.warnings.join(" ")).toMatch(/não oferece entrar nem criar conta/i);
+  });
+
   it("não libera leitura pública inferida quando o app usa login", () => {
     const blueprint = buildBackendBlueprint(
       app("await AD.auth.me(); await AD.list('perfil')")

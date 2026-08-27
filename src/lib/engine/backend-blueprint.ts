@@ -36,6 +36,8 @@ export interface BackendBlueprint {
 interface ManifestCollection {
   name?: unknown;
   profile?: unknown;
+  /** Compatibilidade com manifestos antigos gerados antes de `profile`. */
+  access?: unknown;
   allowedRoles?: unknown;
   authenticatedScope?: unknown;
   fields?: unknown;
@@ -97,10 +99,20 @@ function manifestFrom(files: AppFile[]): { collections: ManifestCollection[] } |
 }
 
 function normalizeFields(raw: unknown): DataContract {
+  const fields = Array.isArray(raw)
+    ? Object.fromEntries(raw
+        .filter((item): item is Record<string, unknown> =>
+          !!item && typeof item === "object" && typeof (item as Record<string, unknown>).name === "string")
+        .map((item) => {
+          const { name, ...rule } = item;
+          if (rule.type === "text") rule.type = "string";
+          return [String(name), rule];
+        }))
+    : raw;
   const result = normalizeDataContract({
     version: 1,
     allowUnknown: true,
-    fields: raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {},
+    fields: fields && typeof fields === "object" && !Array.isArray(fields) ? fields : {},
   });
   return result.contract || EMPTY_DATA_CONTRACT;
 }
@@ -113,8 +125,9 @@ function manifestBlueprint(
   for (const item of manifest.collections.slice(0, 60)) {
     const name = typeof item.name === "string" ? item.name.trim() : "";
     if (!COLLECTION_RE.test(name)) continue;
-    const profile = typeof item.profile === "string" && PROFILES.includes(item.profile as CollectionProfile)
-      ? (item.profile as CollectionProfile)
+    const declaredProfile = typeof item.profile === "string" ? item.profile : item.access;
+    const profile = typeof declaredProfile === "string" && PROFILES.includes(declaredProfile as CollectionProfile)
+      ? (declaredProfile as CollectionProfile)
       : usesAuth
         ? "authenticated"
         : "private";
@@ -303,6 +316,7 @@ export function buildBackendBlueprint(app: AppCode): BackendBlueprint {
   const files = appFiles(app);
   const joined = files.map((file) => file.content).join("\n");
   const usesAuth = /(?:window\.)?AD\.auth\.(?:signUp|signIn|me|signOut)\s*\(/.test(joined);
+  const hasAuthEntry = /(?:window\.)?AD\.auth\.(?:signUp|signIn)\s*\(/.test(joined);
   const manifest = manifestFrom(files);
   const declared = manifest ? manifestBlueprint(manifest, usesAuth) : [];
   const inferred = inferredBlueprint(files, usesAuth);
@@ -329,6 +343,14 @@ export function buildBackendBlueprint(app: AppCode): BackendBlueprint {
     .map((collection) => `${collection.collection}: ${collection.reason}`);
   if (usesAuth && collections.length === 0) {
     warnings.push("O aplicativo usa login, mas nenhuma coleção de dados foi encontrada.");
+  }
+  const unreachableProtected = collections
+    .filter((collection) => collection.profile === "authenticated")
+    .map((collection) => collection.collection);
+  if (unreachableProtected.length && !hasAuthEntry) {
+    warnings.push(
+      `As coleções ${unreachableProtected.join(", ")} exigem autenticação, mas o aplicativo não oferece entrar nem criar conta.`
+    );
   }
   const automation = buildAutomationBlueprint(app);
   warnings.push(...automation.warnings);

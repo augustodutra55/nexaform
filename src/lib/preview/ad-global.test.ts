@@ -36,3 +36,23 @@ describe("adGlobalScript — primitivo AD.settings (admin no motor)", () => {
     expect(s.trim().endsWith("</script>")).toBe(true);
   });
 });
+
+describe("adGlobalScript — autenticação de apps gerados", () => {
+  it("aceita credenciais posicionais e em objeto sem simular sessão", () => {
+    const source = adGlobalScript(PID);
+
+    expect(source).toContain("function authCredentials(email,password,name)");
+    expect(source).toContain("typeof email==='object'");
+    expect(source).toContain("var c=authCredentials(email,password,name)");
+    expect(source).toContain("var c=authCredentials(email,password)");
+  });
+
+  it("mantém aliases de dados emitidos por gerações legadas", () => {
+    const source = adGlobalScript(PID);
+
+    expect(source).toContain("query: listData");
+    expect(source).toContain("select: listData");
+    expect(source).toContain("delete: removeData");
+    expect(source).toContain("third===undefined?first:second");
+  });
+});

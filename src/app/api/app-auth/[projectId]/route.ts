@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { authorizeProject, consumeRateLimit, isUuid, requestRateKey } from "@/lib/engine/data-guard";
+import { verifyGoldenOwnerProject } from "@/lib/golden-auth";
 
 /**
  * Login de usuário final dos apps gerados. Cadastro/entrada por email+senha,
@@ -97,7 +98,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   if (!admin) return bad("Autenticação não configurada (defina SUPABASE_SERVICE_ROLE_KEY na Vercel).", 501);
 
   // Só apps publicados (ou o dono no preview) podem ter login de usuário.
-  const guard = await authorizeProject(await createClient(), projectId, "write");
+  const goldenOwner = await verifyGoldenOwnerProject(req, projectId, admin);
+  const guard = goldenOwner
+    ? { allowed: true }
+    : await authorizeProject(await createClient(), projectId, "write");
   if (!guard.allowed) return NextResponse.json({ error: guard.error }, { status: guard.status });
 
   let body: any;

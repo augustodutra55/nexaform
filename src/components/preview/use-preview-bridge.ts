@@ -11,6 +11,18 @@ const METHODS: Record<BridgeKind, string[]> = {
 };
 const sessionKey = (projectId: string) => `adstudio:app-token:${projectId}`;
 
+export function bridgeErrorMessage(payload: unknown, status: number): string {
+  if (payload && typeof payload === "object") {
+    const error = (payload as { error?: unknown }).error;
+    if (typeof error === "string" && error.trim()) return error.slice(0, 500);
+    if (error && typeof error === "object") {
+      const message = (error as { message?: unknown }).message;
+      if (typeof message === "string" && message.trim()) return message.slice(0, 500);
+    }
+  }
+  return `Erro ${status}`;
+}
+
 function speechVoiceScore(voice: SpeechSynthesisVoice, requestedLang: string): number {
   const requested = String(requestedLang || "pt-BR").toLowerCase().replace("_", "-");
   const language = String(voice.lang || "").toLowerCase().replace("_", "-");
@@ -280,7 +292,7 @@ export function usePreviewBridge(
           window.location.assign(payload.checkout.url);
         }
         reply(source, id, { ok: response.ok, status: response.status, payload,
-          error: response.ok ? undefined : payload?.error || `Erro ${response.status}` });
+          error: response.ok ? undefined : bridgeErrorMessage(payload, response.status) });
       } catch (error) {
         reply(source, id, { ok: false, status: 500,
           error: error instanceof Error ? error.message : "Falha na comunicação com o app." });

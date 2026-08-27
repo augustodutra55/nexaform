@@ -7,8 +7,10 @@ import type { RuntimeAuditReport } from "@/lib/preview/runtime-audit";
 
 export function GoldenRuntimeHarness({
   fixture,
+  projectId,
 }: {
   fixture: { id: string; name: string; app: AppCode };
+  projectId: string | null;
 }) {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
@@ -31,6 +33,7 @@ export function GoldenRuntimeHarness({
         entry={fixture.app.entry}
         version={`golden-${fixture.id}`}
         engineMode="real"
+        projectId={projectId}
         onReady={() => setReady(true)}
         onError={setError}
         onAudit={setAudit}

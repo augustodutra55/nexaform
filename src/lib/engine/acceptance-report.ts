@@ -1,6 +1,7 @@
 import type { AppCode, GenerationPlan, ProjectQualityReport } from "./app-types";
 import { isMultiFile } from "./app-types";
 import type { RuntimeAuditReport } from "@/lib/preview/runtime-audit";
+import { buildBackendBlueprint } from "./backend-blueprint";
 
 export type AcceptanceStatus = "passed" | "warning" | "blocked" | "pending";
 
@@ -36,7 +37,8 @@ function projectSource(app: AppCode | null): string {
 function capabilityEvidence(capability: string, source: string): boolean {
   const normalized = capability.toLowerCase();
   if (normalized.indexOf("autentica") >= 0 || normalized.indexOf("sessão") >= 0) {
-    return /window\.AD\s*\.\s*auth|\bAD\s*\.\s*auth|login|logout|signIn|signUp/i.test(source);
+    return /(?:window\.)?AD\s*\.\s*auth\s*\.\s*signIn\s*\(/i.test(source)
+      && /(?:window\.)?AD\s*\.\s*auth\s*\.\s*signUp\s*\(/i.test(source);
   }
   if (normalized.indexOf("formul") >= 0) {
     return /<form\b|onSubmit\s*=|type=["']submit["']/i.test(source);
@@ -104,6 +106,37 @@ export function buildAcceptanceReport(input: AcceptanceInput): AcceptanceReport 
     });
   }
 
+  if (app) {
+    const backend = buildBackendBlueprint(app);
+    const protectedCollections = backend.collections.filter((collection) => collection.profile === "authenticated");
+    const hasAuthEntry = /(?:window\.)?AD\s*\.\s*auth\s*\.\s*(?:signIn|signUp)\s*\(/i.test(source);
+    const privateMutations = backend.collections.filter((collection) =>
+      collection.profile === "private" && collection.operations.some((operation) => operation !== "read")
+    );
+    if (protectedCollections.length && !hasAuthEntry) {
+      items.push({
+        id: "backend-access",
+        label: "Acesso aos dados",
+        detail: `As coleções ${protectedCollections.map((collection) => collection.collection).join(", ")} exigem autenticação, mas o aplicativo não permite entrar ou criar conta.`,
+        status: "blocked",
+      });
+    } else if (privateMutations.length && !backend.usesAuth) {
+      items.push({
+        id: "backend-access",
+        label: "Acesso aos dados",
+        detail: `O aplicativo funciona para o dono no editor, mas não pode ser publicado sem login: ${privateMutations.map((collection) => collection.collection).join(", ")} permanece privada.`,
+        status: "blocked",
+      });
+    } else if (backend.collections.length) {
+      items.push({
+        id: "backend-access",
+        label: "Acesso aos dados",
+        detail: `${backend.collections.length} coleção(ões) com contrato de acesso coerente com o aplicativo.`,
+        status: backend.status === "ready" ? "passed" : "warning",
+      });
+    }
+  }
+
   if (previewHealth === "checking") {
     items.push({ id: "runtime", label: "Preview funcional", detail: "Executando a verificação em desktop e mobile.", status: "pending" });
   } else if (runtime) {
@@ -123,7 +156,7 @@ export function buildAcceptanceReport(input: AcceptanceInput): AcceptanceReport 
       detail: runtime.smoke
         ? `${runtime.smoke.attempted} controle(s) seguro(s) percorrido(s); ${runtime.smoke.changed} mudança(s) de tela comprovada(s); ${runtime.smoke.fieldsEditable}/${runtime.smoke.fieldsAttempted} campo(s) editável(is) validado(s).`
         : "Use “Testar fluxos” no preview para percorrer menus, abas e campos editáveis deste aplicativo.",
-      status: runtime.smoke ? (runtime.smoke.attempted > 0 && runtime.smoke.changed === 0 ? "warning" : "passed") : "warning",
+      status: runtime.smoke ? (runtime.smoke.changed > 0 ? "passed" : "warning") : "warning",
     });
     if (runtime.smoke?.fieldsAttempted) {
       items.push({

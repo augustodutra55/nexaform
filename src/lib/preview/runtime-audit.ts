@@ -123,6 +123,16 @@ export function runtimeAuditSource(): string {
     var landmarks=Array.from(root.querySelectorAll('main,[data-testid$="-screen"],[role="main"]')).filter(nxVisible).map(function(el){return String(el.getAttribute('data-testid')||nxControlLabel(el)).slice(0,100);}).join('|');
     return (headings+'#'+landmarks+'#'+String(root.innerText||'').replace(/\\s+/g,' ').trim().slice(0,240)).slice(0,900);
   }
+  function nxInteractionState(){
+    return {
+      screen:nxScreenSignature(),
+      scroll:Math.max(0,Number(window.scrollY||document.documentElement.scrollTop||document.body&&document.body.scrollTop||0)),
+      url:String(location.pathname||'')+String(location.search||'')+String(location.hash||'')
+    };
+  }
+  function nxInteractionChanged(previous,next){
+    return !!next.screen&&(next.screen!==previous.screen||next.url!==previous.url||Math.abs(next.scroll-previous.scroll)>16);
+  }
   function nxSafeNavigationControls(){
     var destructive=/\\b(excluir|remover|apagar|deletar|delete|comprar|pagar|checkout|enviar|salvar|criar|adicionar|confirmar|sair|logout|cancelar)\\b/i;
     return Array.from(document.querySelectorAll('nav button,nav a,[role="navigation"] button,[role="navigation"] a,[role="tab"],header button,header a'))
@@ -180,7 +190,7 @@ export function runtimeAuditSource(): string {
     var controls=nxSafeNavigationControls(), attempted=0, changed=0, labels=[];
     var fields={fieldsAttempted:0,fieldsEditable:0,fieldLabels:[]}, seenFields={};
     nxProbeFields(seenFields,fields);
-    var previous=nxScreenSignature();
+    var previous=nxInteractionState();
     for(var index=0;index<controls.length;index++){
       var original=controls[index], label=nxControlLabel(original);
       var current=Array.from(document.querySelectorAll('button,a,[role="tab"]')).find(function(el){return nxVisible(el)&&nxControlLabel(el)===label;});
@@ -188,9 +198,9 @@ export function runtimeAuditSource(): string {
       attempted+=1; labels.push(label);
       try{current.click();}catch(e){}
       await nxWait(180);
-      var next=nxScreenSignature();
-      if(next&&next!==previous)changed+=1;
-      previous=next||previous;
+      var next=nxInteractionState();
+      if(nxInteractionChanged(previous,next))changed+=1;
+      previous=next.screen?next:previous;
       nxProbeFields(seenFields,fields);
       if(document.querySelector('.nx-error'))break;
     }

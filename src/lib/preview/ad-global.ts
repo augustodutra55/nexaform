@@ -147,17 +147,32 @@ export function adGlobalScript(
     if(opts.offset != null) qs += '&offset=' + encodeURIComponent(opts.offset);
     return qs;
   }
+  function listData(collection, opts){
+    return req('GET', { qs: buildQs(collection, opts) }).then(function(r){ return r.items || []; });
+  }
+  function updateData(first, second, third){
+    var id=third===undefined?first:second, data=third===undefined?second:third;
+    return req('PATCH', { body:{ id:id, data:data||{} } }).then(function(r){ return r.item; });
+  }
+  function removeData(first, second){
+    var id=second===undefined?first:second;
+    return req('DELETE', { qs:'?id=' + encodeURIComponent(id) }).then(function(){ return true; });
+  }
   window.AD = {
     enabled: true,
     // list(colecao) OU list(colecao, { where, search, searchField, sort, limit, offset })
-    list: function(collection, opts){ return req('GET', { qs: buildQs(collection, opts) }).then(function(r){ return r.items || []; }); },
+    list: listData,
+    // Compatibilidade com apps gerados antes da padronização dos nomes.
+    query: listData,
+    select: listData,
     // get(colecao, id) → um registro (ou null)
     get: function(collection, id){ return req('GET', { qs:'?collection=' + encodeURIComponent(collection||'default') + '&id=' + encodeURIComponent(id) }).then(function(r){ return r.item || null; }); },
     // count(colecao, where?) → número de registros que batem no filtro
     count: function(collection, where){ var o = where ? { where: where } : {}; return req('GET', { qs: buildQs(collection, o) + '&count=1' }).then(function(r){ return r.count || 0; }); },
     insert: function(collection, data){ return req('POST', { body:{ collection: collection||'default', data: data||{} } }).then(function(r){ return r.item; }); },
-    update: function(id, data){ return req('PATCH', { body:{ id: id, data: data||{} } }).then(function(r){ return r.item; }); },
-    remove: function(id){ return req('DELETE', { qs:'?id=' + encodeURIComponent(id) }).then(function(){ return true; }); },
+    update: updateData,
+    remove: removeData,
+    delete: removeData,
     // Upload de arquivo/imagem (File ou Blob) → devolve a URL pública.
     upload: function(file){
       return bridge('upload',{method:'POST',file:file,fileName:file&&file.name})
@@ -441,9 +456,24 @@ export function adGlobalScript(
     opts = opts || {};
     return bridge('auth',{method:opts.method||'POST',qs:opts.qs||'',body:opts.body});
   }
+  function authCredentials(email,password,name){
+    if(email && typeof email==='object'){
+      return {
+        email:String(email.email||''),
+        password:String(email.password||''),
+        name:email.name==null?undefined:String(email.name)
+      };
+    }
+    return {
+      email:String(email||''),
+      password:String(password||''),
+      name:name==null?undefined:String(name)
+    };
+  }
   window.AD.auth = {
-    signUp: function(email, password, name){ return authFetch({ body:{ action:'signup', email:email, password:password, name:name } }).then(function(j){ setTok(j.token); return j.user; }); },
-    signIn: function(email, password){ return authFetch({ body:{ action:'login', email:email, password:password } }).then(function(j){ setTok(j.token); return j.user; }); },
+    // Aceita argumentos separados ou um objeto com email, password e name.
+    signUp: function(email, password, name){ var c=authCredentials(email,password,name); return authFetch({ body:{ action:'signup', email:c.email, password:c.password, name:c.name } }).then(function(j){ setTok(j.token); return j.user; }); },
+    signIn: function(email, password){ var c=authCredentials(email,password); return authFetch({ body:{ action:'login', email:c.email, password:c.password } }).then(function(j){ setTok(j.token); return j.user; }); },
     signOut: function(){ return authFetch({ body:{ action:'logout' } }).catch(function(){}).then(function(){ setTok(null); return true; }); },
     me: function(){ return authFetch({ method:'GET', qs:'?me=1' }).then(function(j){ if(j.user)setTok('bridge-session'); return j.user; }).catch(function(){ return null; }); },
     token: getTok

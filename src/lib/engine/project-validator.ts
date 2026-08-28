@@ -230,7 +230,7 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
     const requestedSections: Array<[RegExp, RegExp, string]> = [
       [/\bfaq\b|perguntas frequentes/i, /\bfaq\b|perguntas frequentes/i, "FAQ"],
       [/prova social|depoimentos?|testimonials?/i, /prova social|depoimentos?|testimonials?|avalia[çc][aã]o m[eé]dia/i, "prova social/depoimentos"],
-      [/benef[ií]cios?|vantagens?/i, /benef[ií]cios?|vantagens?/i, "benefícios"],
+      [/benef[ií]cios?|vantagens?/i, /benef[ií]cios?|vantagens?|\bbenefits?\b/i, "benefícios"],
     ];
     for (const [requestPattern, evidencePattern, label] of requestedSections) {
       if (requestPattern.test(requested) && !evidencePattern.test(joined)) {

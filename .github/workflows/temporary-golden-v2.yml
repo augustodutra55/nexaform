@@ -13,6 +13,7 @@ on:
       - "src/app/e2e-runtime/golden/**"
       - "src/components/preview/**"
       - "src/lib/golden-auth.ts"
+      - "src/lib/golden-backend-error.ts"
       - "src/lib/engine/project-validator.ts"
       - "src/lib/preview/**"
   push:
@@ -26,6 +27,7 @@ on:
       - "src/app/e2e-runtime/golden/**"
       - "src/components/preview/**"
       - "src/lib/golden-auth.ts"
+      - "src/lib/golden-backend-error.ts"
       - "src/lib/engine/project-validator.ts"
       - "src/lib/preview/**"
 
@@ -72,7 +74,7 @@ jobs:
             exit 1
           fi
 
-      - name: Resolver backend real da revisão Vercel
+      - name: Aguardar publicação Vercel e usar o domínio público
         if: github.event_name != 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -87,13 +89,16 @@ jobs:
               runtime_url="$(gh api "repos/$GITHUB_REPOSITORY/deployments/$deployment_id/statuses?per_page=100" \
                 --jq '[.[] | select(.state == "success" and (.environment_url // "") != "")][0].environment_url // empty')"
               if [ -n "$runtime_url" ]; then
-                echo "GOLDEN_RUNTIME_API_URL=$runtime_url" >> "$GITHUB_ENV"
+                # A URL imutável do deployment confirma que esta revisão já foi
+                # publicada, mas é protegida por Vercel Authentication. O alias
+                # público aponta para a mesma revisão de produção e chega ao app.
+                echo "GOLDEN_RUNTIME_API_URL=$PRODUCTION_URL" >> "$GITHUB_ENV"
                 exit 0
               fi
             fi
             sleep 10
           done
-          echo "::error::Preview Vercel verde não foi encontrado para $TARGET_SHA."
+          echo "::error::Deploy Vercel verde não foi encontrado para $TARGET_SHA."
           exit 1
 
       - name: Usar produção no disparo manual

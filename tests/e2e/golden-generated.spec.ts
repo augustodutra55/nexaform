@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
+import { formatGoldenBackendError } from "../../src/lib/golden-backend-error";
 
 interface GoldenFixture {
   id: string;
@@ -107,7 +108,7 @@ async function provisionGoldenBackend(fixture: GoldenFixture) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.applied !== true) {
-    throw new Error(payload?.error || `Backend Golden não foi provisionado (HTTP ${response.status}).`);
+    throw new Error(formatGoldenBackendError(payload, response.status));
   }
 }
 

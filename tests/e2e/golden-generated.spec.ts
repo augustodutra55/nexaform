@@ -152,15 +152,27 @@ async function assertAgendaAuthAndCrud(page: Page, fixture: GoldenFixture) {
   if (await name.count()) await name.fill("Paciente Golden");
   const submit = frame.locator('button[type="submit"]:visible, form button:visible').filter({ hasText: /criar|cadastrar|registrar|entrar/i }).first();
   await expect(submit, "O cadastro precisa ter uma ação de envio real").toBeVisible();
+  const signupResponsePromise = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === "POST" && /\/api\/app-auth\//.test(url.pathname);
+  }, { timeout: 30_000 });
   await submit.click();
+
+  const signupResponse = await signupResponsePromise;
+  const signupPayload = await signupResponse.json().catch(() => ({}));
+  expect(
+    signupResponse.ok(),
+    `O cadastro real falhou (HTTP ${signupResponse.status()}): ${formatGoldenBackendError(signupPayload, signupResponse.status())}`
+  ).toBeTruthy();
+  expect(signupPayload?.user?.id, "O backend de cadastro precisa devolver o usuário criado").toBeTruthy();
 
   await expect.poll(async () => body.innerText(), { timeout: 20_000, message: "O cadastro precisa abrir o aplicativo" })
     .not.toBe(before);
-  const authenticated = await body.evaluate(async () => {
+  await expect.poll(async () => body.evaluate(async () => {
     const ad = (window as any).AD;
-    return ad?.auth?.me ? await ad.auth.me() : null;
-  });
-  expect(authenticated?.id, "A interface de cadastro precisa criar uma sessão real").toBeTruthy();
+    const authenticated = ad?.auth?.me ? await ad.auth.me() : null;
+    return authenticated?.id || null;
+  }), { timeout: 30_000, message: "A interface de cadastro precisa manter uma sessão real" }).toBeTruthy();
 
   const target = crudTarget(fixture);
   const crud = await body.evaluate(async (_body, input) => {

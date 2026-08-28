@@ -42,8 +42,8 @@ concurrency:
 jobs:
   golden:
     # O preview da Vercel exige SSO e devolve 302 antes de chegar ao app.
-    # A certificação funcional roda após o deploy público de main.
-    if: github.event_name != 'pull_request'
+    # PRs dedicadas certify/* apenas disparam a prova contra a produção pública.
+    if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'certify/')
     name: 5 apps reais · semântica e runtime
     runs-on: ubuntu-latest
     timeout-minutes: 60

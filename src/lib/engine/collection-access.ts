@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 import { isOwner } from "@/lib/access";
+import { verifyGoldenOwnerProject } from "@/lib/golden-auth";
 import { isUuid } from "@/lib/engine/data-guard";
 import {
   EMPTY_DATA_CONTRACT,
@@ -42,6 +43,10 @@ const COLLECTION_RE = /^[a-zA-Z0-9À-ÿ_-]{1,80}$/;
 
 export function isCollectionName(value: string): boolean {
   return COLLECTION_RE.test(value);
+}
+
+export function permitsProjectRuntime(published: boolean, goldenOwner: boolean): boolean {
+  return published || goldenOwner;
 }
 
 export const PRIVATE_PERMISSIONS: CollectionPermissions = {
@@ -251,7 +256,14 @@ export async function authorizeCollectionOperation(
     };
   }
 
-  if (!project.published) return denied(403, "Este projeto ainda não está publicado.");
+  // A suíte Golden exerce um projeto privado do owner. O bypass só existe
+  // quando a requisição carrega a assinatura HMAC válida e o projeto pertence
+  // à conta administrativa; as permissões da coleção e a sessão do app_user
+  // continuam obrigatórias logo abaixo.
+  const goldenOwner = !project.published && await verifyGoldenOwnerProject(req, projectId, admin);
+  if (!permitsProjectRuntime(project.published, goldenOwner)) {
+    return denied(403, "Este projeto ainda não está publicado.");
+  }
 
   const appUser = await appUserFromRequest(req, admin, projectId);
   const actor = appUser ? "app_user" : "public";

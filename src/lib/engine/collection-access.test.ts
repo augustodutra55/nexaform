@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   decideCollectionAccess,
+  permitsProjectRuntime,
   PRIVATE_PERMISSIONS,
   type CollectionPermissions,
 } from "./collection-access";
@@ -10,6 +11,12 @@ function permissions(overrides: Partial<CollectionPermissions>): CollectionPermi
 }
 
 describe("autorização de coleções", () => {
+  it("mantém projeto privado bloqueado e libera apenas o owner Golden autenticado", () => {
+    expect(permitsProjectRuntime(false, false)).toBe(false);
+    expect(permitsProjectRuntime(false, true)).toBe(true);
+    expect(permitsProjectRuntime(true, false)).toBe(true);
+  });
+
   it("mantém coleção privada inacessível fora do painel do dono", () => {
     const result = decideCollectionAccess(PRIVATE_PERMISSIONS, "read", {
       id: "user-1",

@@ -15,6 +15,7 @@ on:
       - "src/lib/golden-auth.ts"
       - "src/lib/golden-backend-error.ts"
       - "src/lib/engine/project-validator.ts"
+      - "src/lib/engine/collection-access.ts"
       - "src/lib/preview/**"
   push:
     branches: [main]
@@ -29,6 +30,7 @@ on:
       - "src/lib/golden-auth.ts"
       - "src/lib/golden-backend-error.ts"
       - "src/lib/engine/project-validator.ts"
+      - "src/lib/engine/collection-access.ts"
       - "src/lib/preview/**"
 
 permissions:

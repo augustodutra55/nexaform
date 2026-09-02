@@ -252,7 +252,10 @@ async function assertAuthenticatedNavigation(page: Page, fixture: GoldenFixture)
     const control = controls.nth(index);
     const label = (await control.innerText().catch(() => "")).trim();
     if (/excluir|remover|apagar|deletar|delete|comprar|pagar|checkout|enviar|salvar|criar|adicionar|confirmar|sair|logout|cancelar/i.test(label)) continue;
-    await control.click();
+    // O editor visual mantém uma camada transparente sobre o iframe para
+    // seleção de elementos. Dispare o clique DOM, como o smoke do runtime,
+    // para validar o handler React sem a camada interceptar o ponteiro.
+    await control.dispatchEvent("click");
     try {
       await expect.poll(async () => body.innerText(), { timeout: 2_000 }).not.toBe(before);
       changed = true;

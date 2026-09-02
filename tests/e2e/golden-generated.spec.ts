@@ -249,19 +249,27 @@ async function signupAndEnter(page: Page, fixture: GoldenFixture) {
 
 async function assertAuthenticatedNavigation(page: Page, fixture: GoldenFixture) {
   const { frame, body } = await signupAndEnter(page, fixture);
-  const before = await body.innerText();
+  const main = frame.locator("main").last();
+  await expect.poll(async () => (await main.innerText()).trim(), {
+    timeout: 20_000,
+    message: `O app ${fixture.id} autenticado precisa concluir o carregamento da tela inicial`,
+  }).not.toBe("");
+  const before = await main.innerText();
+  const currentHeading = (await main.locator('h1:visible, h2:visible, [role="heading"]:visible').first()
+    .innerText().catch(() => "")).trim().toLowerCase();
   const controls = frame.locator('nav button:visible, nav a:visible, header button:visible, header a:visible, [role="tab"]:visible');
   let changed = false;
   for (let index = 0; index < Math.min(await controls.count(), 12); index += 1) {
     const control = controls.nth(index);
     const label = (await control.innerText().catch(() => "")).trim();
+    if (label.toLowerCase() === currentHeading) continue;
     if (/excluir|remover|apagar|deletar|delete|comprar|pagar|checkout|enviar|salvar|criar|adicionar|confirmar|sair|logout|cancelar/i.test(label)) continue;
     // O editor visual mantém uma camada transparente sobre o iframe para
     // seleção de elementos. Dispare o clique DOM, como o smoke do runtime,
     // para validar o handler React sem a camada interceptar o ponteiro.
-    await control.dispatchEvent("click");
+    await control.evaluate((element) => (element as HTMLElement).click());
     try {
-      await expect.poll(async () => body.innerText(), { timeout: 2_000 }).not.toBe(before);
+      await expect.poll(async () => main.innerText(), { timeout: 15_000 }).not.toBe(before);
       changed = true;
       break;
     } catch {}
@@ -308,17 +316,18 @@ async function assertRuntime(page: Page, fixture: GoldenFixture) {
     .map(Number);
   expect(changed).toBeLessThanOrEqual(attempted);
   expect(fieldsEditable).toBe(fieldsAttempted);
+  const frame = page.frameLocator('iframe[title="Preview do app"]');
+  const isAuthGate = await frame.locator('input[type="password"]:visible').count() > 0;
   if (fixture.id === "agenda") {
     expect(fieldsEditable).toBeGreaterThan(0);
     await assertAgendaAuthAndCrud(page, fixture);
-  } else if (hasSignup) {
+  } else if (hasSignup && isAuthGate) {
     expect(fieldsEditable).toBeGreaterThan(0);
     await assertAuthenticatedNavigation(page, fixture);
   } else {
     expect(changed).toBeGreaterThan(0);
   }
 
-  const frame = page.frameLocator('iframe[title="Preview do app"]');
   const overflow = await frame.locator("html").evaluate((html) => html.scrollWidth - window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(8);
 }

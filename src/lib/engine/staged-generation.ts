@@ -235,7 +235,7 @@ export function stagedBuildStages(): StagedBuildStage[] {
       id: "quality",
       label: "Revisão e acabamento",
       instruction:
-        "Faça uma revisão final focada nos fluxos críticos: corrija imports, navegação, estados, validações, responsividade e acessibilidade. Para seções pequenas ausentes, prefira inseri-las em um componente já renderizado; só adicione um import quando criar o arquivo correspondente na mesma resposta. Não adicione módulos grandes novos. Altere apenas os arquivos indispensáveis, no máximo 5, e preserve os recursos funcionais já construídos.",
+        "Faça uma revisão final focada nos fluxos críticos: corrija imports, navegação, estados, validações, responsividade e acessibilidade. Audite explicitamente 320px e elimine qualquer overflow horizontal: grupos de métricas, selos, botões e cards devem quebrar ou empilhar (flex-wrap, flex-col sm:flex-row ou grade responsiva), com min-w-0/max-w-full quando necessário; não deixe inline-flex rígido com vários itens. Para seções pequenas ausentes, prefira inseri-las em um componente já renderizado; só adicione um import quando criar o arquivo correspondente na mesma resposta. Não adicione módulos grandes novos. Altere apenas os arquivos indispensáveis, no máximo 5, e preserve os recursos funcionais já construídos.",
     },
   ];
 }

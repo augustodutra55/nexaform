@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { formatGoldenBackendError } from "../../src/lib/golden-backend-error";
+import { buildBackendBlueprint } from "../../src/lib/engine/backend-blueprint";
 
 interface GoldenFixture {
   id: string;
@@ -62,14 +63,28 @@ function fieldsOf(collection: ManifestCollection): ManifestField[] {
 }
 
 function crudTarget(fixture: GoldenFixture): { collection: string; data: Record<string, unknown> } {
-  const candidates = manifestCollections(fixture).filter((collection) => {
-    const profile = collection.profile || collection.access;
-    const authenticated = profile === "authenticated"
-      || Object.values(collection.permissions || {}).some((value) => value === "authenticated");
-    return authenticated && !fieldsOf(collection).some((field) => field.required && field.reference?.collection);
-  });
+  const blueprint = buildBackendBlueprint(fixture.app as any);
+  const fullCrud = new Set(
+    blueprint.collections
+      .filter((collection) =>
+        collection.profile === "authenticated"
+        && ["read", "insert", "update", "delete"].every((operation) =>
+          collection.operations.includes(operation as "read" | "insert" | "update" | "delete")
+        )
+      )
+      .map((collection) => collection.collection)
+  );
+  const candidates = manifestCollections(fixture).filter((collection) =>
+    !!collection.name
+    && fullCrud.has(collection.name)
+    && !fieldsOf(collection).some((field) => field.required && field.reference?.collection)
+  );
   const selected = candidates[0];
-  if (!selected?.name) throw new Error("O app agenda não declarou uma coleção autenticada sem dependência para o CRUD Golden.");
+  if (!selected?.name) {
+    throw new Error(
+      "O app agenda não declarou uma coleção autenticada com leitura, criação, edição e exclusão para o CRUD Golden."
+    );
+  }
   const suffix = String(Date.now()).slice(-8);
   const data: Record<string, unknown> = {};
   for (const field of fieldsOf(selected)) {
@@ -133,6 +148,52 @@ async function installGoldenBackendProxy(page: Page) {
   });
 }
 
+async function fillSignupForm(page: Page, submit: ReturnType<Page["locator"]>, email: string, password: string) {
+  const form = submit.locator("xpath=ancestor::form[1]");
+  const inputs = form.locator("input:visible");
+  for (let index = 0; index < await inputs.count(); index += 1) {
+    const input = inputs.nth(index);
+    const type = ((await input.getAttribute("type")) || "text").toLowerCase();
+    if (["hidden", "submit", "button", "file", "image", "reset"].includes(type)) continue;
+    if (type === "checkbox" || type === "radio") {
+      if (await input.getAttribute("required")) await input.check();
+      continue;
+    }
+    if (await input.inputValue()) continue;
+    const identity = `${await input.getAttribute("name") || ""} ${await input.getAttribute("placeholder") || ""}`;
+    if (type === "email" || /email/i.test(identity)) await input.fill(email);
+    else if (type === "password") await input.fill(password);
+    else if (type === "tel" || /phone|telefone|celular/i.test(identity)) await input.fill("11999990000");
+    else if (type === "number") await input.fill("1");
+    else if (type === "date") await input.fill("2026-09-02");
+    else if (type === "time") await input.fill("09:00");
+    else if (type === "datetime-local") await input.fill("2026-09-02T09:00");
+    else if (type === "url") await input.fill("https://example.com");
+    else await input.fill(/clinic|clínica/i.test(identity) ? "Clínica Golden" : "Paciente Golden");
+  }
+
+  const textareas = form.locator("textarea:visible");
+  for (let index = 0; index < await textareas.count(); index += 1) {
+    const textarea = textareas.nth(index);
+    if (!(await textarea.inputValue())) await textarea.fill("Cadastro Golden");
+  }
+
+  const selects = form.locator("select:visible");
+  for (let index = 0; index < await selects.count(); index += 1) {
+    const select = selects.nth(index);
+    if (await select.inputValue()) continue;
+    const value = await select.locator("option:not([disabled])").evaluateAll((options) =>
+      options.map((option) => (option as HTMLOptionElement).value).find(Boolean) || ""
+    );
+    if (value) await select.selectOption(value);
+  }
+
+  const valid = await submit.evaluate((button) =>
+    (button.closest("form") as HTMLFormElement | null)?.checkValidity() ?? true
+  );
+  expect(valid, "O formulário de cadastro gerado precisa aceitar dados válidos").toBeTruthy();
+}
+
 async function assertAgendaAuthAndCrud(page: Page, fixture: GoldenFixture) {
   const frame = page.frameLocator('iframe[title="Preview do app"]');
   const body = frame.locator("body");
@@ -152,6 +213,7 @@ async function assertAgendaAuthAndCrud(page: Page, fixture: GoldenFixture) {
   if (await name.count()) await name.fill("Paciente Golden");
   const submit = frame.locator('button[type="submit"]:visible, form button:visible').filter({ hasText: /criar|cadastrar|registrar|entrar/i }).first();
   await expect(submit, "O cadastro precisa ter uma ação de envio real").toBeVisible();
+  await fillSignupForm(page, submit, uniqueEmail, "Golden-Flow-2026!");
   const signupResponsePromise = page.waitForResponse((response) => {
     const url = new URL(response.url());
     return response.request().method() === "POST" && /\/api\/app-auth\//.test(url.pathname);

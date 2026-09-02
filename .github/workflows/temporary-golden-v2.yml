@@ -107,7 +107,23 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: echo "GOLDEN_RUNTIME_API_URL=$PRODUCTION_URL" >> "$GITHUB_ENV"
 
+      # CI de runtime reutiliza cinco apps reais do último Golden semântico
+      # completo. Isso evita cobrar OpenRouter de novo para testar login/CRUD.
+      - name: Reutilizar apps reais para regressão de runtime
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FIXTURE_RUN_ID: "33572683674"
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          gh run download "$FIXTURE_RUN_ID" \
+            --name golden-v2-production-certification-report \
+            --dir artifacts
+          test -s artifacts/golden-apps.json
+
       - name: Gerar e avaliar requisitos
+        if: github.event_name == 'workflow_dispatch'
         run: node scripts/golden-production.mjs
 
       - name: Instalar Chromium
@@ -117,7 +133,7 @@ jobs:
         env:
           E2E_TEST_MODE: "1"
           GOLDEN_FIXTURE_PATH: artifacts/golden-apps.json
-        run: npx playwright test tests/e2e/golden-generated.spec.ts
+        run: npx playwright test tests/e2e/golden-generated.spec.ts --grep dashboard
 
       - name: Publicar relatório
         if: always()

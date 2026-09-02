@@ -15,6 +15,10 @@ describe("isRunnableReport — entregar quando roda, falhar só quando não abre
     expect(isRunnableReport({ errors: [{ code: "missing_import", message: "" }] })).toBe(false);
     expect(isRunnableReport({ errors: [{ code: "missing_entry", message: "" }] })).toBe(false);
     expect(isRunnableReport({ errors: [{ code: "auth_dead_end", message: "" }] })).toBe(false);
+    expect(isRunnableReport({ errors: [{ code: "invalid_ad_get", message: "" }] })).toBe(false);
+    expect(isRunnableReport({ errors: [{ code: "unsupported_ad_find", message: "" }] })).toBe(false);
+    expect(isRunnableReport({ errors: [{ code: "unsupported_ad_query", message: "" }] })).toBe(false);
+    expect(isRunnableReport({ errors: [{ code: "unsupported_ad_delete", message: "" }] })).toBe(false);
   });
 
   it("sem erros, é entregável", () => {
@@ -95,6 +99,58 @@ describe("validateAppProject visual e mídia", () => {
 });
 
 describe("validateAppProject conclusão funcional", () => {
+  it("reprova AD.get sem id e orienta listagem pela API correta", () => {
+    const report = validateAppProject(
+      appWith("export default function Screen(){ React.useEffect(() => { AD.get('pacientes').then(setPacientes); }, []); return <main>Pacientes</main>; }"),
+      buildGenerationPlan("programa odontológico com pacientes")
+    );
+
+    expect(report.errors).toContainEqual(expect.objectContaining({
+      code: "invalid_ad_get",
+      path: "components/Screen.jsx",
+    }));
+    expect(report.valid).toBe(false);
+  });
+
+  it("reprova AD.find inventado e orienta filtro pela API suportada", () => {
+    const report = validateAppProject(
+      appWith("export default function Screen(){ React.useEffect(() => { AD.find('pacientes', { ativo: true }).then(setPacientes); }, []); return <main>Pacientes</main>; }"),
+      buildGenerationPlan("programa odontológico com pacientes")
+    );
+
+    expect(report.errors).toContainEqual(expect.objectContaining({
+      code: "unsupported_ad_find",
+      path: "components/Screen.jsx",
+    }));
+    expect(report.valid).toBe(false);
+  });
+
+  it("reprova AD.query em novas gerações para impedir retorno .data incompatível", () => {
+    const report = validateAppProject(
+      appWith("export default function Screen(){ React.useEffect(() => { AD.query('pacientes', { userId }).then(result => setPacientes(result.data)); }, []); return <main>Pacientes</main>; }"),
+      buildGenerationPlan("programa odontológico com pacientes")
+    );
+
+    expect(report.errors).toContainEqual(expect.objectContaining({
+      code: "unsupported_ad_query",
+      path: "components/Screen.jsx",
+    }));
+    expect(report.valid).toBe(false);
+  });
+
+  it("reprova AD.delete legado e exige AD.remove em novas gerações", () => {
+    const report = validateAppProject(
+      appWith("export default function Screen(){ return <button onClick={() => AD.delete('pacientes', id)}>Apagar</button>; }"),
+      buildGenerationPlan("programa odontológico com pacientes")
+    );
+
+    expect(report.errors).toContainEqual(expect.objectContaining({
+      code: "unsupported_ad_delete",
+      path: "components/Screen.jsx",
+    }));
+    expect(report.valid).toBe(false);
+  });
+
   it("reprova componente React criado mas não alcançável pelo App", () => {
     const app: AppCode = {
       kind: "app",

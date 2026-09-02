@@ -9,4 +9,12 @@ describe("runtimeAuditSource interaction evidence", () => {
     expect(source).toContain("next.url!==previous.url");
     expect(source).toContain("Math.abs(next.scroll-previous.scroll)>16");
   });
+
+  it("exercises safe CTA and disclosure controls even without a navigation bar", () => {
+    const source = runtimeAuditSource();
+
+    expect(source).toContain("document.querySelectorAll('button,a,[role=\"button\"],summary')");
+    expect(source).toContain("el.closest('form')");
+    expect(source).toContain("el.tagName==='SUMMARY'");
+  });
 });

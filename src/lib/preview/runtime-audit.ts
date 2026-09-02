@@ -135,13 +135,15 @@ export function runtimeAuditSource(): string {
   }
   function nxSafeNavigationControls(){
     var destructive=/\\b(excluir|remover|apagar|deletar|delete|comprar|pagar|checkout|enviar|salvar|criar|adicionar|confirmar|sair|logout|cancelar)\\b/i;
-    return Array.from(document.querySelectorAll('nav button,nav a,[role="navigation"] button,[role="navigation"] a,[role="tab"],header button,header a'))
+    var primary=Array.from(document.querySelectorAll('nav button,nav a,[role="navigation"] button,[role="navigation"] a,[role="tab"],header button,header a'));
+    var secondary=Array.from(document.querySelectorAll('button,a,[role="button"],summary'));
+    return primary.concat(secondary)
       .filter(function(el){
         if(!nxVisible(el)||el.disabled||el.closest('form'))return false;
         var label=nxControlLabel(el);
         if(!label||destructive.test(label))return false;
         var props=nxReactProps(el), href=String(el.getAttribute('href')||'');
-        return typeof props.onClick==='function'||href==='#'||href.indexOf('javascript:')===0;
+        return typeof props.onClick==='function'||el.tagName==='SUMMARY'||href==='#'||href.indexOf('javascript:')===0;
       })
       .filter(function(el,index,list){
         var label=nxControlLabel(el).toLowerCase();

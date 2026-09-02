@@ -43,6 +43,10 @@ export const FATAL_ISSUE_CODES = new Set<string>([
   "missing_default_export",
   "react_router",
   "location_navigation",
+  "invalid_ad_get",
+  "unsupported_ad_find",
+  "unsupported_ad_query",
+  "unsupported_ad_delete",
   // O React pode montar, mas nenhum usuário consegue alcançar os dados. Para um
   // produto de gestão isto é tão terminal quanto um import quebrado.
   "auth_dead_end",
@@ -141,6 +145,34 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
     if (/\b(?:window\.)?location\.(?:href|assign|replace)\b|\bwindow\.location\s*=/.test(file.content)) errors.push(issue("location_navigation", "Use navegação por estado; window.location não é permitido.", path));
     if (/from\s+["']react-router(?:-dom)?["']/.test(file.content)) errors.push(issue("react_router", "react-router não é suportado neste runtime; use navegação por estado.", path));
     if (/\b(?:localStorage|sessionStorage)\b/.test(file.content)) warnings.push(issue("browser_storage", "Prefira window.AD para persistência vendável e multiusuário.", path));
+    if (/(?:window\.)?AD\s*\.\s*get\s*\(\s*[^,\n()]+\s*\)/.test(file.content)) {
+      errors.push(issue(
+        "invalid_ad_get",
+        "AD.get exige coleção e id. Para listar registros, use AD.list('colecao').",
+        path
+      ));
+    }
+    if (/(?:window\.)?AD\s*\.\s*find\s*\(/.test(file.content)) {
+      errors.push(issue(
+        "unsupported_ad_find",
+        "AD.find não existe na API de geração. Use AD.list('colecao', { where: {...} }).",
+        path
+      ));
+    }
+    if (/(?:window\.)?AD\s*\.\s*(?:query|select)\s*\(/.test(file.content)) {
+      errors.push(issue(
+        "unsupported_ad_query",
+        "AD.query/AD.select são apenas compatibilidade legada. Em novas gerações use AD.list('colecao', { where: {...} }), que devolve o array diretamente.",
+        path
+      ));
+    }
+    if (/(?:window\.)?AD\s*\.\s*delete\s*\(/.test(file.content)) {
+      errors.push(issue(
+        "unsupported_ad_delete",
+        "AD.delete é apenas compatibilidade legada. Em novas gerações use AD.remove(id).",
+        path
+      ));
+    }
     if (/https?:\/\/(?:www\.)?(?:picsum\.photos|source\.unsplash\.com)\//.test(file.content)) warnings.push(issue("random_stock", "Imagem principal aleatória detectada; use ADIMG contextual.", path));
 
     for (const source of importSources(file.content)) {

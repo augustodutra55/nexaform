@@ -114,9 +114,12 @@ export function adGlobalScript(
   if(!PID){
     window.AD = {
       list:function(){return Promise.resolve([]);},
+      query:function(){var items=[];items.data=items;return Promise.resolve(items);},
+      select:function(){var items=[];items.data=items;return Promise.resolve(items);},
+      find:function(){return Promise.resolve([]);},
       get:function(){return Promise.resolve(null);},
       count:function(){return Promise.resolve(0);},
-      insert:noop, update:noop, remove:noop, email:noop,
+      insert:noop, update:noop, remove:noop, delete:noop, email:noop,
       payments:{checkout:noop}, actions:{run:noop},
       voice:{listen:function(){return Promise.reject(new Error('Voz indisponível fora de um projeto.'));},speak:noop,cancel:noop},
       // Apps recém-gerados já podem usar conteúdo editável antes de o projeto
@@ -150,6 +153,27 @@ export function adGlobalScript(
   function listData(collection, opts){
     return req('GET', { qs: buildQs(collection, opts) }).then(function(r){ return r.items || []; });
   }
+  // Compatibilidade com projetos antigos: algumas gerações usavam
+  // query(colecao, where) e liam result.data. Novos projetos usam list() e
+  // recebem o array diretamente. O array legado recebe .data não enumerável,
+  // preservando as duas formas sem alterar o JSON dos registros.
+  function queryData(collection, opts){
+    var normalized=opts||{};
+    if(normalized&&typeof normalized==='object'&&!Array.isArray(normalized)){
+      var optionKeys=['where','search','searchField','sort','limit','offset'];
+      var hasOption=optionKeys.some(function(key){return Object.prototype.hasOwnProperty.call(normalized,key);});
+      if(!hasOption)normalized={where:normalized};
+    }
+    return listData(collection,normalized).then(function(items){
+      try{Object.defineProperty(items,'data',{value:items,enumerable:false});}catch(e){items.data=items;}
+      return items;
+    });
+  }
+  // Compatibilidade com gerações antigas que usaram find(colecao, where).
+  // Diferente de list(), o segundo argumento de find é o filtro diretamente.
+  function findData(collection, where){
+    return listData(collection, { where: where && typeof where === 'object' ? where : {} });
+  }
   function updateData(first, second, third){
     var id=third===undefined?first:second, data=third===undefined?second:third;
     return req('PATCH', { body:{ id:id, data:data||{} } }).then(function(r){ return r.item; });
@@ -163,10 +187,13 @@ export function adGlobalScript(
     // list(colecao) OU list(colecao, { where, search, searchField, sort, limit, offset })
     list: listData,
     // Compatibilidade com apps gerados antes da padronização dos nomes.
-    query: listData,
-    select: listData,
-    // get(colecao, id) → um registro (ou null)
-    get: function(collection, id){ return req('GET', { qs:'?collection=' + encodeURIComponent(collection||'default') + '&id=' + encodeURIComponent(id) }).then(function(r){ return r.item || null; }); },
+    query: queryData,
+    select: queryData,
+    find: findData,
+    // get(colecao, id) → um registro. Gerações antigas usaram get(colecao)
+    // como listagem; mantenha esse app funcional enquanto o validador corrige
+    // novas gerações para o contrato explícito AD.list(colecao).
+    get: function(collection, id){ if(id==null)return listData(collection); return req('GET', { qs:'?collection=' + encodeURIComponent(collection||'default') + '&id=' + encodeURIComponent(id) }).then(function(r){ return r.item || null; }); },
     // count(colecao, where?) → número de registros que batem no filtro
     count: function(collection, where){ var o = where ? { where: where } : {}; return req('GET', { qs: buildQs(collection, o) + '&count=1' }).then(function(r){ return r.count || 0; }); },
     insert: function(collection, data){ return req('POST', { body:{ collection: collection||'default', data: data||{} } }).then(function(r){ return r.item; }); },
@@ -464,9 +491,19 @@ export function adGlobalScript(
         name:email.name==null?undefined:String(email.name)
       };
     }
+    var positionalEmail=String(email||''), positionalPassword=String(password||'');
+    // Compatibilidade com gerações antigas que emitiram signUp(nome,email,senha).
+    // A troca só ocorre com três argumentos e quando o segundo tem formato de
+    // e-mail; signIn(email,senha) e a assinatura canônica não são alterados.
+    if(name!=null&&positionalEmail.indexOf('@')<1&&positionalPassword.indexOf('@')>0){
+      return {email:positionalPassword,password:String(name||''),name:positionalEmail};
+    }
+    if(name!=null&&positionalEmail.indexOf('@')<1&&String(name).indexOf('@')>0){
+      return {email:String(name),password:positionalPassword,name:positionalEmail};
+    }
     return {
-      email:String(email||''),
-      password:String(password||''),
+      email:positionalEmail,
+      password:positionalPassword,
       name:name==null?undefined:String(name)
     };
   }

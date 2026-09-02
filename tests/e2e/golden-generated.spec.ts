@@ -3,7 +3,6 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { formatGoldenBackendError } from "../../src/lib/golden-backend-error";
-import { buildBackendBlueprint } from "../../src/lib/engine/backend-blueprint";
 
 interface GoldenFixture {
   id: string;
@@ -61,36 +60,60 @@ function fieldsOf(collection: ManifestCollection): ManifestField[] {
   if (Array.isArray(collection.fields)) return collection.fields;
   return Object.entries(collection.fields || {}).map(([name, field]) => ({ name, ...field }));
 }
+function backendProvisioningApp(fixture: GoldenFixture) {
+  const source = appSource(fixture);
+  const collections = manifestCollections(fixture).map((collection) => collection.name);
+  const legacyReads = collections.filter((collection) =>
+    new RegExp(`(?:window\\.)?AD\\.(?:query|select|find)\\(\\s*["']${collection}["']`).test(source)
+  );
+  const legacyDeletes = collections.filter((collection) =>
+    new RegExp(`(?:window\\.)?AD\\.delete\\(\\s*["']${collection}["']`).test(source)
+  );
+  if (!legacyReads.length && !legacyDeletes.length) return fixture.app;
+  return {
+    ...fixture.app,
+    files: [
+      ...(fixture.app.files || []),
+      {
+        path: "__golden_backend_read_compat.js",
+        content: [
+          ...legacyReads.map((collection) => `AD.list('${collection}')`),
+          ...legacyDeletes.map((collection) => `AD.list('${collection}'); AD.remove('golden-probe')`),
+        ].join("; "),
+      },
+    ],
+  };
+}
+function supportsCollectionDelete(fixture: GoldenFixture, collection: string): boolean {
+  const escaped = collection.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const collectionUse = new RegExp(`(?:window\\.)?AD\\.(?:list|query|select|get|count|insert)\\(\\s*["']${escaped}["']`);
+  return (fixture.app.files || [{ path: "App.jsx", content: fixture.app.code || "" }]).some((file) =>
+    collectionUse.test(file.content) && /(?:window\.)?AD\.(?:remove|delete)\s*\(/.test(file.content)
+  );
+}
 
-function crudTarget(fixture: GoldenFixture): { collection: string; data: Record<string, unknown> } {
-  const blueprint = buildBackendBlueprint(fixture.app as any);
-  const fullCrud = new Set(
-    blueprint.collections
-      .filter((collection) =>
-        collection.profile === "authenticated"
-        && ["read", "insert", "update", "delete"].every((operation) =>
-          collection.operations.includes(operation as "read" | "insert" | "update" | "delete")
-        )
-      )
-      .map((collection) => collection.collection)
-  );
-  const candidates = manifestCollections(fixture).filter((collection) =>
-    !!collection.name
-    && fullCrud.has(collection.name)
-    && !fieldsOf(collection).some((field) => field.required && field.reference?.collection)
-  );
+function crudTarget(
+  fixture: GoldenFixture,
+  authenticatedUserId: string
+): { collection: string; data: Record<string, unknown>; updateData: Record<string, unknown>; deleteExpected: boolean } {
+  const candidates = manifestCollections(fixture).filter((collection) => {
+    const profile = collection.profile || collection.access;
+    const authenticated = profile === "authenticated"
+      || Object.values(collection.permissions || {}).some((value) => value === "authenticated");
+    return authenticated && !fieldsOf(collection).some((field) => field.required && field.reference?.collection);
+  });
   const selected = candidates[0];
-  if (!selected?.name) {
-    throw new Error(
-      "O app agenda não declarou uma coleção autenticada com leitura, criação, edição e exclusão para o CRUD Golden."
-    );
-  }
+  if (!selected?.name) throw new Error("O app agenda não declarou uma coleção autenticada sem dependência para o CRUD Golden.");
   const suffix = String(Date.now()).slice(-8);
   const data: Record<string, unknown> = {};
   for (const field of fieldsOf(selected)) {
     if (!field.required && !field.unique && !/name|nome|title|titulo/i.test(field.name)) continue;
-    if (field.type === "number" || field.type === "integer") data[field.name] = 1;
+    if (/^(?:user|owner|account)(?:id)?$/i.test(field.name)) data[field.name] = authenticatedUserId;
+    else if (field.type === "uuid") data[field.name] = crypto.randomUUID();
+    else if (field.type === "number" || field.type === "integer") data[field.name] = 1;
     else if (field.type === "boolean") data[field.name] = true;
+    else if (field.type === "array" || (field.type === "json" && /items|itens|lista/i.test(field.name))) data[field.name] = [];
+    else if (field.type === "object" || field.type === "json") data[field.name] = {};
     else if (field.type === "date" || /date|data|birth/i.test(field.name)) data[field.name] = "2026-08-27";
     else if (field.type === "email" || /email/i.test(field.name)) data[field.name] = `crud.${suffix}@example.com`;
     else if (/cpf/i.test(field.name)) data[field.name] = `987${suffix}`.slice(0, 11).padEnd(11, "0");
@@ -98,7 +121,16 @@ function crudTarget(fixture: GoldenFixture): { collection: string; data: Record<
     else data[field.name] = `Paciente Golden ${suffix}`;
   }
   if (!Object.keys(data).length) data.name = `Paciente Golden ${suffix}`;
-  return { collection: selected.name, data };
+  const mutableField = fieldsOf(selected).find((field) =>
+    Object.prototype.hasOwnProperty.call(data, field.name)
+      && (!field.type || field.type === "string")
+      && !field.unique
+      && !/email|uuid|date|data|userId|ownerId/i.test(field.name)
+  );
+  const updateData = mutableField
+    ? { [mutableField.name]: `${data[mutableField.name]} atualizado` }
+    : {};
+  return { collection: selected.name, data, updateData, deleteExpected: supportsCollectionDelete(fixture, selected.name) };
 }
 
 function goldenServiceHeaders(secret: string) {
@@ -119,7 +151,7 @@ async function provisionGoldenBackend(fixture: GoldenFixture) {
   const response = await fetch(new URL(`/api/backend/${projectId}`, base), {
     method: "POST",
     headers: { "content-type": "application/json", ...goldenServiceHeaders(secret) },
-    body: JSON.stringify({ apply: true, force: true, allowDestructive: true, app: fixture.app }),
+    body: JSON.stringify({ apply: true, force: true, allowDestructive: true, app: backendProvisioningApp(fixture) }),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.applied !== true) {
@@ -134,7 +166,7 @@ async function installGoldenBackendProxy(page: Page) {
 
   await page.route("**/api/**", async (route) => {
     const requestUrl = new URL(route.request().url());
-    if (!/^\/api\/(?:app-auth|data)\//.test(requestUrl.pathname)) {
+    if (!/^\/api\/(?:app-auth|app-settings|data)\//.test(requestUrl.pathname)) {
       await route.continue();
       return;
     }
@@ -148,22 +180,20 @@ async function installGoldenBackendProxy(page: Page) {
   });
 }
 
-async function fillSignupForm(submit: Locator, email: string, password: string) {
+async function fillRemainingSignupFields(submit: Locator) {
   const form = submit.locator("xpath=ancestor::form[1]");
   const inputs = form.locator("input:visible");
   for (let index = 0; index < await inputs.count(); index += 1) {
     const input = inputs.nth(index);
+    if (await input.inputValue()) continue;
     const type = ((await input.getAttribute("type")) || "text").toLowerCase();
-    if (["hidden", "submit", "button", "file", "image", "reset"].includes(type)) continue;
+    if (["hidden", "submit", "button", "file", "image", "reset", "email", "password"].includes(type)) continue;
     if (type === "checkbox" || type === "radio") {
       if (await input.getAttribute("required")) await input.check();
       continue;
     }
-    if (await input.inputValue()) continue;
     const identity = `${await input.getAttribute("name") || ""} ${await input.getAttribute("placeholder") || ""}`;
-    if (type === "email" || /email/i.test(identity)) await input.fill(email);
-    else if (type === "password") await input.fill(password);
-    else if (type === "tel" || /phone|telefone|celular/i.test(identity)) await input.fill("11999990000");
+    if (type === "tel" || /phone|telefone|celular/i.test(identity)) await input.fill("11999990000");
     else if (type === "number") await input.fill("1");
     else if (type === "date") await input.fill("2026-09-02");
     else if (type === "time") await input.fill("09:00");
@@ -194,26 +224,43 @@ async function fillSignupForm(submit: Locator, email: string, password: string) 
   expect(valid, "O formulário de cadastro gerado precisa aceitar dados válidos").toBeTruthy();
 }
 
-async function assertAgendaAuthAndCrud(page: Page, fixture: GoldenFixture) {
+async function assertAuthAndCrud(page: Page, fixture: GoldenFixture) {
   const frame = page.frameLocator('iframe[title="Preview do app"]');
   const body = frame.locator("body");
   const before = await body.innerText();
-  const switcher = frame.locator("button:visible, a:visible").filter({ hasText: /criar conta|cadastre-se|cadastrar|registro/i }).first();
-  if (await switcher.count()) await switcher.click();
+  const switcher = frame.locator("button:visible, a:visible").filter({
+    hasText: /n[aã]o (?:tenho|tem|possui)(?: uma)? conta|criar (?:conta|nova|agora|minha conta)|cadastre-se|cadastrar|registro/i,
+  }).first();
+  await expect(switcher, `O app ${fixture.id} precisa oferecer criação de conta`).toBeVisible();
+  await switcher.click();
 
-  const email = frame.locator('input[type="email"]:visible').first();
-  const password = frame.locator('input[type="password"]:visible').first();
-  await expect(email, "O app agenda precisa expor e-mail no cadastro").toBeVisible();
-  await expect(password, "O app agenda precisa expor senha no cadastro").toBeVisible();
-  const uniqueEmail = `golden.agenda.${Date.now()}@example.com`;
-  await email.fill(uniqueEmail);
-  await password.fill("Golden-Flow-2026!");
+  const submit = frame.locator('button[type="submit"]:visible, form button:visible').filter({
+    hasText: /criar|cadastrar|registrar/i,
+  }).first();
+  await expect(submit, "O cadastro precisa substituir Entrar por uma ação explícita de criação").toBeVisible();
 
-  const name = frame.locator('input[name*="name" i]:visible, input[name*="nome" i]:visible, input[placeholder*="nome" i]:visible').first();
-  if (await name.count()) await name.fill("Paciente Golden");
-  const submit = frame.locator('button[type="submit"]:visible, form button:visible').filter({ hasText: /criar|cadastrar|registrar|entrar/i }).first();
-  await expect(submit, "O cadastro precisa ter uma ação de envio real").toBeVisible();
-  await fillSignupForm(submit, uniqueEmail, "Golden-Flow-2026!");
+  const emailInputs = frame.locator(
+    'input[type="email"]:visible, input[name*="email" i]:visible, input[placeholder*="email" i]:visible, input[placeholder*="e-mail" i]:visible'
+  );
+  const passwordInputs = frame.locator(
+    'input[type="password"]:visible, input[name*="senha" i]:visible, input[name*="password" i]:visible, input[placeholder*="senha" i]:visible'
+  );
+  await expect(emailInputs.first(), `O app ${fixture.id} precisa expor e-mail no cadastro`).toBeVisible();
+  await expect(passwordInputs.first(), `O app ${fixture.id} precisa expor senha no cadastro`).toBeVisible();
+  const nameInputs = frame.locator(
+    'input[name*="name" i]:visible, input[name*="nome" i]:visible, input[placeholder*="nome" i]:visible'
+  );
+  for (let index = 0; index < await nameInputs.count(); index += 1) {
+    await nameInputs.nth(index).fill("Paciente Golden");
+  }
+  const uniqueEmail = `golden.${fixture.id}.${Date.now()}@example.com`;
+  for (let index = 0; index < await emailInputs.count(); index += 1) {
+    await emailInputs.nth(index).fill(uniqueEmail);
+  }
+  for (let index = 0; index < await passwordInputs.count(); index += 1) {
+    await passwordInputs.nth(index).fill("Golden-Flow-2026!");
+  }
+  await fillRemainingSignupFields(submit);
   const signupResponsePromise = page.waitForResponse((response) => {
     const url = new URL(response.url());
     return response.request().method() === "POST" && /\/api\/app-auth\//.test(url.pathname);
@@ -222,9 +269,17 @@ async function assertAgendaAuthAndCrud(page: Page, fixture: GoldenFixture) {
 
   const signupResponse = await signupResponsePromise;
   const signupPayload = await signupResponse.json().catch(() => ({}));
+  const signupRequestPayload = signupResponse.request().postDataJSON?.() || {};
+  const submittedEmail = typeof signupRequestPayload?.email === "string"
+    ? signupRequestPayload.email
+    : "(ausente)";
+  const signupCallIndex = appSource(fixture).indexOf("auth.signUp");
+  const signupCall = signupCallIndex >= 0
+    ? appSource(fixture).slice(Math.max(0, signupCallIndex - 120), signupCallIndex + 320).replace(/\s+/g, " ")
+    : "(chamada não localizada)";
   expect(
     signupResponse.ok(),
-    `O cadastro real falhou (HTTP ${signupResponse.status()}): ${formatGoldenBackendError(signupPayload, signupResponse.status())}`
+    `O cadastro real falhou (HTTP ${signupResponse.status()}): ${formatGoldenBackendError(signupPayload, signupResponse.status())}; email enviado: ${submittedEmail}; chamada: ${signupCall}`
   ).toBeTruthy();
   expect(signupPayload?.user?.id, "O backend de cadastro precisa devolver o usuário criado").toBeTruthy();
 
@@ -236,24 +291,37 @@ async function assertAgendaAuthAndCrud(page: Page, fixture: GoldenFixture) {
     return authenticated?.id || null;
   }), { timeout: 30_000, message: "A interface de cadastro precisa manter uma sessão real" }).toBeTruthy();
 
-  const target = crudTarget(fixture);
+  const target = crudTarget(fixture, String(signupPayload.user.id));
   const crud = await body.evaluate(async (_body, input) => {
     const ad = (window as any).AD;
     const created = await ad.insert(input.collection, input.data);
     const listed = await ad.list(input.collection);
     const found = listed.some((item: any) => item.id === created.id);
-    const changedField = Object.keys(input.data).find((key) => typeof input.data[key] === "string");
-    const updated = await ad.update(created.id, changedField ? { [changedField]: `${input.data[changedField]} atualizado` } : input.data);
-    await ad.remove(created.id);
-    const afterDelete = await ad.list(input.collection);
-    return { createdId: created.id, found, updatedId: updated.id, removed: !afterDelete.some((item: any) => item.id === created.id) };
+    const changedData = input.updateData;
+    const updated = await ad.update(created.id, changedData);
+    const afterUpdate = await ad.list(input.collection);
+    const updatedPersisted = afterUpdate.some((item: any) =>
+      item.id === created.id && Object.entries(changedData).every(([key, value]) => item[key] === value)
+    );
+    let removed = false;
+    let deleteStatus = null;
+    try {
+      await ad.remove(created.id);
+      const afterDelete = await ad.list(input.collection);
+      removed = !afterDelete.some((item: any) => item.id === created.id);
+    } catch (error: any) {
+      deleteStatus = Number(error?.status) || null;
+    }
+    return { createdId: created.id, found, updatedId: updated.id, updatedPersisted, removed, deleteStatus };
   }, target);
-  expect(crud).toMatchObject({ found: true, removed: true });
+  expect(crud).toMatchObject({ found: true, updatedPersisted: true });
   expect(crud.createdId).toBe(crud.updatedId);
+  if (target.deleteExpected) expect(crud.removed, "A exclusão declarada pelo app precisa funcionar").toBe(true);
+  else expect(crud.deleteStatus, "Coleção sem exclusão declarada precisa preservar o registro").toBe(403);
 }
 
 async function assertRuntime(page: Page, fixture: GoldenFixture) {
-  if (fixture.id === "agenda") await provisionGoldenBackend(fixture);
+  if (manifestCollections(fixture).length > 0) await provisionGoldenBackend(fixture);
   await installGoldenBackendProxy(page);
   await page.goto(`/e2e-runtime/golden?id=${encodeURIComponent(fixture.id)}`);
   await expect(page.getByTestId("golden-case")).toHaveText(fixture.id);
@@ -270,14 +338,16 @@ async function assertRuntime(page: Page, fixture: GoldenFixture) {
     .map(Number);
   expect(changed).toBeLessThanOrEqual(attempted);
   expect(fieldsEditable).toBe(fieldsAttempted);
-  if (fixture.id === "agenda") {
+  const frame = page.frameLocator('iframe[title="Preview do app"]');
+  const hasAuthWall = await frame.locator('input[type="password"]:visible').count() > 0;
+  if (hasAuthWall) {
     expect(fieldsEditable).toBeGreaterThan(0);
-    await assertAgendaAuthAndCrud(page, fixture);
+    expect(manifestCollections(fixture).length, `O app ${fixture.id} exige login, mas não declarou backend`).toBeGreaterThan(0);
+    await assertAuthAndCrud(page, fixture);
   } else {
     expect(changed).toBeGreaterThan(0);
   }
 
-  const frame = page.frameLocator('iframe[title="Preview do app"]');
   const overflow = await frame.locator("html").evaluate((html) => html.scrollWidth - window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(8);
 }

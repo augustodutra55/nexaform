@@ -146,6 +146,40 @@ describe("validateAppProject conclusão funcional", () => {
     expect(report.errors).toContainEqual(expect.objectContaining({ code: "missing_auth" }));
   });
 
+  it("reprova assinaturas inventadas da API de dados", () => {
+    const report = validateAppProject(
+      appWith(`export default function Screen(){
+        async function load(){ await AD.get('clients', {}); }
+        async function save(id){ await AD.update('clients', id, { name: 'Ana' }); }
+        async function drop(id){ await AD.remove('clients', id); }
+        return <button onClick={load}>Clientes</button>;
+      }`),
+      buildGenerationPlan("cadastro de clientes")
+    );
+
+    expect(report.errors).toContainEqual(expect.objectContaining({ code: "invalid_ad_get_signature" }));
+    expect(report.errors).toContainEqual(expect.objectContaining({ code: "invalid_ad_update_signature" }));
+    expect(report.errors).toContainEqual(expect.objectContaining({ code: "invalid_ad_remove_signature" }));
+    expect(isRunnableReport(report)).toBe(false);
+  });
+
+  it("exige CRUD completo quando essa capacidade faz parte do contrato", () => {
+    const candidate = appWith(`export default function Screen(){
+      async function load(){ return AD.list('clients'); }
+      async function create(){ return AD.insert('clients', { name: 'Ana' }); }
+      async function edit(id){ return AD.update(id, { name: 'Bia' }); }
+      return <button onClick={create}>Cadastrar</button>;
+    }`);
+    candidate.files![0].content = `// AD_BACKEND: {"collections":[{"name":"clients","profile":"authenticated"}]}\n${candidate.files![0].content}`;
+    const plan = buildGenerationPlan("agenda com login e cadastro");
+    plan.requiredCapabilities.push("CRUD completo em uma coleção autenticada: leitura, criação, edição e exclusão");
+
+    const report = validateAppProject(candidate, plan);
+
+    expect(report.errors).toContainEqual(expect.objectContaining({ code: "missing_required_crud" }));
+    expect(isRunnableReport(report)).toBe(false);
+  });
+
   it("reprova jornada comercial obrigatória sem checkout", () => {
     const report = validateAppProject(
       appWith('export default function Screen(){ return <main><h1>Produtos e preços</h1></main>; }'),

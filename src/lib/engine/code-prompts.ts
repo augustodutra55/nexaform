@@ -70,6 +70,8 @@ Regras OBRIGATÓRIAS:
      - await AD.update(id, {campos})        → atualiza
      - await AD.remove(id)                  → apaga
      - await AD.upload(file)                → envia um File/Blob (imagem, pdf ≤5MB) e retorna a URL pública (use em <img src={url}> ou salve com AD.insert)
+   AD.get EXIGE o segundo argumento id. Para carregar uma coleção inteira use SEMPRE AD.list; NUNCA use AD.get('colecao') como listagem.
+   AD.query, AD.select, AD.find e AD.delete NÃO fazem parte da API de novas gerações. Para filtrar use AD.list('colecao', { where:{campo:valor} }); para apagar use AD.remove(id). O retorno de AD.list já é o array, portanto NUNCA leia result.data.
    Ex.: em um useEffect inicial "AD.list('recados').then(setRecados)"; ao enviar "await AD.insert('recados', { nome, texto })" e recarregue a lista. Para avatar/foto: "const url = await AD.upload(file); await AD.insert('perfis', { nome, foto: url })". Para datas use item._createdAt. Trate erros com try/catch. Se o app NÃO precisa persistir, use apenas estado em memória (useState).
    NÃO use fetch cru, localStorage, cookies nem window.parent — persistência e upload são só via window.AD.
 6a. MANIFESTO AUTOMÁTICO DO BACKEND (obrigatório quando usar window.AD): no topo de App.jsx, em UMA única linha, declare todas as coleções usadas para o AD Studio configurar banco, validação e segurança automaticamente:

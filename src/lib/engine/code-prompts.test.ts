@@ -77,4 +77,10 @@ describe("prompt do motor — admin embutido (AD.settings) e imagens", () => {
     expect(CODE_REFINE_SYSTEM_PROMPT).toContain("AD.remove(id)");
     expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/Nunca use AD\.get\('colecao', \{\}\)/);
   });
+
+  it("proíbe overflow horizontal em 320px na geração e no refinamento", () => {
+    expect(CODE_SYSTEM_PROMPT).toMatch(/320px sem rolagem horizontal/);
+    expect(CODE_SYSTEM_PROMPT).toMatch(/flex-col sm:flex-row|flex-wrap/);
+    expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/320px sem overflow horizontal/);
+  });
 });

@@ -298,7 +298,10 @@ async function assertAgendaAuthAndCrud(page: Page, fixture: GoldenFixture) {
 
 async function assertRuntime(page: Page, fixture: GoldenFixture) {
   const hasSignup = fixtureHasSignup(fixture);
-  if (hasSignup) await provisionGoldenBackend(fixture);
+  // Todos os casos compartilham o projeto Golden. Reaplique o manifesto antes
+  // de cada app para que um catálogo público não herde coleções privadas do
+  // fixture autenticado executado anteriormente.
+  await provisionGoldenBackend(fixture);
   await installGoldenBackendProxy(page);
   await page.goto(`/e2e-runtime/golden?id=${encodeURIComponent(fixture.id)}`);
   await expect(page.getByTestId("golden-case")).toHaveText(fixture.id);

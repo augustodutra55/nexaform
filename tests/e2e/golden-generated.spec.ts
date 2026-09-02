@@ -29,6 +29,10 @@ function appSource(fixture: GoldenFixture): string {
   return fixture.app.files?.map((file) => file.content).join("\n") || fixture.app.code || "";
 }
 
+function fixtureHasSignup(fixture: GoldenFixture): boolean {
+  return /\b(?:window\.)?AD\.auth\.signUp\s*\(/.test(appSource(fixture));
+}
+
 interface ManifestField {
   name: string;
   type?: string;
@@ -194,7 +198,7 @@ async function fillSignupForm(submit: Locator, email: string, password: string) 
   expect(valid, "O formulário de cadastro gerado precisa aceitar dados válidos").toBeTruthy();
 }
 
-async function assertAgendaAuthAndCrud(page: Page, fixture: GoldenFixture) {
+async function signupAndEnter(page: Page, fixture: GoldenFixture) {
   const frame = page.frameLocator('iframe[title="Preview do app"]');
   const body = frame.locator("body");
   const before = await body.innerText();
@@ -203,9 +207,9 @@ async function assertAgendaAuthAndCrud(page: Page, fixture: GoldenFixture) {
 
   const email = frame.locator('input[type="email"]:visible').first();
   const password = frame.locator('input[type="password"]:visible').first();
-  await expect(email, "O app agenda precisa expor e-mail no cadastro").toBeVisible();
-  await expect(password, "O app agenda precisa expor senha no cadastro").toBeVisible();
-  const uniqueEmail = `golden.agenda.${Date.now()}@example.com`;
+  await expect(email, `O app ${fixture.id} precisa expor e-mail no cadastro`).toBeVisible();
+  await expect(password, `O app ${fixture.id} precisa expor senha no cadastro`).toBeVisible();
+  const uniqueEmail = `golden.${fixture.id}.${Date.now()}@example.com`;
   await email.fill(uniqueEmail);
   await password.fill("Golden-Flow-2026!");
 
@@ -236,6 +240,31 @@ async function assertAgendaAuthAndCrud(page: Page, fixture: GoldenFixture) {
     return authenticated?.id || null;
   }), { timeout: 30_000, message: "A interface de cadastro precisa manter uma sessão real" }).toBeTruthy();
 
+  return { frame, body };
+}
+
+async function assertAuthenticatedNavigation(page: Page, fixture: GoldenFixture) {
+  const { frame, body } = await signupAndEnter(page, fixture);
+  const before = await body.innerText();
+  const controls = frame.locator('nav button:visible, nav a:visible, header button:visible, header a:visible, [role="tab"]:visible');
+  let changed = false;
+  for (let index = 0; index < Math.min(await controls.count(), 12); index += 1) {
+    const control = controls.nth(index);
+    const label = (await control.innerText().catch(() => "")).trim();
+    if (/excluir|remover|apagar|deletar|delete|comprar|pagar|checkout|enviar|salvar|criar|adicionar|confirmar|sair|logout|cancelar/i.test(label)) continue;
+    await control.click();
+    try {
+      await expect.poll(async () => body.innerText(), { timeout: 2_000 }).not.toBe(before);
+      changed = true;
+      break;
+    } catch {}
+  }
+  expect(changed, `O app ${fixture.id} autenticado precisa responder à navegação principal`).toBeTruthy();
+}
+
+async function assertAgendaAuthAndCrud(page: Page, fixture: GoldenFixture) {
+  const { body } = await signupAndEnter(page, fixture);
+
   const target = crudTarget(fixture);
   const crud = await body.evaluate(async (_body, input) => {
     const ad = (window as any).AD;
@@ -253,7 +282,8 @@ async function assertAgendaAuthAndCrud(page: Page, fixture: GoldenFixture) {
 }
 
 async function assertRuntime(page: Page, fixture: GoldenFixture) {
-  if (fixture.id === "agenda") await provisionGoldenBackend(fixture);
+  const hasSignup = fixtureHasSignup(fixture);
+  if (hasSignup) await provisionGoldenBackend(fixture);
   await installGoldenBackendProxy(page);
   await page.goto(`/e2e-runtime/golden?id=${encodeURIComponent(fixture.id)}`);
   await expect(page.getByTestId("golden-case")).toHaveText(fixture.id);
@@ -262,7 +292,8 @@ async function assertRuntime(page: Page, fixture: GoldenFixture) {
   await expect(page.getByTestId("golden-runtime-audit")).toHaveText("0:0");
   // O gate só marca o preview como pronto depois de executar o smoke seguro.
   // Campos editáveis sozinhos são apenas transporte. Para apps sem login,
-  // exigimos mudança de tela; a agenda passa por cadastro + CRUD logo abaixo.
+  // exigimos mudança no smoke; apps protegidos passam por cadastro real e
+  // precisam responder à navegação já autenticada.
   const smoke = page.getByTestId("golden-runtime-smoke");
   await expect(smoke).toHaveText(/^\d+:\d+:\d+:\d+$/, { timeout: 15_000 });
   const [attempted, changed, fieldsAttempted, fieldsEditable] = (await smoke.innerText())
@@ -273,6 +304,9 @@ async function assertRuntime(page: Page, fixture: GoldenFixture) {
   if (fixture.id === "agenda") {
     expect(fieldsEditable).toBeGreaterThan(0);
     await assertAgendaAuthAndCrud(page, fixture);
+  } else if (hasSignup) {
+    expect(fieldsEditable).toBeGreaterThan(0);
+    await assertAuthenticatedNavigation(page, fixture);
   } else {
     expect(changed).toBeGreaterThan(0);
   }

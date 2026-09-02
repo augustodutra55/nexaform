@@ -42,6 +42,7 @@ describe("adGlobalScript — autenticação de apps gerados", () => {
     const source = adGlobalScript(PID);
 
     expect(source).toContain("function authCredentials(email,password,name)");
+    expect(source).toContain("positionalPassword.indexOf(\'@\')>0");
     expect(source).toContain("typeof email==='object'");
     expect(source).toContain("var c=authCredentials(email,password,name)");
     expect(source).toContain("var c=authCredentials(email,password)");
@@ -50,9 +51,13 @@ describe("adGlobalScript — autenticação de apps gerados", () => {
   it("mantém aliases de dados emitidos por gerações legadas", () => {
     const source = adGlobalScript(PID);
 
-    expect(source).toContain("query: listData");
-    expect(source).toContain("select: listData");
+    expect(source).toContain("query: queryData");
+    expect(source).toContain("select: queryData");
+    expect(source).toContain("Object.defineProperty(items,'data'");
+    expect(source).toContain("find: findData");
+    expect(source).toContain("return listData(collection, { where:");
     expect(source).toContain("delete: removeData");
     expect(source).toContain("third===undefined?first:second");
+    expect(source).toContain("if(id==null)return listData(collection)");
   });
 });

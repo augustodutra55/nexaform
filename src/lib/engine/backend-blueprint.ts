@@ -155,7 +155,7 @@ function manifestBlueprint(
 function operationFor(method: string): "read" | "insert" | "update" | "delete" {
   if (method === "insert") return "insert";
   if (method === "update") return "update";
-  if (method === "remove") return "delete";
+  if (method === "remove" || method === "delete") return "delete";
   return "read";
 }
 
@@ -256,7 +256,7 @@ function inferredProfile(
 function inferredBlueprint(files: AppFile[], usesAuth: boolean): BackendCollectionBlueprint[] {
   const operations = new Map<string, BackendCollectionBlueprint["operations"]>();
   const fields = new Map<string, Record<string, DataFieldRule>>();
-  const callExpression = /(?:window\.)?AD\.(list|get|count|insert)\(\s*['"]([a-zA-Z][a-zA-Z0-9_-]{0,79})['"]/g;
+  const callExpression = /(?:window\.)?AD\.(list|query|select|find|get|count|insert|update|remove|delete)\(\s*['"]([a-zA-Z][a-zA-Z0-9_-]{0,79})['"]/g;
 
   for (const file of files) {
     const fileCollections: string[] = [];
@@ -276,7 +276,7 @@ function inferredBlueprint(files: AppFile[], usesAuth: boolean): BackendCollecti
     // não há como recuperar a coleção com certeza; marque todas as coleções
     // usadas no mesmo módulo para impedir uma classificação pública insegura.
     const mutates = /(?:window\.)?AD\.update\s*\(/.test(file.content);
-    const removes = /(?:window\.)?AD\.remove\s*\(/.test(file.content);
+    const removes = /(?:window\.)?AD\.(?:remove|delete)\s*\(/.test(file.content);
     for (const collection of unique(fileCollections)) {
       const current = operations.get(collection) || [];
       if (mutates) current.push("update");

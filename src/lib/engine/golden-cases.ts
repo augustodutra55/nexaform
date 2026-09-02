@@ -29,13 +29,14 @@ export const GOLDEN_CASES: GoldenCase[] = [
   {
     id: "agenda",
     name: "Agenda SaaS",
-    prompt: "Crie um app SaaS de agendamento para uma clínica: login, cadastro, agenda por dia e horário, cadastro de clientes, confirmação, reagendamento, cancelamento e estados de vazio, carregando e erro. Precisa funcionar bem no celular.",
+    prompt: "Crie um app SaaS de agendamento para uma clínica: login, cadastro, agenda por dia e horário e CRUD completo de clientes com listagem, criação, edição e exclusão real com confirmação; inclua também confirmação, reagendamento, cancelamento e estados de vazio, carregando e erro. Precisa funcionar bem no celular.",
     expectedKind: "app",
     expectedProfile: "product-system",
     requiredCapabilities: [
       "autenticação e estados de sessão",
       "formulários validados com feedback visível",
       "dados reais via window.AD, com vazio/carregando/erro",
+      "CRUD completo em uma coleção autenticada: leitura, criação, edição e exclusão",
     ],
     expectedVideoMode: "none",
   },

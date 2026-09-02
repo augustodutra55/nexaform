@@ -3,6 +3,13 @@ import { buildGenerationPlan } from "./generation-plan";
 import { GOLDEN_CASES } from "./golden-cases";
 
 describe("golden suite de paridade", () => {
+  it("reconhece CRUD completo como capacidade determinística", () => {
+    const plan = buildGenerationPlan("app com CRUD completo de clientes: listagem, criação, edição e exclusão");
+    expect(plan.requiredCapabilities).toContain(
+      "CRUD completo em uma coleção autenticada: leitura, criação, edição e exclusão"
+    );
+  });
+
   it("mantém cinco cenários comerciais distintos", () => {
     expect(GOLDEN_CASES.map((item) => item.id)).toEqual([
       "landing",

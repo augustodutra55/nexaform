@@ -65,6 +65,8 @@ describe("retomada da geração por etapas", () => {
     expect(stage.instruction).toContain("no máximo 3 arquivos");
     expect(stage.instruction).toContain("abaixo de 120 linhas");
     expect(stage.instruction).toContain("entidade central");
+    expect(stage.instruction).toContain("AD.remove(id)");
+    expect(stage.instruction).toContain("CRUD completo");
   });
 
   it("obriga a última etapa a fechar todas as omissões pequenas da especificação", () => {

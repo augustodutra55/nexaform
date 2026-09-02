@@ -43,6 +43,10 @@ export const FATAL_ISSUE_CODES = new Set<string>([
   "missing_default_export",
   "react_router",
   "location_navigation",
+  "invalid_ad_get_signature",
+  "invalid_ad_update_signature",
+  "invalid_ad_remove_signature",
+  "missing_required_crud",
   // O React pode montar, mas nenhum usuário consegue alcançar os dados. Para um
   // produto de gestão isto é tão terminal quanto um import quebrado.
   "auth_dead_end",
@@ -142,6 +146,15 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
     if (/from\s+["']react-router(?:-dom)?["']/.test(file.content)) errors.push(issue("react_router", "react-router não é suportado neste runtime; use navegação por estado.", path));
     if (/\b(?:localStorage|sessionStorage)\b/.test(file.content)) warnings.push(issue("browser_storage", "Prefira window.AD para persistência vendável e multiusuário.", path));
     if (/https?:\/\/(?:www\.)?(?:picsum\.photos|source\.unsplash\.com)\//.test(file.content)) warnings.push(issue("random_stock", "Imagem principal aleatória detectada; use ADIMG contextual.", path));
+    if (/(?:window\.)?AD\s*\.\s*get\s*\(\s*["'][a-zA-Z][a-zA-Z0-9_-]*["']\s*,\s*\{/.test(file.content)) {
+      errors.push(issue("invalid_ad_get_signature", "AD.get busca um único id. Para listar, use AD.list('colecao', opcoes?).", path));
+    }
+    if (/(?:window\.)?AD\s*\.\s*update\s*\(\s*["'][a-zA-Z][a-zA-Z0-9_-]*["']\s*,/.test(file.content)) {
+      errors.push(issue("invalid_ad_update_signature", "Assinatura inválida: use AD.update(id, dados), sem passar a coleção.", path));
+    }
+    if (/(?:window\.)?AD\s*\.\s*remove\s*\(\s*["'][a-zA-Z][a-zA-Z0-9_-]*["']\s*,/.test(file.content)) {
+      errors.push(issue("invalid_ad_remove_signature", "Assinatura inválida: use AD.remove(id), sem passar a coleção.", path));
+    }
 
     for (const source of importSources(file.content)) {
       const packageName = source.startsWith("@") ? source.split("/").slice(0, 2).join("/") : source.split("/")[0];
@@ -209,6 +222,19 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
     }
   }
   const backend = buildBackendBlueprint(app);
+  if (plan?.requiredCapabilities.some((capability) => /CRUD completo|leitura, criação, edição e exclusão/i.test(capability))) {
+    const requiredOperations = ["read", "insert", "update", "delete"] as const;
+    const hasFullCrud = backend.collections.some((collection) =>
+      collection.profile === "authenticated"
+      && requiredOperations.every((operation) => collection.operations.includes(operation))
+    );
+    if (!hasFullCrud) {
+      errors.push(issue(
+        "missing_required_crud",
+        "O pedido exige CRUD completo, mas nenhuma coleção autenticada implementa listar, criar, editar e excluir."
+      ));
+    }
+  }
   const protectedCollections = backend.collections.filter((collection) => collection.profile === "authenticated");
   const joinedForAuth = reachableSource || files.map((file) => file.content).join("\n");
   const hasAuthEntry = /(?:window\.)?AD\s*\.\s*auth\s*\.\s*(?:signIn|signUp)\s*\(/i.test(joinedForAuth);

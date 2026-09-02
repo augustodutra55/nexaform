@@ -352,7 +352,14 @@ test.describe("Golden 2.0 · projetos realmente gerados", () => {
   for (const fixture of prioritizedCases) {
     test(`${fixture.id} compila, monta, audita e aceita interação segura`, async ({ page }) => {
       test.setTimeout(90_000);
-      await assertRuntime(page, fixture);
+      try {
+        await assertRuntime(page, fixture);
+      } finally {
+        // Alguns apps mantêm leituras assíncronas/polling ativos. Espere as
+        // rotas já iniciadas antes de o Playwright encerrar a página para que
+        // uma requisição aprovada não se transforme em erro de teardown.
+        await page.unrouteAll({ behavior: "wait" });
+      }
     });
   }
 });

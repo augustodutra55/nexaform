@@ -70,4 +70,11 @@ describe("prompt do motor — admin embutido (AD.settings) e imagens", () => {
     expect(CODE_SYSTEM_PROMPT).toMatch(/nunca deixe uma coleção "authenticated".*signIn \+ signUp/i);
     expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/ao remover login.*me\/signOut.*profile:"private"/i);
   });
+
+  it("fixa as assinaturas reais de dados também durante refinamentos", () => {
+    expect(CODE_REFINE_SYSTEM_PROMPT).toContain("AD.list('colecao', opcoes?)");
+    expect(CODE_REFINE_SYSTEM_PROMPT).toContain("AD.update(id, dados)");
+    expect(CODE_REFINE_SYSTEM_PROMPT).toContain("AD.remove(id)");
+    expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/Nunca use AD\.get\('colecao', \{\}\)/);
+  });
 });

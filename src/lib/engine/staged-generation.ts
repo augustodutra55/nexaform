@@ -205,7 +205,7 @@ export function stagedBuildStages(): StagedBuildStage[] {
       id: "core-data",
       label: "Cadastros e dados centrais",
       instruction:
-        "Implemente somente o primeiro fluxo vertical de cadastro indispensável da especificação usando window.AD: lista, criação e edição da entidade central. Inclua validações e estados de carregamento, vazio e erro. Deixe entidades secundárias para as próximas etapas. Crie ou altere no máximo 3 arquivos curtos, abaixo de 120 linhas cada, e preserve tudo que já funciona.",
+        "Implemente somente o primeiro fluxo vertical de cadastro indispensável da especificação usando window.AD: AD.list para listar, AD.insert para criar, AD.update(id, dados) para editar e AD.remove(id) para excluir com confirmação. O CRUD completo deve operar sobre a mesma entidade central. Inclua validações e estados de carregamento, vazio e erro. Deixe entidades secundárias para as próximas etapas. Crie ou altere no máximo 3 arquivos curtos, abaixo de 120 linhas cada, e preserve tudo que já funciona.",
     },
     {
       id: "core-workflows",

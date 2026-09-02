@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { formatGoldenBackendError } from "../../src/lib/golden-backend-error";
 import { buildBackendBlueprint } from "../../src/lib/engine/backend-blueprint";
 
@@ -148,7 +148,7 @@ async function installGoldenBackendProxy(page: Page) {
   });
 }
 
-async function fillSignupForm(page: Page, submit: ReturnType<Page["locator"]>, email: string, password: string) {
+async function fillSignupForm(_page: Page, submit: Locator, email: string, password: string) {
   const form = submit.locator("xpath=ancestor::form[1]");
   const inputs = form.locator("input:visible");
   for (let index = 0; index < await inputs.count(); index += 1) {

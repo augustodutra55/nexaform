@@ -148,7 +148,7 @@ async function installGoldenBackendProxy(page: Page) {
   });
 }
 
-async function fillSignupForm(_page: Page, submit: Locator, email: string, password: string) {
+async function fillSignupForm(submit: Locator, email: string, password: string) {
   const form = submit.locator("xpath=ancestor::form[1]");
   const inputs = form.locator("input:visible");
   for (let index = 0; index < await inputs.count(); index += 1) {
@@ -213,7 +213,7 @@ async function assertAgendaAuthAndCrud(page: Page, fixture: GoldenFixture) {
   if (await name.count()) await name.fill("Paciente Golden");
   const submit = frame.locator('button[type="submit"]:visible, form button:visible').filter({ hasText: /criar|cadastrar|registrar|entrar/i }).first();
   await expect(submit, "O cadastro precisa ter uma ação de envio real").toBeVisible();
-  await fillSignupForm(page, submit, uniqueEmail, "Golden-Flow-2026!");
+  await fillSignupForm(submit, uniqueEmail, "Golden-Flow-2026!");
   const signupResponsePromise = page.waitForResponse((response) => {
     const url = new URL(response.url());
     return response.request().method() === "POST" && /\/api\/app-auth\//.test(url.pathname);

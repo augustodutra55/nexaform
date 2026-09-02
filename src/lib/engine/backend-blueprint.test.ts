@@ -88,6 +88,21 @@ describe("buildBackendBlueprint", () => {
     });
   });
 
+  it("reconhece leitura em aliases e no legado AD.find", () => {
+    const blueprint = buildBackendBlueprint(
+      app(
+        '// AD_BACKEND: {"collections":[{"name":"patients","profile":"authenticated"}]}\n' +
+        "await AD.auth.signUp(email, password, name); await AD.find('patients', { status: 'active' }); await AD.insert('patients', { name })"
+      )
+    );
+
+    expect(blueprint.collections[0]).toMatchObject({
+      collection: "patients",
+      profile: "authenticated",
+      operations: ["read", "insert"],
+    });
+  });
+
   it("entende o alias legado access e denuncia dados protegidos sem entrada", () => {
     const blueprint = buildBackendBlueprint(
       app(
@@ -123,15 +138,15 @@ describe("buildBackendBlueprint", () => {
     });
   });
 
-  it("detecta update e remove associados às coleções do mesmo módulo", () => {
+  it("detecta update e o alias legado delete associados à coleção", () => {
     const blueprint = buildBackendBlueprint(
-      app("const itens = await AD.list('clientes'); await AD.update(id, { nome }); await AD.remove(id)")
+      app("const itens = await AD.list('clientes'); await AD.update(id, { nome }); await AD.delete('clientes', id)")
     );
     expect(blueprint.status).toBe("review");
     expect(blueprint.collections[0]).toMatchObject({
       collection: "clientes",
       profile: "private",
-      operations: ["read", "update", "delete"],
+      operations: ["read", "delete", "update"],
     });
   });
 

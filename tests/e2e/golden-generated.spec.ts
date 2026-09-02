@@ -203,7 +203,7 @@ async function signupAndEnter(page: Page, fixture: GoldenFixture) {
   const body = frame.locator("body");
   const before = await body.innerText();
   const switcher = frame.locator("button:visible, a:visible").filter({
-    hasText: /não tem conta|criar (?:uma )?conta|criar uma|nova conta|cadastre-se|cadastrar|registro/i,
+    hasText: /não (?:tem|tenho|possui).{0,24}conta|cri(?:ar|e)(?: uma| sua)? conta|criar agora|nova conta|cadastre-se|cadastrar|registro/i,
   }).first();
   if (await switcher.count()) await switcher.dispatchEvent("click");
 

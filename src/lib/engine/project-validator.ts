@@ -43,6 +43,9 @@ export const FATAL_ISSUE_CODES = new Set<string>([
   "missing_default_export",
   "react_router",
   "location_navigation",
+  // O preview roda intencionalmente sem allow-same-origin. Acessar Web Storage
+  // nesse sandbox lança SecurityError e impede o React de montar.
+  "browser_storage",
   "invalid_ad_get_signature",
   "invalid_ad_update_signature",
   "invalid_ad_remove_signature",
@@ -144,7 +147,13 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
     if (/import\s+["'][^"']+\.css["']/.test(file.content)) errors.push(issue("css_import", "CSS de pacote/arquivo não é suportado pelo runtime; use Tailwind.", path));
     if (/\b(?:window\.)?location\.(?:href|assign|replace)\b|\bwindow\.location\s*=/.test(file.content)) errors.push(issue("location_navigation", "Use navegação por estado; window.location não é permitido.", path));
     if (/from\s+["']react-router(?:-dom)?["']/.test(file.content)) errors.push(issue("react_router", "react-router não é suportado neste runtime; use navegação por estado.", path));
-    if (/\b(?:localStorage|sessionStorage)\b/.test(file.content)) warnings.push(issue("browser_storage", "Prefira window.AD para persistência vendável e multiusuário.", path));
+    if (/\b(?:localStorage|sessionStorage)\b/.test(file.content)) {
+      errors.push(issue(
+        "browser_storage",
+        "localStorage/sessionStorage não funcionam no sandbox seguro do preview; use estado React ou window.AD.",
+        path
+      ));
+    }
     if (/https?:\/\/(?:www\.)?(?:picsum\.photos|source\.unsplash\.com)\//.test(file.content)) warnings.push(issue("random_stock", "Imagem principal aleatória detectada; use ADIMG contextual.", path));
     if (/(?:window\.)?AD\s*\.\s*get\s*\(\s*["'][a-zA-Z][a-zA-Z0-9_-]*["']\s*,\s*\{/.test(file.content)) {
       errors.push(issue("invalid_ad_get_signature", "AD.get busca um único id. Para listar, use AD.list('colecao', opcoes?).", path));

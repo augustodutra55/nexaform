@@ -15,6 +15,7 @@ describe("isRunnableReport — entregar quando roda, falhar só quando não abre
     expect(isRunnableReport({ errors: [{ code: "missing_import", message: "" }] })).toBe(false);
     expect(isRunnableReport({ errors: [{ code: "missing_entry", message: "" }] })).toBe(false);
     expect(isRunnableReport({ errors: [{ code: "auth_dead_end", message: "" }] })).toBe(false);
+    expect(isRunnableReport({ errors: [{ code: "browser_storage", message: "" }] })).toBe(false);
   });
 
   it("sem erros, é entregável", () => {
@@ -95,6 +96,20 @@ describe("validateAppProject visual e mídia", () => {
 });
 
 describe("validateAppProject conclusão funcional", () => {
+  it("reprova Web Storage porque o sandbox seguro do preview bloqueia seu acesso", () => {
+    const report = validateAppProject(
+      appWith(`export default function Screen(){
+        const saved = localStorage.getItem('cart');
+        return <main>{saved}</main>;
+      }`),
+      buildGenerationPlan("loja com carrinho")
+    );
+
+    expect(report.errors).toContainEqual(expect.objectContaining({ code: "browser_storage" }));
+    expect(report.warnings).not.toContainEqual(expect.objectContaining({ code: "browser_storage" }));
+    expect(isRunnableReport(report)).toBe(false);
+  });
+
   it("reprova componente React criado mas não alcançável pelo App", () => {
     const app: AppCode = {
       kind: "app",

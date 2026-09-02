@@ -41,6 +41,7 @@ export const FATAL_ISSUE_CODES = new Set<string>([
   "node_import",
   "missing_import",
   "missing_default_export",
+  "duplicate_binding",
   "react_router",
   "location_navigation",
   // O preview roda intencionalmente sem allow-same-origin. Acessar Web Storage
@@ -93,6 +94,39 @@ function syntaxErrors(file: AppFile): string[] {
   }
 }
 
+function duplicateTopLevelBindings(file: AppFile): string[] {
+  if (!/\.(?:jsx|tsx|js|ts)$/i.test(file.path)) return [];
+  const source = ts.createSourceFile(file.path, file.content, ts.ScriptTarget.ES2020, true,
+    /\.tsx?$/i.test(file.path) ? ts.ScriptKind.TSX : ts.ScriptKind.JSX);
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  const add = (name?: ts.Identifier) => {
+    if (!name) return;
+    if (seen.has(name.text)) duplicates.add(name.text);
+    else seen.add(name.text);
+  };
+  const addBinding = (name: ts.BindingName) => {
+    if (ts.isIdentifier(name)) add(name);
+    else for (const element of name.elements) if (ts.isBindingElement(element)) addBinding(element.name);
+  };
+
+  for (const statement of source.statements) {
+    if (ts.isImportDeclaration(statement)) {
+      const clause = statement.importClause;
+      add(clause?.name);
+      const bindings = clause?.namedBindings;
+      if (bindings && ts.isNamespaceImport(bindings)) add(bindings.name);
+      else if (bindings) for (const element of bindings.elements) add(element.name);
+    } else if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) addBinding(declaration.name);
+    } else if (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)
+      || ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)
+      || ts.isEnumDeclaration(statement)) {
+      add(statement.name);
+    }
+  }
+  return [...duplicates];
+}
 function resolvedRelative(from: string, source: string, paths: Set<string>): string | null {
   const base = normalizePath(`${dirname(from)}/${source}`);
   for (const extension of SCRIPT_EXTENSIONS) {
@@ -136,6 +170,14 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
     const compilerErrors = syntaxErrors(file);
     if (compilerErrors.length) {
       errors.push(issue("syntax_error", `JSX/TypeScript inválido: ${compilerErrors.slice(0, 3).join("; ")}`, path));
+    }
+    const duplicateBindings = duplicateTopLevelBindings(file);
+    if (duplicateBindings.length) {
+      errors.push(issue(
+        "duplicate_binding",
+        `Identificador declarado mais de uma vez no mesmo arquivo: ${duplicateBindings.join(", ")}. Use aliases nos imports.`,
+        path
+      ));
     }
     // Tamanho é estilo, não correção: um componente grande compila e roda. Nunca
     // deve bloquear a geração — antes derrubava refinamentos com agenda/catálogo

@@ -112,6 +112,9 @@ export function buildGenerationPlan(message: string, mediaAssets: GenerationMedi
   if (has(normalized, /\b(?:login|cadastro|conta|usu[aá]rio|autentica(?:r|[çc][aã]o)?)\b/)) requiredCapabilities.push("autenticação e estados de sessão");
   if (has(normalized, /\b(formul[aá]rio|lead|contato|orçamento|orcamento|agendamento)/)) requiredCapabilities.push("formulários validados com feedback visível");
   if (has(normalized, /\b(produto|estoque|cat[aá]logo|serviço|servico|cliente|crm|ve[ií]culo)/)) requiredCapabilities.push("dados reais via window.AD, com vazio/carregando/erro");
+  if (has(normalized, /\bcrud completo\b|(?:listagem|listar|leitura).{0,80}(?:cria[çc][aã]o|criar).{0,80}(?:edi[çc][aã]o|editar).{0,80}(?:exclus[aã]o|excluir)/)) {
+    requiredCapabilities.push("CRUD completo em uma coleção autenticada: leitura, criação, edição e exclusão");
+  }
   if (has(normalized, /\b(pagamento|checkout|assinatura|preço|preco|plano)/)) requiredCapabilities.push("jornada comercial clara, sem simular pagamento real");
   if (has(normalized, /\bfaq\b|perguntas frequentes/)) requiredCapabilities.push("seção de FAQ realmente renderizada");
   if (has(normalized, /prova social|depoimentos?|testimonials?/)) requiredCapabilities.push("seção de prova social/depoimentos realmente renderizada");

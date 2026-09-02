@@ -15,6 +15,7 @@ describe("isRunnableReport — entregar quando roda, falhar só quando não abre
     expect(isRunnableReport({ errors: [{ code: "missing_import", message: "" }] })).toBe(false);
     expect(isRunnableReport({ errors: [{ code: "missing_entry", message: "" }] })).toBe(false);
     expect(isRunnableReport({ errors: [{ code: "auth_dead_end", message: "" }] })).toBe(false);
+    expect(isRunnableReport({ errors: [{ code: "unrequested_auth", message: "" }] })).toBe(false);
     expect(isRunnableReport({ errors: [{ code: "browser_storage", message: "" }] })).toBe(false);
     expect(isRunnableReport({ errors: [{ code: "duplicate_binding", message: "" }] })).toBe(false);
   });
@@ -150,6 +151,29 @@ describe("validateAppProject conclusão funcional", () => {
     );
 
     expect(report.errors.some((entry) => entry.code === "missing_auth")).toBe(true);
+  });
+
+  it("reprova autenticação inventada em landing pública", () => {
+    const report = validateAppProject(
+      appWith(`export default function Screen(){
+        return <main><h1>Clínica</h1><button onClick={() => AD.auth.signIn(email, senha)}>Entrar</button><button onClick={() => AD.auth.signUp(email, senha, nome)}>Criar conta</button></main>;
+      }`),
+      buildGenerationPlan("Crie uma landing page para clínica com formulário de agendamento")
+    );
+
+    expect(report.errors).toContainEqual(expect.objectContaining({ code: "unrequested_auth" }));
+    expect(isRunnableReport(report)).toBe(false);
+  });
+
+  it("aceita autenticação quando a landing pede área do cliente", () => {
+    const report = validateAppProject(
+      appWith(`export default function Screen(){
+        return <main><h1>Área do cliente</h1><button onClick={() => AD.auth.signIn(email, senha)}>Entrar</button><button onClick={() => AD.auth.signUp(email, senha, nome)}>Criar conta</button></main>;
+      }`),
+      buildGenerationPlan("Crie uma landing page com login, cadastro e área do cliente")
+    );
+
+    expect(report.errors.some((entry) => entry.code === "unrequested_auth")).toBe(false);
   });
 
   it("reprova o caso odontológico: me/signOut sem entrar ou criar conta", () => {

@@ -202,8 +202,10 @@ async function signupAndEnter(page: Page, fixture: GoldenFixture) {
   const frame = page.frameLocator('iframe[title="Preview do app"]');
   const body = frame.locator("body");
   const before = await body.innerText();
-  const switcher = frame.locator("button:visible, a:visible").filter({ hasText: /criar conta|cadastre-se|cadastrar|registro/i }).first();
-  if (await switcher.count()) await switcher.click();
+  const switcher = frame.locator("button:visible, a:visible").filter({
+    hasText: /não tem conta|criar (?:uma )?conta|criar uma|nova conta|cadastre-se|cadastrar|registro/i,
+  }).first();
+  if (await switcher.count()) await switcher.dispatchEvent("click");
 
   const email = frame.locator('input[type="email"]:visible').first();
   const password = frame.locator('input[type="password"]:visible').first();
@@ -215,7 +217,9 @@ async function signupAndEnter(page: Page, fixture: GoldenFixture) {
 
   const name = frame.locator('input[name*="name" i]:visible, input[name*="nome" i]:visible, input[placeholder*="nome" i]:visible').first();
   if (await name.count()) await name.fill("Paciente Golden");
-  const submit = frame.locator('button[type="submit"]:visible, form button:visible').filter({ hasText: /criar|cadastrar|registrar|entrar/i }).first();
+  const submit = frame.locator('button[type="submit"]:visible, form button:visible').filter({
+    hasText: /criar|cadastrar|registrar|abrir conta|começar/i,
+  }).first();
   await expect(submit, "O cadastro precisa ter uma ação de envio real").toBeVisible();
   await fillSignupForm(submit, uniqueEmail, "Golden-Flow-2026!");
   const signupResponsePromise = page.waitForResponse((response) => {

@@ -16,6 +16,7 @@ describe("isRunnableReport — entregar quando roda, falhar só quando não abre
     expect(isRunnableReport({ errors: [{ code: "missing_entry", message: "" }] })).toBe(false);
     expect(isRunnableReport({ errors: [{ code: "auth_dead_end", message: "" }] })).toBe(false);
     expect(isRunnableReport({ errors: [{ code: "browser_storage", message: "" }] })).toBe(false);
+    expect(isRunnableReport({ errors: [{ code: "duplicate_binding", message: "" }] })).toBe(false);
   });
 
   it("sem erros, é entregável", () => {
@@ -96,6 +97,20 @@ describe("validateAppProject visual e mídia", () => {
 });
 
 describe("validateAppProject conclusão funcional", () => {
+  it("reprova imports que declaram o mesmo identificador e quebram no Babel", () => {
+    const app = appWith("export default function Screen(){ return <main>Agenda</main>; }");
+    app.files![0].content = `
+      import { Settings } from 'lucide-react';
+      import Settings from './components/Screen.jsx';
+      export default function App(){ return <Settings />; }
+    `;
+
+    const report = validateAppProject(app, buildGenerationPlan("agenda com configurações"));
+
+    expect(report.errors).toContainEqual(expect.objectContaining({ code: "duplicate_binding", path: "App.jsx" }));
+    expect(isRunnableReport(report)).toBe(false);
+  });
+
   it("reprova Web Storage porque o sandbox seguro do preview bloqueia seu acesso", () => {
     const report = validateAppProject(
       appWith(`export default function Screen(){

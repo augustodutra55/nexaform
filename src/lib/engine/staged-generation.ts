@@ -205,13 +205,13 @@ export function stagedBuildStages(): StagedBuildStage[] {
       id: "core-data",
       label: "Cadastros e dados centrais",
       instruction:
-        "Implemente somente o primeiro fluxo vertical de cadastro indispensável da especificação usando window.AD: AD.list para listar, AD.insert para criar, AD.update(id, dados) para editar e AD.remove(id) para excluir com confirmação. O CRUD completo deve operar sobre a mesma entidade central. Inclua validações e estados de carregamento, vazio e erro. Deixe entidades secundárias para as próximas etapas. Crie ou altere no máximo 3 arquivos curtos, abaixo de 120 linhas cada, e preserve tudo que já funciona.",
+        "Modele no AD_BACKEND todas as entidades centrais explicitamente pedidas e implemente o CRUD completo de cada entidade central indispensável usando window.AD: AD.list, AD.insert, AD.update(id, dados) e AD.remove(id). Em sistemas clínicos, preserve pacientes, profissionais, procedimentos, agendamentos, convênios, financeiro, laboratórios, trabalhos protéticos e e-mails processados como coleções distintas, com referências UUID, perfis e campos mínimos coerentes. Inclua validações e estados de carregamento, vazio e erro. Organize os dados em no máximo 3 arquivos abaixo de 120 linhas cada; crie ou altere até 5 arquivos no total e preserve tudo que já funciona.",
     },
     {
       id: "core-workflows",
       label: "Fluxos operacionais",
       instruction:
-        "Implemente os principais fluxos operacionais ainda ausentes: formulários, status, histórico, agenda, aprovações ou equivalentes descritos na especificação. Faça integrações internas reais com window.AD. Crie ou altere no máximo 5 arquivos curtos.",
+        "Implemente os principais fluxos operacionais ainda ausentes com window.AD. Em clínica, a agenda deve considerar profissional, início, duração e buffer ao recusar sobreposição, além de reagendamento, cancelamento, lista de espera e no-show; o fluxo protético deve persistir laboratório, prazo, etapas, anexos e histórico. Não reduza esses requisitos a formulários decorativos. Crie ou altere no máximo 5 arquivos curtos.",
     },
     {
       id: "roles-admin",
@@ -223,19 +223,19 @@ export function stagedBuildStages(): StagedBuildStage[] {
       id: "admin",
       label: "Painel administrativo",
       instruction:
-        "Se a especificação pedir painel administrativo ou gerencial, implemente métricas essenciais e ferramentas de operação com dados reais. Se não pedir painel, use esta etapa para implementar conteúdo comercial explicitamente solicitado e ainda ausente, como benefícios, prova social/depoimentos e FAQ, sempre em componentes realmente renderizados. Preserve os fluxos existentes e crie ou altere no máximo 3 arquivos curtos.",
+        "Se a especificação pedir painel administrativo ou gerencial, implemente métricas e ferramentas com dados reais. Em clínica, inclua precificação por custos/tempo/margem/impostos, tabelas por convênio, contas a pagar/receber e fluxo de caixa; não use números fixos fingindo serem dados. Se não pedir painel, implemente conteúdo comercial ainda ausente, como benefícios, prova social/depoimentos e FAQ, sempre realmente renderizados. Preserve os fluxos existentes e crie ou altere no máximo 5 arquivos curtos.",
     },
     {
       id: "automation",
       label: "Alertas e regras de negócio",
       instruction:
-        "Implemente notificações internas, cálculos, lembretes e regras de negócio possíveis no runtime atual. Para WhatsApp, e-mail, SMS, pagamentos ou APIs externas, crie pontos de integração e estados de interface honestos, sem fingir que um serviço externo foi enviado. Crie ou altere no máximo 3 arquivos curtos.",
+        "Implemente notificações internas, cálculos, lembretes e regras de negócio possíveis no runtime. Quando houver Gmail/Make/Zapier/n8n, declare inbound no AD_BACKEND apontando para emails_processados, mostre a caixa de entrada inteligente e mantenha cada evento em pending_review até aprovação ou rejeição humana; somente a aprovação pode atualizar financeiro, prontuário ou trabalho protético. Para WhatsApp, e-mail, SMS ou IA externa, crie pontos de integração e estados honestos, sem fingir conexão ou envio. Crie ou altere no máximo 5 arquivos curtos.",
     },
     {
       id: "quality",
       label: "Revisão e acabamento",
       instruction:
-        "Faça uma revisão final focada nos fluxos críticos: corrija imports, navegação, estados, validações, responsividade e acessibilidade. Audite explicitamente 320px e elimine qualquer overflow horizontal: grupos de métricas, selos, botões e cards devem quebrar ou empilhar (flex-wrap, flex-col sm:flex-row ou grade responsiva), com min-w-0/max-w-full quando necessário; não deixe inline-flex rígido com vários itens. Para seções pequenas ausentes, prefira inseri-las em um componente já renderizado; só adicione um import quando criar o arquivo correspondente na mesma resposta. Não adicione módulos grandes novos. Altere apenas os arquivos indispensáveis, no máximo 5, e preserve os recursos funcionais já construídos.",
+        "Faça uma revisão final dos fluxos críticos e compare cada módulo nomeado na especificação com uma tela alcançável e dados reais. Em sistemas híbridos, mantenha o site público acessível sem modal de login automático e separe-o do painel. Confira agenda, pacientes, financeiro, protético, convênios, IA/e-mails e configurações quando pedidos. Corrija imports, navegação, estados, validações, responsividade e acessibilidade; audite 320px e elimine overflow horizontal. Não adicione módulos grandes novos: repare apenas lacunas indispensáveis em até 5 arquivos.",
     },
   ];
 }

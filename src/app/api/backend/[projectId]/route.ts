@@ -180,6 +180,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     automations: blueprint.automations,
     payments: blueprint.payments,
     actions: blueprint.actions,
+    inbound: blueprint.inbound,
     warnings: blueprint.warnings,
     blueprint,
     changePlan,

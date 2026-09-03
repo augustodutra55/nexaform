@@ -76,4 +76,19 @@ describe("buildGenerationPlan", () => {
     expect(plan.requiredCapabilities).toContain("live externa responsiva, com estados ao vivo/offline e fallback");
     expect(plan.requiredCapabilities).not.toContain("voz pelo runtime AD.voice com fallback e feedback");
   });
+
+  it("trata site com gestão odontológica como sistema híbrido e preserva todos os módulos", () => {
+    const plan = buildGenerationPlan("Site público e sistema de gestão para clínica odontológica com agenda por profissional, buffer e no-show; prontuário de pacientes e RX; financeiro com precificação, contas a pagar, fluxo de caixa e convênios; controle protético com laboratório; caixa de entrada inteligente integrada ao Gmail por webhook do Make; assistente de IA.");
+
+    expect(plan.kind).toBe("app");
+    expect(plan.requiredCapabilities).toEqual(expect.arrayContaining([
+      expect.stringMatching(/agenda clínica real/),
+      expect.stringMatching(/financeiro clínico real/),
+      expect.stringMatching(/controle protético real/),
+      expect.stringMatching(/prontuário de pacientes/),
+      expect.stringMatching(/caixa de entrada inteligente/),
+      expect.stringMatching(/assistente de IA/),
+    ]));
+    expect(plan.acceptanceCriteria).toContain("site público e painel interno permanecem jornadas distintas, sem login sobreposto ao conteúdo público");
+  });
 });

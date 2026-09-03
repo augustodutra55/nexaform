@@ -1,11 +1,12 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export type ProjectIntegrationProvider = "stripe" | "resend" | "automation";
+export type ProjectIntegrationProvider = "stripe" | "resend" | "automation" | "inbound";
 export type ProjectIntegrationConfig =
   | { provider: "stripe"; secretKey: string }
   | { provider: "resend"; apiKey: string; from?: string }
-  | { provider: "automation"; targets: string[] };
+  | { provider: "automation"; targets: string[] }
+  | { provider: "inbound"; secret: string };
 
 export interface ProjectIntegrationStatus {
   id: ProjectIntegrationProvider;
@@ -15,7 +16,7 @@ export interface ProjectIntegrationStatus {
   updatedAt?: string;
 }
 
-const PROVIDERS: ProjectIntegrationProvider[] = ["stripe", "resend", "automation"];
+const PROVIDERS: ProjectIntegrationProvider[] = ["stripe", "resend", "automation", "inbound"];
 
 function encryptionKey(env: NodeJS.ProcessEnv = process.env): Buffer {
   const material = env.PROJECT_SECRETS_KEY?.trim() || env.SUPABASE_SERVICE_ROLE_KEY?.trim();
@@ -75,6 +76,11 @@ export function validateProjectIntegration(provider: ProjectIntegrationProvider,
     if (from && !/(?:^|<)[^<>@\s]+@[^<>@\s]+\.[^<>@\s]+>?$/.test(from)) throw new Error("Remetente Resend inválido.");
     return { provider, apiKey, from: from || undefined };
   }
+  if (provider === "inbound") {
+    const secret = String(raw?.secret || "").trim();
+    if (!/^[A-Za-z0-9_-]{32,160}$/.test(secret)) throw new Error("Segredo de entrada inválido.");
+    return { provider, secret };
+  }
   const targets: string[] = Array.isArray(raw?.targets)
     ? Array.from(new Set<string>(raw.targets.slice(0, 20).map((item: unknown) => safeHttps(item))))
     : [];
@@ -84,7 +90,7 @@ export function validateProjectIntegration(provider: ProjectIntegrationProvider,
 
 function hintFor(config: ProjectIntegrationConfig): string {
   if (config.provider === "automation") return `${config.targets.length} endpoint(s)`;
-  const secret = config.provider === "stripe" ? config.secretKey : config.apiKey;
+  const secret = config.provider === "stripe" ? config.secretKey : config.provider === "resend" ? config.apiKey : config.secret;
   return `••••${secret.slice(-4)}`;
 }
 
@@ -131,6 +137,7 @@ export async function projectIntegrationStatuses(admin: SupabaseClient, projectI
     stripe: !!env.STRIPE_SECRET_KEY?.trim(),
     resend: !!env.RESEND_API_KEY?.trim(),
     automation: !!env.AUTOMATION_WEBHOOK_ALLOWLIST?.trim(),
+    inbound: false,
   };
   return PROVIDERS.map((id) => {
     const row: any = rows.get(id);

@@ -49,4 +49,14 @@ describe("backend change plan", () => {
     expect(plan.removedActions).toEqual(["antiga"]);
     expect(plan.destructive).toBe(true);
   });
+
+  it("inclui endpoints de entrada declarativos no plano", () => {
+    const plan = buildBackendChangePlan(
+      { collections: [], actions: [], inbound: [] },
+      { collections: [], actions: [], inbound: [{ name: "email-clinica", collection: "emails_processados" }] }
+    );
+    expect(plan.addedInbound).toEqual(["email-clinica"]);
+    expect(plan.removedInbound).toEqual([]);
+    expect(plan.destructive).toBe(false);
+  });
 });

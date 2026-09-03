@@ -120,6 +120,8 @@ interface ChatPanelProps {
   onUserSend?: () => void;
   onSiteResult: (result: GenerationResult) => void;
   onAppResult: (result: AppGenerationResult) => void | Promise<void>;
+  /** Mostra um checkpoint já persistido pelo worker sem iniciar outro save. */
+  onAppCheckpoint?: (app: AppCode) => void | Promise<void>;
   onGeneratingChange?: (generating: boolean) => void;
   /** Informa o modo do motor da última geração (real/template/demo) ao pai. */
   onEngineMode?: (mode: EngineMode | null) => void;
@@ -228,6 +230,7 @@ export function ChatPanel({
   onUserSend,
   onSiteResult,
   onAppResult,
+  onAppCheckpoint,
   onGeneratingChange,
   onEngineMode,
   visualSelection,
@@ -439,6 +442,7 @@ export function ChatPanel({
   useEffect(() => {
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let shownCheckpointKey = "";
 
     const poll = async () => {
       let nextDelay = 8000;
@@ -460,7 +464,8 @@ export function ChatPanel({
             }
             if (light.threadId && light.threadId !== threadId) return;
             const knownSnapshot = backgroundJobRef.current;
-            if (light.active && knownSnapshot && knownSnapshot.id === light.id) {
+            if (light.active && knownSnapshot && knownSnapshot.id === light.id
+              && light.stageIndex === knownSnapshot.payload.stageIndex) {
               nextDelay = 2000;
               if (!disposed) {
                 setBackgroundJob({
@@ -506,6 +511,14 @@ export function ChatPanel({
 
         const queuedJob = row.payload.stagedJob as StagedBuildJob;
         const queuedStages = stagedStages(queuedJob.kind ?? "initial");
+        if (!disposed && row.status !== "completed" && row.payload.currentApp && onAppCheckpoint) {
+          const checkpointKey = `${row.id}:${row.payload.stageIndex}:${row.updated_at}`;
+          if (shownCheckpointKey !== checkpointKey) {
+            shownCheckpointKey = checkpointKey;
+            await Promise.resolve(onAppCheckpoint(row.payload.currentApp));
+            onEngineMode?.("real");
+          }
+        }
         if (!disposed && row.status !== "cancelled") {
           setPlan(queuedStages.map((item, index) => `${index + 1}/${queuedStages.length} · ${item.label}`));
           setPlanDone(Math.min(row.payload.stageIndex, queuedStages.length));

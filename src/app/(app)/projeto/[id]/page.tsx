@@ -368,6 +368,24 @@ export default function ProjectPage() {
     [currentApp, previewHealth, projectId, supabase]
   );
 
+  const handleAppCheckpoint = useCallback((app: AppCode) => {
+    setPreviewHealth("checking");
+    latestAuditRef.current = undefined;
+    pendingAppApproval.current = null;
+    setMode("app");
+    setAppName(app.name ?? "App");
+    if (isMultiFile(app)) {
+      setAppFiles(app.files);
+      setAppEntry(app.entry);
+      setAppCode(null);
+    } else {
+      setAppCode(app.code ?? null);
+      setAppFiles(null);
+      setAppEntry(null);
+    }
+    setAppVer((value) => value + 1);
+  }, []);
+
   async function handleRename(name: string) {
     if (!project) return;
     setProject({ ...project, name });
@@ -1248,6 +1266,7 @@ export default function ProjectPage() {
             onUserSend={handleManualGenerationStart}
             onSiteResult={handleSiteResult}
             onAppResult={handleAppResult}
+            onAppCheckpoint={handleAppCheckpoint}
             onGeneratingChange={setGenerating}
             onEngineMode={setEngineMode}
             visualSelection={visualSelection}

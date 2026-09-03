@@ -269,6 +269,10 @@ export async function GET(req: NextRequest) {
   const { error: completeError } = await admin.from("staged_generation_jobs").update({
     status: nextStatus,
     payload: transition.payload,
+    // `attempts` pertence à etapa atual. Sem zerar aqui, a terceira etapa era
+    // exibida como "tentativa 3" mesmo sem ter sido repetida e perdia a chance
+    // de recuperação prevista para ela.
+    attempts: transition.completed ? executionCount : 0,
     last_error: null,
     next_attempt_at: new Date().toISOString(),
     locked_at: null,
@@ -277,6 +281,24 @@ export async function GET(req: NextRequest) {
   }).eq("id", row.id).eq("locked_by", workerId);
   if (completeError) {
     return NextResponse.json({ error: "A etapa terminou, mas o resultado não pôde ser salvo." }, { status: 503 });
+  }
+  // Checkpoint durável e imediatamente carregável pelo preview. O payload da
+  // fila continua sendo a fonte para a etapa seguinte, enquanto `projects`
+  // impede que uma falha futura deixe um projeto vazio apesar de já haver
+  // etapas válidas e pagas.
+  const checkpointApp = transition.payload.currentApp;
+  if (checkpointApp) {
+    const { error: checkpointError } = await admin.from("projects").update({
+      schema: checkpointApp,
+      updated_at: new Date().toISOString(),
+    }).eq("id", payload.projectId).eq("user_id", payload.userId);
+    if (checkpointError) {
+      console.error("[worker] checkpoint do projeto não foi salvo", {
+        projectId: payload.projectId,
+        stage: payload.stageIndex + 1,
+        message: checkpointError.message,
+      });
+    }
   }
   if (transition.completed && payload.reservationId) {
     await admin.from("generations").update({

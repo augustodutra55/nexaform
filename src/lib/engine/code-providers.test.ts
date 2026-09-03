@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compactProviderSystemPrompt, MAX_QUALITY_REPAIR_ATTEMPTS, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairBaseFiles, qualityRepairInstruction, recoverStagedMissingImports, rollbackMissingImportFiles, shouldContinueQualityRepair, shouldTryFreeModelsAfterPaidDiagnostics, stagedRuntimeQualityReport, streamAppWithOpenRouter, streamOpenRouter } from "./code-providers";
+import { compactFormatRepairMessages, compactProviderSystemPrompt, MAX_QUALITY_REPAIR_ATTEMPTS, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairBaseFiles, qualityRepairInstruction, recoverStagedMissingImports, rollbackMissingImportFiles, shouldContinueQualityRepair, shouldTryFreeModelsAfterPaidDiagnostics, stagedRuntimeQualityReport, streamAppWithOpenRouter, streamOpenRouter } from "./code-providers";
 import { BUDGET_MODEL_OPENROUTER, PREMIUM_MODEL_OPENROUTER } from "./models";
 import type { AppGenerationResult, ProjectQualityReport } from "./app-types";
 
@@ -216,6 +216,18 @@ describe("quality gate progressivo das etapas", () => {
 
 
 describe("contrato determinístico de saída", () => {
+  it("recupera o formato sem reenviar o superprompt e o projeto inteiro", () => {
+    const previous = "```jsx\nexport default function App(){ return <main>Agenda</main> }\n```";
+    const messages = compactFormatRepairMessages(previous, true);
+    const serialized = JSON.stringify(messages);
+
+    expect(messages).toHaveLength(2);
+    expect(messages[1].content).toContain(previous);
+    expect(serialized).toContain("AD_PATCH");
+    expect(serialized).not.toContain("ESPECIFICAÇÃO MESTRA");
+    expect(serialized).not.toContain("Projeto atual (arquivos)");
+  });
+
   it("usa AD_FILE no reparo de uma primeira geração simples", () => {
     const instruction = qualityRepairInstruction({
       message: "Crie uma landing premium para consultoria",

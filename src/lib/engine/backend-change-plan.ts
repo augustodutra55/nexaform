@@ -11,9 +11,13 @@ export interface BackendChangePlan {
   }>;
   addedActions: string[];
   removedActions: string[];
+  addedInbound: string[];
+  removedInbound: string[];
   destructive: boolean;
   changed: boolean;
 }
+
+type ComparableBackendBlueprint = Pick<BackendBlueprint, "collections" | "actions"> & Partial<Pick<BackendBlueprint, "inbound">>;
 
 function byName(collections: BackendCollectionBlueprint[]): Map<string, BackendCollectionBlueprint> {
   return new Map(collections.map((item) => [item.collection, item]));
@@ -21,8 +25,8 @@ function byName(collections: BackendCollectionBlueprint[]): Map<string, BackendC
 
 /** Compara o contrato aplicado com o contrato atual sem executar SQL arbitrário. */
 export function buildBackendChangePlan(
-  previous: Pick<BackendBlueprint, "collections" | "actions"> | null | undefined,
-  next: Pick<BackendBlueprint, "collections" | "actions">
+  previous: ComparableBackendBlueprint | null | undefined,
+  next: ComparableBackendBlueprint
 ): BackendChangePlan {
   const before = byName(previous?.collections ?? []);
   const after = byName(next.collections);
@@ -47,14 +51,20 @@ export function buildBackendChangePlan(
   const nextActions = new Set((next.actions ?? []).map((item) => item.name));
   const addedActions = Array.from(nextActions).filter((name) => !previousActions.has(name)).sort();
   const removedActions = Array.from(previousActions).filter((name) => !nextActions.has(name)).sort();
-  const destructive = removedCollections.length > 0 || removedActions.length > 0 || changedCollections.some((item) => item.removedFields.length > 0);
+  const previousInbound = new Set((previous?.inbound ?? []).map((item) => item.name));
+  const nextInbound = new Set((next.inbound ?? []).map((item) => item.name));
+  const addedInbound = Array.from(nextInbound).filter((name) => !previousInbound.has(name)).sort();
+  const removedInbound = Array.from(previousInbound).filter((name) => !nextInbound.has(name)).sort();
+  const destructive = removedCollections.length > 0 || removedActions.length > 0 || removedInbound.length > 0 || changedCollections.some((item) => item.removedFields.length > 0);
   return {
     addedCollections,
     removedCollections,
     changedCollections,
     addedActions,
     removedActions,
+    addedInbound,
+    removedInbound,
     destructive,
-    changed: addedCollections.length > 0 || removedCollections.length > 0 || changedCollections.length > 0 || addedActions.length > 0 || removedActions.length > 0,
+    changed: addedCollections.length > 0 || removedCollections.length > 0 || changedCollections.length > 0 || addedActions.length > 0 || removedActions.length > 0 || addedInbound.length > 0 || removedInbound.length > 0,
   };
 }

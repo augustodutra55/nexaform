@@ -7,6 +7,11 @@ function app(code: string): AppCode {
 }
 
 describe("buildBackendBlueprint", () => {
+  it("provisiona endpoint de entrada declarado no manifesto", () => {
+    const blueprint = buildBackendBlueprint(app('// AD_BACKEND: {"collections":[{"name":"emails_processados","profile":"authenticated"}],"inbound":[{"name":"email-clinica","collection":"emails_processados"}]}'));
+    expect(blueprint.inbound).toEqual([{ name: "email-clinica", collection: "emails_processados" }]);
+  });
+
   it("configura catálogo somente leitura automaticamente", () => {
     const blueprint = buildBackendBlueprint(app("AD.list('produtos').then(setProdutos)"));
     expect(blueprint.status).toBe("ready");

@@ -101,7 +101,8 @@ export function buildGenerationPlan(message: string, mediaAssets: GenerationMedi
   const sourceMessage = stagedSpecification || message;
   const normalized = sourceMessage.toLowerCase();
   const isSite = has(normalized, /\b(site|landing|página|pagina|institucional|portf[oó]lio|vitrine|one.?page)\b/);
-  const kind: "site" | "app" = isSite ? "site" : "app";
+  const isOperationalSystem = has(normalized, /\b(sistema|painel|dashboard|gest[aã]o|agenda inteligente|financeiro|prontu[aá]rio)\b/);
+  const kind: "site" | "app" = isOperationalSystem ? "app" : isSite ? "site" : "app";
   const requiredCapabilities: string[] = [];
   const visualDirection: string[] = [];
   const visualProfile = visualProfileFor(message, kind);
@@ -116,6 +117,24 @@ export function buildGenerationPlan(message: string, mediaAssets: GenerationMedi
     requiredCapabilities.push("CRUD completo em uma coleção autenticada: leitura, criação, edição e exclusão");
   }
   if (has(normalized, /\b(pagamento|checkout|assinatura|preço|preco|plano)/)) requiredCapabilities.push("jornada comercial clara, sem simular pagamento real");
+  if (has(normalized, /\b(agenda|agendamento|reagendamento|consulta)\b/) && has(normalized, /\b(profissional|hor[aá]rio|conflito|buffer|espera|no.?show|faltou)\b/)) {
+    requiredCapabilities.push("agenda clínica real via window.AD: profissional, duração/buffer, prevenção de conflitos, reagendamento, lista de espera e no-show");
+  }
+  if (has(normalized, /\b(financeiro|contas? a pagar|contas? a receber|fluxo de caixa|precifica[çc][aã]o|parcelamento|glosa|repasse)\b/)) {
+    requiredCapabilities.push("financeiro clínico real via window.AD: precificação, convênios, contas a pagar/receber e fluxo de caixa");
+  }
+  if (has(normalized, /\b(pr[oó]tese|prot[eé]tico|laborat[oó]rio|moldagem|coroa|ponte)\b/)) {
+    requiredCapabilities.push("controle protético real via window.AD: laboratório, prazos, etapas, anexos e alertas");
+  }
+  if (has(normalized, /\b(paciente|prontu[aá]rio|raio.?x|\brx\b|preven[çc][aã]o semestral)\b/)) {
+    requiredCapabilities.push("cadastro e prontuário de pacientes via window.AD com anexos, histórico, convênio e prevenção");
+  }
+  if (has(normalized, /\b(gmail|e-?mails? processados?|caixa de entrada inteligente|zapier|make|webhook)\b/)) {
+    requiredCapabilities.push("caixa de entrada inteligente via endpoint inbound declarado, idempotência e aprovação humana pendente");
+  }
+  if (has(normalized, /\b(assistente de ia|chat de ia|intelig[eê]ncia artificial)\b/)) {
+    requiredCapabilities.push("assistente de IA com limites clínicos explícitos e estados honestos de integração externa");
+  }
   if (has(normalized, /\bfaq\b|perguntas frequentes/)) requiredCapabilities.push("seção de FAQ realmente renderizada");
   if (has(normalized, /prova social|depoimentos?|testimonials?/)) requiredCapabilities.push("seção de prova social/depoimentos realmente renderizada");
   if (has(normalized, /benef[ií]cios?|vantagens?/)) requiredCapabilities.push("seção de benefícios realmente renderizada");
@@ -153,6 +172,7 @@ export function buildGenerationPlan(message: string, mediaAssets: GenerationMedi
       "nenhuma dependência de Node ou backend inexistente no runtime gerado",
       `perfil visual ${visualProfile.label} aplicado sem comprometer o orçamento de performance`,
       `sistema visual ${visualBlueprint.id} aplicado de forma coerente e não genérica`,
+      ...(isOperationalSystem ? ["site público e painel interno permanecem jornadas distintas, sem login sobreposto ao conteúdo público"] : []),
     ],
   };
 }

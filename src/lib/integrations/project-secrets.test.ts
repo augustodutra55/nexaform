@@ -18,5 +18,9 @@ describe("project integration vault", () => {
     });
     expect(() => validateProjectIntegration("automation", { targets: ["http://hooks.example.com/ad"] })).toThrow(/HTTPS/);
     expect(() => validateProjectIntegration("stripe", { secretKey: "pk_test_publica" })).toThrow(/Stripe/);
+    expect(validateProjectIntegration("inbound", { secret: "a".repeat(40) })).toEqual({
+      provider: "inbound", secret: "a".repeat(40),
+    });
+    expect(() => validateProjectIntegration("inbound", { secret: "curto" })).toThrow(/entrada/);
   });
 });

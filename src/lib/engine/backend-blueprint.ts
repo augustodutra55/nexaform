@@ -9,6 +9,7 @@ import type { CollectionProfile } from "./collection-access";
 import { buildAutomationBlueprint, type AppAutomationBlueprint } from "./automation-blueprint";
 import { buildPaymentBlueprint, type AppPaymentBlueprint } from "./payment-blueprint";
 import { buildBackendActionBlueprint, type AppBackendAction } from "./backend-action-blueprint";
+import { buildInboundBlueprint, type AppInboundEndpoint } from "./inbound-blueprint";
 
 export interface BackendCollectionBlueprint {
   collection: string;
@@ -29,6 +30,7 @@ export interface BackendBlueprint {
   automations: AppAutomationBlueprint[];
   payments: AppPaymentBlueprint | null;
   actions: AppBackendAction[];
+  inbound: AppInboundEndpoint[];
   warnings: string[];
   status: "ready" | "review";
 }
@@ -358,6 +360,15 @@ export function buildBackendBlueprint(app: AppCode): BackendBlueprint {
   warnings.push(...payment.warnings);
   const action = buildBackendActionBlueprint(app);
   warnings.push(...action.warnings);
+  const inbound = buildInboundBlueprint(app);
+  warnings.push(...inbound.warnings);
+  for (const endpoint of inbound.inbound) {
+    const target = collections.find((collection) => collection.collection === endpoint.collection);
+    if (!target) warnings.push(`O endpoint ${endpoint.name} aponta para a coleção inexistente ${endpoint.collection}.`);
+    else if (target.profile !== "authenticated" || target.authenticatedScope !== "all") {
+      warnings.push(`A coleção ${endpoint.collection} deve ser authenticated com authenticatedScope all para revisão da equipe.`);
+    }
+  }
 
   return {
     version: 1,
@@ -366,6 +377,7 @@ export function buildBackendBlueprint(app: AppCode): BackendBlueprint {
     automations: automation.automations,
     payments: payment.payments,
     actions: action.actions,
+    inbound: inbound.inbound,
     warnings,
     status: warnings.length ? "review" : "ready",
   };

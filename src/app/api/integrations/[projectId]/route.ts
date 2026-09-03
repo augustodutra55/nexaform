@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomBytes } from "node:crypto";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { authorizeProjectOwner, isUuid } from "@/lib/engine/data-guard";
@@ -37,7 +38,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ pro
   const context = await ownerContext(projectId);
   if (context.response) return context.response;
   try {
-    return NextResponse.json({ integrations: await projectIntegrationStatuses(context.admin!, projectId) });
+    const { data: project } = await context.admin!.from("projects").select("meta").eq("id", projectId).maybeSingle();
+    const inbound = Array.isArray(project?.meta?.backendProvisioning?.inbound)
+      ? project.meta.backendProvisioning.inbound.filter((item: any) => typeof item?.name === "string" && typeof item?.collection === "string")
+      : [];
+    return NextResponse.json({ integrations: await projectIntegrationStatuses(context.admin!, projectId), inbound });
   } catch (error: any) {
     return bad(String(error?.message || error), 500);
   }
@@ -54,13 +59,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   try {
     if (body?.action === "secret.save" || body?.action === "secret.remove") {
       const provider = String(body.provider || "") as ProjectIntegrationProvider;
-      if (!["stripe", "resend", "automation"].includes(provider)) return bad("Provedor inválido.");
+      if (!["stripe", "resend", "automation", "inbound"].includes(provider)) return bad("Provedor inválido.");
       if (body.action === "secret.remove") {
         await removeProjectIntegration(context.admin!, projectId, provider);
         return NextResponse.json({ ok: true, integrations: await projectIntegrationStatuses(context.admin!, projectId) });
       }
       await saveProjectIntegration(context.admin!, projectId, provider, body.config);
       return NextResponse.json({ ok: true, integrations: await projectIntegrationStatuses(context.admin!, projectId) });
+    }
+
+    if (body?.action === "inbound.rotate") {
+      const secret = randomBytes(32).toString("base64url");
+      await saveProjectIntegration(context.admin!, projectId, "inbound", { secret });
+      return NextResponse.json({
+        ok: true,
+        secret,
+        integrations: await projectIntegrationStatuses(context.admin!, projectId),
+      });
     }
 
     if (body?.action === "stripe.checkout") {

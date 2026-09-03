@@ -25,11 +25,11 @@ function dirname(path: string): string {
 }
 
 /**
- * Erros FATAIS: quebram a execução/renderização do app (ele nem roda). Tudo o
- * mais é erro de COMPLETUDE/política — o site RODA, só está incompleto. Para não
+ * Erros FATAIS: quebram a execução/renderização ou bloqueiam a jornada central.
+ * Tudo o mais é erro de COMPLETUDE/política — o site RODA, só está incompleto. Para não
  * falhar e cobrar crédito à toa, o motor ENTREGA um site que roda (mesmo com esses
  * avisos) em vez de recusar tudo — igual ao comportamento do Lovable, que entrega
- * algo para você iterar. Só bloqueamos de fato quando o app não abre.
+ * algo para você iterar. Bloqueamos quando o app não abre ou impede a jornada central.
  */
 export const FATAL_ISSUE_CODES = new Set<string>([
   "single_file",
@@ -54,6 +54,9 @@ export const FATAL_ISSUE_CODES = new Set<string>([
   // O React pode montar, mas nenhum usuário consegue alcançar os dados. Para um
   // produto de gestão isto é tão terminal quanto um import quebrado.
   "auth_dead_end",
+  // Autenticação inventada em uma landing bloqueia uma jornada que deveria ser
+  // pública e não pode ser aprovada como simples aviso de acabamento.
+  "unrequested_auth",
 ]);
 
 /** true quando o app RODA (nenhum erro fatal), mesmo que falte completude. */
@@ -289,6 +292,14 @@ function validateFiles(app: AppCode, plan?: GenerationPlan): { errors: ProjectQu
   const protectedCollections = backend.collections.filter((collection) => collection.profile === "authenticated");
   const joinedForAuth = reachableSource || files.map((file) => file.content).join("\n");
   const hasAuthEntry = /(?:window\.)?AD\s*\.\s*auth\s*\.\s*(?:signIn|signUp)\s*\(/i.test(joinedForAuth);
+  const planRequestsAuth = !!plan?.requiredCapabilities.some((capability) => /autentica|sess[aã]o/i.test(capability));
+  const hasAnyAuthApi = /(?:window\.)?AD\s*\.\s*auth\s*\.\s*(?:me|signIn|signUp|signOut)\s*\(/i.test(joinedForAuth);
+  if (plan?.kind === "site" && !planRequestsAuth && hasAnyAuthApi) {
+    errors.push(issue(
+      "unrequested_auth",
+      "A landing/site criou autenticação sem o pedido solicitar. A jornada pública deve funcionar sem login."
+    ));
+  }
   if (protectedCollections.length && !hasAuthEntry) {
     errors.push(issue(
       "auth_dead_end",

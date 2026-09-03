@@ -96,6 +96,25 @@ export function runtimeAuditSource(): string {
       var submit=form.querySelector('button[type="submit"],button:not([type]),input[type="submit"]');
       if(typeof props.onSubmit!=='function'&&!form.getAttribute('action')&&!submit)add('incomplete_form','warning','Formulário sem envio ou botão de continuação detectável.',form);
     });
+    Array.from(document.querySelectorAll('input[type="password"]')).filter(nxVisible).forEach(function(password){
+      var overlay=password.parentElement;
+      while(overlay&&overlay!==document.body){
+        var overlayStyle=getComputedStyle(overlay), overlayRect=overlay.getBoundingClientRect();
+        if(overlayStyle.position==='fixed'&&overlayRect.width>=window.innerWidth*.65&&overlayRect.height>=window.innerHeight*.65)break;
+        overlay=overlay.parentElement;
+      }
+      if(!overlay||overlay===document.body)return;
+      var publicContent=Array.from(document.querySelectorAll('main,header,section')).some(function(el){
+        return !overlay.contains(el)&&nxVisible(el)&&String(el.innerText||'').trim().length>20;
+      });
+      var dismiss=Array.from(overlay.querySelectorAll('button,[role="button"]')).some(function(el){
+        return nxVisible(el)&&/^(fechar|close|cancelar|voltar|×|x)$/i.test(nxControlLabel(el));
+      });
+      if(publicContent&&!dismiss)add('blocking_auth_overlay','error','O login está bloqueando conteúdo público sem controle visível para fechar.',overlay);
+      var dialog=password.closest('form,[role="dialog"]')||password.parentElement;
+      var dialogRect=dialog&&dialog.getBoundingClientRect();
+      if(dialogRect&&(dialogRect.top < -8||dialogRect.bottom > window.innerHeight+8))add('clipped_auth_dialog','error','O formulário de login está cortado e não cabe na tela.',dialog);
+    });
     images.forEach(function(image){
       if(image.complete&&image.naturalWidth===0)add('broken_image','warning','Imagem não carregou: '+String(image.getAttribute('alt')||image.getAttribute('src')||'imagem').slice(0,100),image);
       if(!image.getAttribute('alt'))add('missing_image_alt','warning','Imagem sem texto alternativo.',image);
@@ -134,7 +153,7 @@ export function runtimeAuditSource(): string {
     return !!next.screen&&(next.screen!==previous.screen||next.url!==previous.url||Math.abs(next.scroll-previous.scroll)>16);
   }
   function nxSafeNavigationControls(){
-    var destructive=/\\b(excluir|remover|apagar|deletar|delete|comprar|pagar|checkout|enviar|salvar|criar|adicionar|confirmar|sair|logout|cancelar)\\b/i;
+    var destructive=/\\b(excluir|remover|apagar|deletar|delete|comprar|pagar|checkout|enviar|salvar|criar|adicionar|confirmar|sair|logout|cancelar|entrar|login|acessar|cadastro|cadastrar|conta)\\b/i;
     return Array.from(document.querySelectorAll('nav button,nav a,[role="navigation"] button,[role="navigation"] a,[role="tab"],header button,header a'))
       .filter(function(el){
         if(!nxVisible(el)||el.disabled||el.closest('form'))return false;

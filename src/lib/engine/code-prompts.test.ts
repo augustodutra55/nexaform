@@ -71,6 +71,15 @@ describe("prompt do motor — admin embutido (AD.settings) e imagens", () => {
     expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/ao remover login.*me\/signOut.*profile:"private"/i);
   });
 
+  it("protege jornadas públicas contra login inventado e modal bloqueante", () => {
+    expect(CODE_SYSTEM_PROMPT).toMatch(/NUNCA invente login/);
+    expect(CODE_SYSTEM_PROMPT).toMatch(/agendamento DEVEM funcionar sem login/);
+    expect(CODE_SYSTEM_PROMPT).toMatch(/começa SEMPRE fechado/);
+    expect(CODE_SYSTEM_PROMPT).toMatch(/Fechar.*Escape.*backdrop/);
+    expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/não adicione AD\.auth/);
+    expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/profile:"form"/);
+  });
+
   it("fixa as assinaturas reais de dados também durante refinamentos", () => {
     expect(CODE_REFINE_SYSTEM_PROMPT).toContain("AD.list('colecao', opcoes?)");
     expect(CODE_REFINE_SYSTEM_PROMPT).toContain("AD.update(id, dados)");

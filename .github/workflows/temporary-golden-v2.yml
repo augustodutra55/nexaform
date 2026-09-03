@@ -17,21 +17,6 @@ on:
       - "src/lib/engine/project-validator.ts"
       - "src/lib/engine/collection-access.ts"
       - "src/lib/preview/**"
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/temporary-golden-v2.yml"
-      - "scripts/golden-production.mjs"
-      - "tests/e2e/golden-generated.spec.ts"
-      - "src/app/api/app-auth/**"
-      - "src/app/api/backend/**"
-      - "src/app/e2e-runtime/golden/**"
-      - "src/components/preview/**"
-      - "src/lib/golden-auth.ts"
-      - "src/lib/golden-backend-error.ts"
-      - "src/lib/engine/project-validator.ts"
-      - "src/lib/engine/collection-access.ts"
-      - "src/lib/preview/**"
 
 permissions:
   contents: read

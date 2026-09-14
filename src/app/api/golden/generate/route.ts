@@ -28,7 +28,11 @@ export async function POST(req: NextRequest) {
   const message = typeof body?.message === "string" ? body.message.trim() : "";
   if (!isUuid(projectId) || !message) return NextResponse.json({ error: "Requisição incompleta." }, { status: 400 });
 
-  const { data: project } = await admin.from("projects").select("user_id").eq("id", projectId).maybeSingle();
+  const { data: project, error: projectError } = await admin.from("projects").select("user_id").eq("id", projectId).maybeSingle();
+  if (projectError) {
+    console.error("Falha ao validar o projeto Golden:", projectError.message);
+    return NextResponse.json({ error: "Não foi possível validar o projeto Golden." }, { status: 503 });
+  }
   if (!project?.user_id) return NextResponse.json({ error: "Projeto Golden não encontrado." }, { status: 404 });
 
   const [{ data: authUser }, { data: profile }] = await Promise.all([

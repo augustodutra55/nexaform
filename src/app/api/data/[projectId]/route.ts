@@ -9,6 +9,13 @@ import {
 } from "@/lib/engine/collection-access";
 import { validateDataRecord } from "@/lib/engine/data-contract";
 import { findDeleteReference, validateDataConstraints } from "@/lib/engine/data-constraints";
+import {
+  busyScheduleIntervals,
+  intervalsOverlap,
+  isSchedulingCollection,
+  scheduleInterval,
+  scheduleResource,
+} from "@/lib/engine/scheduling";
 
 /**
  * Backend de dados embutido dos apps gerados. A service role toca app_data
@@ -72,6 +79,24 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ proj
 
   const admin = createAdminClient();
   if (!admin) return bad("Backend de dados não configurado.", 501);
+  if (sp.get("availability") === "1") {
+    if (!isSchedulingCollection(collection)) return bad("Disponibilidade não suportada para esta coleção.");
+    const access = await authorizeCollectionOperation(req, await createClient(), admin, projectId, collection, "insert");
+    if (!access.allowed) return denied(access);
+    const requested = {
+      profissional_id: sp.get("professionalId"),
+      data_hora: sp.get("start"),
+      duracao_minutos: sp.get("durationMinutes"),
+      buffer_antes: sp.get("bufferBefore"),
+      buffer_depois: sp.get("bufferAfter"),
+    };
+    const interval = scheduleInterval(requested);
+    if (!scheduleResource(requested) || !interval) return bad("Profissional, início e duração são obrigatórios.");
+    const { data: rows, error } = await admin.from("app_data").select("data").eq("project_id", projectId).eq("collection", collection).limit(LIST_LIMIT);
+    if (error) return bad(error.message, 500);
+    const busy = busyScheduleIntervals(rows ?? [], requested);
+    return NextResponse.json({ available: !busy.some((item) => intervalsOverlap(item, interval)), busy });
+  }
   const access = await authorizeCollectionOperation(req, await createClient(), admin, projectId, collection, "read");
   if (!access.allowed) return denied(access);
 
@@ -166,6 +191,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     { error: "Dados conflitantes com as relações desta coleção.", fieldErrors: constraint.fieldErrors },
     { status: 409 }
   );
+  if (isSchedulingCollection(collection)) {
+    const interval = scheduleInterval(data);
+    const resource = scheduleResource(data);
+    if (interval && resource) {
+      const { data: rows, error: scheduleError } = await admin.from("app_data").select("data").eq("project_id", projectId).eq("collection", collection).limit(LIST_LIMIT);
+      if (scheduleError) return bad(scheduleError.message, 500);
+      const busy = busyScheduleIntervals(rows ?? [], data);
+      if (busy.some((item) => intervalsOverlap(item, interval))) return bad("Este horário acabou de ser ocupado. Escolha outro horário.", 409);
+    }
+  }
 
   const { count } = await admin
     .from("app_data")

@@ -6,7 +6,7 @@ import { authorizeProjectOwner, consumeRateLimit, isUuid, requestRateKey } from 
 import { generateAiImage, storeAiImage } from "@/lib/media/ai-image";
 
 /**
- * Gera uma imagem por IA (Nano Banana / Gemini 2.5 Flash Image) a partir de um
+ * Gera uma imagem por IA (Nano Banana 2 / Gemini 3.1 Flash Image) a partir de um
  * prompt e guarda no bucket do projeto, devolvendo a URL pública. Assim o criador
  * gera a foto direto na aba Mídia, sem sair do AD Studio.
  *
@@ -14,7 +14,7 @@ import { generateAiImage, storeAiImage } from "@/lib/media/ai-image";
  * Body: { prompt: string, userKey?: string, userProvider?: string }
  */
 export const runtime = "nodejs";
-export const maxDuration = 30;
+export const maxDuration = 90;
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;

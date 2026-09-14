@@ -80,6 +80,13 @@ describe("prompt do motor — admin embutido (AD.settings) e imagens", () => {
     expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/profile:"form"/);
   });
 
+  it("fixa o contrato seguro de agenda pública", () => {
+    expect(CODE_SYSTEM_PROMPT).toContain("AD.availability('agendamentos'");
+    expect(CODE_SYSTEM_PROMPT).toMatch(/procedimentos e profissionais ativos são profile:"catalog"/);
+    expect(CODE_SYSTEM_PROMPT).toMatch(/JAMAIS use AD\.list\('agendamentos'\) no fluxo público/);
+    expect(CODE_SYSTEM_PROMPT).toContain('allowedRoles:["admin","equipe"]');
+  });
+
   it("fixa as assinaturas reais de dados também durante refinamentos", () => {
     expect(CODE_REFINE_SYSTEM_PROMPT).toContain("AD.list('colecao', opcoes?)");
     expect(CODE_REFINE_SYSTEM_PROMPT).toContain("AD.update(id, dados)");

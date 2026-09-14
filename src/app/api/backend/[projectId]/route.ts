@@ -3,7 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isOwner } from "@/lib/access";
 import { authorizeProjectOwner, isUuid } from "@/lib/engine/data-guard";
-import { buildBackendBlueprint, type BackendCollectionBlueprint } from "@/lib/engine/backend-blueprint";
+import { buildBackendBlueprint } from "@/lib/engine/backend-blueprint";
+import { settingsForCollection } from "@/lib/engine/backend-settings";
 import { PRIVATE_PERMISSIONS } from "@/lib/engine/collection-access";
 import { isAppCode } from "@/lib/engine/app-types";
 import { buildBackendChangePlan } from "@/lib/engine/backend-change-plan";
@@ -49,36 +50,6 @@ async function context(projectId: string, req?: NextRequest, goldenApp?: unknown
     return { response: bad("Este projeto ainda não possui um aplicativo gerado.", 422) };
   }
   return { admin, project };
-}
-
-function settingsFor(item: BackendCollectionBlueprint) {
-  const base = {
-    ...PRIVATE_PERMISSIONS,
-    project_id: "",
-    collection: item.collection,
-    profile: item.profile === "custom" ? "private" : item.profile,
-    allowed_roles: item.allowedRoles,
-    authenticated_scope: item.authenticatedScope,
-    data_contract: item.dataContract,
-  };
-  if (item.profile === "catalog") {
-    return { ...base, public_read: true, owner_only: false };
-  }
-  if (item.profile === "form") {
-    return { ...base, public_insert: true, owner_only: false };
-  }
-  if (item.profile === "authenticated") {
-    const fullManifestAccess = item.source === "manifest" && item.operations.length === 0;
-    return {
-      ...base,
-      authenticated_read: fullManifestAccess || item.operations.includes("read"),
-      authenticated_insert: fullManifestAccess || item.operations.includes("insert"),
-      authenticated_update: fullManifestAccess || item.operations.includes("update"),
-      authenticated_delete: fullManifestAccess || item.operations.includes("delete"),
-      owner_only: false,
-    };
-  }
-  return base;
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
@@ -143,7 +114,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
     // Provisionamento automático cria apenas o que falta. Configurações que o
     // dono ajustou no painel só são substituídas por uma ação explícita.
     if (body.force === true || !existing.has(item.collection)) {
-      const payload = { ...settingsFor(item), project_id: projectId };
+      const payload = { ...settingsForCollection(item), project_id: projectId };
       const { error } = await resolved.admin!
         .from("app_collection_settings")
         .upsert(payload, { onConflict: "project_id,collection" });

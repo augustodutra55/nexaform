@@ -114,6 +114,7 @@ export function adGlobalScript(
   if(!PID){
     window.AD = {
       list:function(){return Promise.resolve([]);},
+      availability:function(){return Promise.resolve({available:true,busy:[]});},
       get:function(){return Promise.resolve(null);},
       count:function(){return Promise.resolve(0);},
       insert:noop, update:noop, remove:noop, email:noop,
@@ -169,6 +170,17 @@ export function adGlobalScript(
     get: function(collection, id){ return req('GET', { qs:'?collection=' + encodeURIComponent(collection||'default') + '&id=' + encodeURIComponent(id) }).then(function(r){ return r.item || null; }); },
     // count(colecao, where?) → número de registros que batem no filtro
     count: function(collection, where){ var o = where ? { where: where } : {}; return req('GET', { qs: buildQs(collection, o) + '&count=1' }).then(function(r){ return r.count || 0; }); },
+    // Consulta horários ocupados sem expor nomes, contatos ou demais dados de pacientes.
+    availability: function(collection, opts){
+      opts=opts||{};
+      var qs='?collection='+encodeURIComponent(collection||'agendamentos')+'&availability=1';
+      qs+='&professionalId='+encodeURIComponent(opts.professionalId||'');
+      qs+='&start='+encodeURIComponent(opts.start||'');
+      qs+='&durationMinutes='+encodeURIComponent(opts.durationMinutes||30);
+      qs+='&bufferBefore='+encodeURIComponent(opts.bufferBefore||0);
+      qs+='&bufferAfter='+encodeURIComponent(opts.bufferAfter||0);
+      return req('GET',{qs:qs});
+    },
     insert: function(collection, data){ return req('POST', { body:{ collection: collection||'default', data: data||{} } }).then(function(r){ return r.item; }); },
     update: updateData,
     remove: removeData,

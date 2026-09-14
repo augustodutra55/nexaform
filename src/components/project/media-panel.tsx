@@ -44,6 +44,7 @@ export function MediaPanel({ projectId, projectName, files, assets, focusSource,
   const [promptKind, setPromptKind] = useState<MediaKind>(selected?.kind || "image");
   const [uploading, setUploading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [videoStatus, setVideoStatus] = useState("");
   const [promptText, setPromptText] = useState("");
   const [dragging, setDragging] = useState(false);
   const [batch, setBatch] = useState<{ running: boolean; done: number; total: number }>({ running: false, done: 0, total: 0 });
@@ -175,6 +176,43 @@ export function MediaPanel({ projectId, projectName, files, assets, focusSource,
       toast.error("Falha ao gerar a imagem", { description: error?.message });
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function generateVideo() {
+    const text = promptText.trim();
+    if (!text) return toast.error("Descreva o vídeo que você quer gerar.");
+    if (!window.confirm("Gerar vídeo consome mais saldo que uma imagem e pode levar alguns minutos. Continuar?")) return;
+    const credentials = {
+      userKey: localStorage.getItem("nexaform:ai-key") || null,
+      userProvider: browserAiProvider(localStorage),
+    };
+    setGenerating(true);
+    setVideoStatus("Enviando para geração…");
+    try {
+      const submitted = await fetch(`/api/media-video/${projectId}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "submit", prompt: text, ...credentials }) });
+      const job = await submitted.json().catch(() => ({}));
+      if (!submitted.ok) throw new Error(job.error || "Não foi possível iniciar o vídeo.");
+      let completed: any = null;
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        setVideoStatus(`Gerando vídeo… verificação ${attempt + 1}/20`);
+        await new Promise((resolve) => setTimeout(resolve, 30_000));
+        const response = await fetch(`/api/media-video/${projectId}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "status", jobId: job.jobId, ...credentials }) });
+        const state = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(state.error || "Falha ao consultar o vídeo.");
+        if (["failed", "cancelled", "expired"].includes(state.status)) throw new Error(state.error || `Geração ${state.status}.`);
+        if (state.status === "completed") { completed = state; break; }
+      }
+      if (!completed?.url) throw new Error("O vídeo ainda não terminou. Tente novamente em alguns minutos.");
+      const asset: ProjectMediaAsset = { id: crypto.randomUUID(), url: completed.url, path: "", name: `Vídeo IA · ${text.slice(0, 36)}`, type: "video/mp4", size: 0, createdAt: new Date().toISOString() };
+      await onAssetsChange([asset, ...assets].slice(0, 100));
+      if (selected?.kind === "video") await onReplace(selected, completed.url);
+      toast.success(selected?.kind === "video" ? "Vídeo gerado e aplicado" : "Vídeo gerado e salvo na biblioteca");
+    } catch (error: any) {
+      toast.error("Falha ao gerar o vídeo", { description: error?.message });
+    } finally {
+      setGenerating(false);
+      setVideoStatus("");
     }
   }
 
@@ -320,13 +358,19 @@ export function MediaPanel({ projectId, projectName, files, assets, focusSource,
                   {generating ? <Loader2 className="animate-spin" /> : <WandSparkles />} Gerar com IA
                 </Button>
               )}
+              {promptKind === "video" && (
+                <Button size="sm" variant="brand" onClick={generateVideo} disabled={generating}>
+                  {generating ? <Loader2 className="animate-spin" /> : <Film />} {videoStatus || "Gerar vídeo com IA"}
+                </Button>
+              )}
               <Button size="sm" variant="outline" onClick={() => copy(promptText, "Prompt copiado")}><Copy /> Copiar prompt</Button>
               <Button size="sm" variant="outline" asChild><a href="https://chatgpt.com/" target="_blank" rel="noreferrer">ChatGPT <ExternalLink /></a></Button>
               <Button size="sm" variant="outline" asChild><a href="https://www.genspark.ai/" target="_blank" rel="noreferrer">Genspark <ExternalLink /></a></Button>
             </div>
             {promptKind === "image" && (
-              <p className="mt-2 text-[11px] text-muted-foreground">Gera com o Nano Banana usando sua chave do OpenRouter. Some segundos.</p>
+              <p className="mt-2 text-[11px] text-muted-foreground">Nano Banana 2 para imagens, com chave própria ou saldo configurado no motor.</p>
             )}
+            {promptKind === "video" && <p className="mt-2 text-[11px] text-muted-foreground">Vídeo usa um modelo compatível do OpenRouter, exige confirmação e nunca roda automaticamente.</p>}
           </div>
         </section>
 

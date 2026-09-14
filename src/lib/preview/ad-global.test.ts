@@ -55,4 +55,11 @@ describe("adGlobalScript — autenticação de apps gerados", () => {
     expect(source).toContain("delete: removeData");
     expect(source).toContain("third===undefined?first:second");
   });
+
+  it("expõe disponibilidade sem recorrer à leitura pública de agendamentos", () => {
+    const source = adGlobalScript(PID);
+    expect(source).toContain("availability: function(collection, opts)");
+    expect(source).toContain("&availability=1");
+    expect(source).toContain("professionalId");
+  });
 });

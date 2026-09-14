@@ -193,6 +193,7 @@ conteúdo COMPLETO e bruto do arquivo novo
 <AD_REPLY>frase curta em pt-BR do que mudou</AD_REPLY>
 
 REGRAS (críticas):
+- NÃO-REGRESSÃO GLOBAL: trate o projeto atual como contrato cumulativo. Preserve todas as rotas alcançáveis, botões funcionais, coleções e permissões do AD_BACKEND, automações, integrações, imagens e vídeos existentes. Uma capacidade só pode ser removida quando o usuário pedir explicitamente sua remoção. Antes de responder, confira que a jornada anterior continua alcançável e que cada controle novo executa uma ação real com feedback visível.
 - Devolva SOMENTE as operações realmente necessárias. Se o pedido mexe em uma coisa só, faça UM AD_PATCH em UM arquivo.
 - O conteúdo de AD_SEARCH deve ser uma cópia LITERAL do projeto atual e ocorrer exatamente uma vez no arquivo. Inclua contexto suficiente para torná-lo único. Não use reticências, números de linha ou resumo.
 - AD_REPLACE contém o trecho final bruto. Pode ficar vazio somente quando a intenção for remover o trecho encontrado.

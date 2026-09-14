@@ -168,6 +168,9 @@ export function buildGenerationPlan(message: string, mediaAssets: GenerationMedi
     acceptanceCriteria: [
       "projeto multi-arquivo com App.jsx fino e imports resolvíveis",
       "fluxo principal utilizável, sem botões decorativos ou telas sem saída",
+      "todo controle clicável executa uma ação real e apresenta sucesso, vazio ou erro de forma visível",
+      "refinamentos preservam rotas, funcionalidades, dados, permissões, automações e mídias existentes, salvo remoção explicitamente pedida",
+      "catálogos necessários ao fluxo solicitado abrem com dados iniciais coerentes ou estado vazio acionável",
       "desktop e mobile responsivos, com acessibilidade e feedback de erro",
       "nenhuma dependência de Node ou backend inexistente no runtime gerado",
       `perfil visual ${visualProfile.label} aplicado sem comprometer o orçamento de performance`,

@@ -94,6 +94,12 @@ describe("prompt do motor — admin embutido (AD.settings) e imagens", () => {
     expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/Nunca use AD\.get\('colecao', \{\}\)/);
   });
 
+  it("torna todo refinamento cumulativo e bloqueia regressão funcional", () => {
+    expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/NÃO-REGRESSÃO GLOBAL/);
+    expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/capacidade só pode ser removida quando o usuário pedir explicitamente/i);
+    expect(CODE_REFINE_SYSTEM_PROMPT).toMatch(/cada controle novo executa uma ação real com feedback visível/i);
+  });
+
   it("proíbe overflow horizontal em 320px na geração e no refinamento", () => {
     expect(CODE_SYSTEM_PROMPT).toMatch(/320px sem rolagem horizontal/);
     expect(CODE_SYSTEM_PROMPT).toMatch(/flex-col sm:flex-row|flex-wrap/);

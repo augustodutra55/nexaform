@@ -52,6 +52,10 @@ const PUBLIC_CATALOGS = new Set([
   "produtos",
   "servicos",
   "serviços",
+  "procedimentos",
+  "procedures",
+  "profissionais",
+  "professionals",
   "planos",
   "depoimentos",
   "categorias",
@@ -227,18 +231,18 @@ function inferredProfile(
       reason: "Coleção usada como formulário público sem leitura dos envios.",
     };
   }
-  if (usesAuth && hasRead && !hasMutation) {
-    return {
-      profile: "authenticated",
-      confidence: "high",
-      reason: "O aplicativo usa autenticação; a leitura foi protegida por usuário.",
-    };
-  }
   if (PUBLIC_CATALOGS.has(normalized) && hasRead && !hasMutation) {
     return {
       profile: "catalog",
       confidence: "high",
       reason: "Coleção reconhecida como catálogo público somente para leitura.",
+    };
+  }
+  if (usesAuth && hasRead && !hasMutation) {
+    return {
+      profile: "authenticated",
+      confidence: "high",
+      reason: "O aplicativo usa autenticação; a leitura foi protegida por usuário.",
     };
   }
   if (hasRead && !hasMutation) {

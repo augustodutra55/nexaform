@@ -1,16 +1,16 @@
-// Geração de imagem por IA (Nano Banana / Gemini 2.5 Flash Image via OpenRouter).
+// Geração de imagem por IA (Nano Banana 2 / Gemini 3.1 Flash Image via OpenRouter).
 // Mesma engrenagem que o motor já usa para trocar marcadores ADIMG:, agora
 // reutilizável pela aba Mídia para o criador gerar uma foto sob demanda, sem
 // sair do AD Studio e sem depender de ChatGPT/Genspark.
 
-const IMAGE_MODEL = process.env.NEXT_PUBLIC_IMAGE_MODEL || "google/gemini-2.5-flash-image";
+const IMAGE_MODEL = process.env.IMAGE_MODEL || "google/gemini-3.1-flash-image";
 const IMG_BUCKET = "app-uploads";
 
 /** Chama o Nano Banana e devolve um data: URL da imagem, ou null se falhar. */
 export async function generateAiImage(
   apiKey: string,
   prompt: string,
-  timeoutMs = 18_000
+  timeoutMs = 60_000
 ): Promise<string | null> {
   try {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -95,7 +95,7 @@ export async function resolveAdimgInApp(
       .map(async ([key, prompt]) => {
         let url: string | null = null;
         if (opts.apiKey) {
-          const dataUrl = await generateAiImage(opts.apiKey, prompt, opts.timeoutMs ?? 16_000);
+          const dataUrl = await generateAiImage(opts.apiKey, prompt, opts.timeoutMs ?? 60_000);
           if (dataUrl && opts.supabase) url = await storeAiImage(opts.supabase, opts.projectId, dataUrl);
         }
         map.set(key, url || adimgPlaceholder());

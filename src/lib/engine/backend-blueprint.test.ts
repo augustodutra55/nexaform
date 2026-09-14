@@ -128,6 +128,14 @@ describe("buildBackendBlueprint", () => {
     });
   });
 
+  it("reconhece catálogos clínicos públicos em aplicativo híbrido", () => {
+    const blueprint = buildBackendBlueprint(app("await AD.auth.me(); await AD.list('procedimentos'); await AD.list('profissionais')"));
+    expect(blueprint.collections).toEqual(expect.arrayContaining([
+      expect.objectContaining({ collection: "procedimentos", profile: "catalog" }),
+      expect.objectContaining({ collection: "profissionais", profile: "catalog" }),
+    ]));
+  });
+
   it("detecta update e remove associados às coleções do mesmo módulo", () => {
     const blueprint = buildBackendBlueprint(
       app("const itens = await AD.list('clientes'); await AD.update(id, { nome }); await AD.remove(id)")

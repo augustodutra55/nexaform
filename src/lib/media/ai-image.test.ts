@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { resolveAdimgInApp } from "./ai-image";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { generateAiImage, resolveAdimgInApp } from "./ai-image";
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("resolveAdimgInApp — resolve marcadores ADIMG (fila durável)", () => {
   it("sem chave, troca ADIMG por um placeholder que carrega (nunca deixa quebrado)", async () => {
@@ -31,5 +33,14 @@ describe("resolveAdimgInApp — resolve marcadores ADIMG (fila durável)", () =>
     await resolveAdimgInApp(app, { apiKey: null, supabase: null, projectId: "p1" });
     expect(app.code).not.toContain("ADIMG:");
     expect(app.code).toContain("data:image/svg+xml");
+  });
+
+  it("usa Nano Banana 2 e aceita a resposta de imagem do OpenRouter", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { images: [{ image_url: { url: "data:image/png;base64,AAAA" } }] } }] }) });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(generateAiImage("key", "consultório moderno")).resolves.toBe("data:image/png;base64,AAAA");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.model).toBe("google/gemini-3.1-flash-image");
+    expect(body.modalities).toEqual(["image", "text"]);
   });
 });

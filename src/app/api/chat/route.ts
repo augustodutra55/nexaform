@@ -9,6 +9,7 @@ import { authorizeProjectOwner, consumeRateLimit, isUuid } from "@/lib/engine/da
 import { finalizeGeneration, reserveGeneration } from "@/lib/engine/generation-usage";
 import { sanitizePromptAttachments } from "@/lib/engine/prompt-attachments";
 import { classifyGenerationFailure, safeOperationalMessage } from "@/lib/engine/observability";
+import { readProjectGenerationPlan } from "@/lib/engine/generation-contract";
 
 /**
  * Chat → código com streaming SSE (Fase 1 — paridade Lovable).
@@ -71,6 +72,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: access.error }, { status: access.status ?? 403 });
   }
 
+  const { data: project, error: projectContextError } = await supabase.from("projects").select("meta").eq("id", projectId).maybeSingle();
+  if (projectContextError) return NextResponse.json({ error: "Não foi possível carregar o contrato do projeto. Nenhuma geração foi iniciada." }, { status: 503 });
+  const existingPlan = readProjectGenerationPlan(project?.meta);
+
   const attachments = sanitizePromptAttachments(body?.attachments);
   const requestId = typeof body?.requestId === "string" && isUuid(body.requestId)
     ? body.requestId
@@ -114,6 +119,7 @@ export async function POST(req: NextRequest) {
     costMode: costMode ?? "auto",
     forceReal: true,
     attachments,
+    existingPlan,
   };
 
   // Streaming exige OpenRouter. A rota só assume o transporte SSE com tokens

@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { buildGenerationPlan } from "./generation-plan";
-import { projectGenerationPlan } from "./generation-contract";
+import { projectGenerationPlan, readProjectGenerationPlan } from "./generation-contract";
 
 describe("projectGenerationPlan", () => {
+  it("carrega somente contrato persistido com estrutura válida", () => {
+    const plan = buildGenerationPlan("Crie uma clínica com agenda por profissional");
+    expect(readProjectGenerationPlan({ acceptance: { plan } })).toBe(plan);
+    expect(readProjectGenerationPlan({ acceptance: { plan: { ...plan, visualProfile: null } } })).toBeUndefined();
+    expect(readProjectGenerationPlan({ acceptance: { plan: { ...plan, media: { ...plan.media, videoUrls: null } } } })).toBeUndefined();
+    expect(readProjectGenerationPlan(null)).toBeUndefined();
+    expect(readProjectGenerationPlan({})).toBeUndefined();
+  });
   it("preserva o objetivo mestre durante correções curtas", () => {
     const master = buildGenerationPlan("Crie um programa odontológico completo com pacientes, agenda e prontuário");
     const refinement = buildGenerationPlan("está dando e-mail inválido resolva");

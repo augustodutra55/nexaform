@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { compactFormatRepairMessages, compactProviderSystemPrompt, MAX_QUALITY_REPAIR_ATTEMPTS, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairBaseFiles, qualityRepairInstruction, recoverStagedMissingImports, rollbackMissingImportFiles, shouldContinueQualityRepair, shouldTryFreeModelsAfterPaidDiagnostics, stagedRuntimeQualityReport, streamAppWithOpenRouter, streamOpenRouter } from "./code-providers";
+import { assessCandidate, compactFormatRepairMessages, compactProviderSystemPrompt, MAX_QUALITY_REPAIR_ATTEMPTS, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairBaseFiles, qualityRepairInstruction, recoverStagedMissingImports, rollbackMissingImportFiles, shouldContinueQualityRepair, shouldTryFreeModelsAfterPaidDiagnostics, stagedRuntimeQualityReport, streamAppWithOpenRouter, streamOpenRouter } from "./code-providers";
 import { BUDGET_MODEL_OPENROUTER, PREMIUM_MODEL_OPENROUTER } from "./models";
 import type { AppGenerationResult, ProjectQualityReport } from "./app-types";
+import { buildGenerationPlan } from "./generation-plan";
+import { isRunnableReport } from "./project-validator";
 
 const report: ProjectQualityReport = {
   valid: false,
@@ -157,6 +159,12 @@ Crie um dashboard B2B com KPIs, clientes, funil, tarefas e filtros.
 });
 
 describe("quality gate progressivo das etapas", () => {
+  it("nunca rebaixa perda funcional para aviso, mesmo em etapa intermediária", () => {
+    const staged = stagedRuntimeQualityReport({ ...report, errors: [{ code: "regression_runtime", message: "Agendamento desapareceu" }] }, true);
+    expect(staged.valid).toBe(false);
+    expect(isRunnableReport(staged)).toBe(false);
+    expect(staged.warnings).toEqual([]);
+  });
   it("mantém bloqueios que quebram o runtime e rebaixa acabamento para aviso", () => {
     const staged = stagedRuntimeQualityReport({
       valid: false,
@@ -211,6 +219,32 @@ describe("quality gate progressivo das etapas", () => {
       "missing_required_section",
     ]);
     expect(staged.warnings.map((value) => value.code)).toEqual(["file_too_large"]);
+  });
+});
+
+describe("contrato e não regressão aplicados ao candidato", () => {
+  const files = [{ path: "App.jsx", content: "export default function App(){ return <button onClick={()=>AD.insert('agendamentos',{})}>Agendar</button> }" }];
+  function result(content: string): AppGenerationResult {
+    return {
+      provider: "openrouter", engineMode: "real", reply: "feito", plan: [], cost: 0,
+      app: { kind: "app", name: "Clínica", description: "", entry: "App.jsx", files: [{ path: "App.jsx", content }] },
+      stats: { files: 1, lines: 1, components: 1, hooks: 0, handlers: 1 },
+    };
+  }
+  it("usa o produto completo, não só o comando de trocar cor", () => {
+    const existingPlan = buildGenerationPlan("Crie uma clínica com agenda por profissional e buffer");
+    const candidate = result(files[0].content);
+    assessCandidate(candidate, { message: "troque a cor", name: "Clínica", currentFiles: files, existingPlan });
+    expect(candidate.generationPlan?.objective).toBe(existingPlan.objective);
+    expect(candidate.generationPlan?.requiredCapabilities).toEqual(expect.arrayContaining(existingPlan.requiredCapabilities));
+  });
+  it("recusa o botão sem operação tanto no refinamento quanto na construção por etapas", () => {
+    for (const message of ["troque a cor", "CONSTRUÇÃO POR ETAPAS — ETAPA 3 DE 7: Fluxos operacionais."]) {
+      const candidate = result("export default function App(){return <button>Agendar</button>}");
+      const quality = assessCandidate(candidate, { message, name: "Clínica", currentFiles: files });
+      expect(quality.errors.map((item) => item.code)).toContain("regression_runtime");
+      expect(isRunnableReport(quality)).toBe(false);
+    }
   });
 });
 

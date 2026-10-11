@@ -13,6 +13,7 @@ import {
 import { buildStagePrompt, buildStageRetryPrompt, stagedStages } from "@/lib/engine/staged-generation";
 import { classifyGenerationFailure, safeOperationalMessage } from "@/lib/engine/observability";
 import { resolveAdimgInApp } from "@/lib/media/ai-image";
+import { readProjectGenerationPlan } from "@/lib/engine/generation-contract";
 
 export const maxDuration = 300;
 const configuredMaxMs = Number(process.env.GEN_MAX_MS);
@@ -89,7 +90,7 @@ export async function GET(req: NextRequest) {
 
   const { data: project } = await admin
     .from("projects")
-    .select("id,user_id,schema")
+    .select("id,user_id,schema,meta")
     .eq("id", payload.projectId)
     .eq("user_id", payload.userId)
     .maybeSingle();
@@ -152,6 +153,7 @@ export async function GET(req: NextRequest) {
         attachments: [],
         mediaAssets: [],
         backgroundAttempt: 1,
+        existingPlan: readProjectGenerationPlan(project.meta),
       }),
       new Promise<typeof TIMEOUT>((resolve) => setTimeout(() => resolve(TIMEOUT), WORKER_MAX_MS)),
     ]);

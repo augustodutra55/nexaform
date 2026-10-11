@@ -5,7 +5,7 @@
  * Com roteamento de modelo (econômico/premium) e captura de custo real, para
  * o Studio operar barato.
  */
-import { AppFile, AppGenerationResult, GenerationMediaAsset, ProjectQualityReport, codeStats, projectStats } from "./app-types";
+import { AppFile, AppGenerationResult, GenerationMediaAsset, GenerationPlan, ProjectQualityReport, codeStats, projectStats } from "./app-types";
 import { CODE_SYSTEM_PROMPT, CODE_REFINE_SYSTEM_PROMPT, buildCodeUserPrompt } from "./code-prompts";
 import { matchTemplate } from "./code-templates";
 import { BUDGET_MODEL_OPENROUTER, CostMode, pickTier, modelExecutionPlan, estimateCost, isFunctionalRefinement, isFreeOpenRouterModel } from "./models";
@@ -14,6 +14,8 @@ import { applyFileOperations, parseOperationBlocks } from "./operation-blocks";
 import { buildGenerationPlan, renderGenerationPlan } from "./generation-plan";
 import { issueKey, validateAppProject, isRunnableReport } from "./project-validator";
 import { environmentProviderOrder } from "./provider-order";
+import { projectGenerationPlan } from "./generation-contract";
+import { detectProjectRegressions, REGRESSION_ISSUE_CODES } from "./project-regression";
 
 interface Args {
   message: string;
@@ -34,6 +36,8 @@ interface Args {
   mediaAssets?: GenerationMediaAsset[];
   /** Tentativa transacional da fila; usada apenas para diagnóstico e limites. */
   backgroundAttempt?: number;
+  /** Trusted, persisted product contract, not a client-supplied instruction. */
+  existingPlan?: GenerationPlan;
 }
 
 /** Normaliza e valida os arquivos devolvidos pelo modelo. */
@@ -259,10 +263,11 @@ function maxOutputTokens(a: Args, model: string): number {
 }
 
 function generationPlanFor(a: Args) {
-  return buildGenerationPlan(a.message, a.mediaAssets ?? []);
+  return projectGenerationPlan(a.existingPlan, buildGenerationPlan(a.message, a.mediaAssets ?? []), !!currentOf(a))!;
 }
 
 const STAGED_RUNTIME_BLOCKERS = new Set([
+  ...REGRESSION_ISSUE_CODES,
   "syntax_error",
   "single_file",
   "unsafe_path",
@@ -329,7 +334,7 @@ function textPromptFor(a: Args): string {
   return `${base}\n\nUse os anexos abaixo como referência fiel para esta geração. Não invente conteúdo que contradiga os arquivos.\n\n${blocks.join("\n\n")}`;
 }
 
-function assessCandidate(result: AppGenerationResult, a: Args, repaired = false): ProjectQualityReport {
+export function assessCandidate(result: AppGenerationResult, a: Args, repaired = false): ProjectQualityReport {
   const generationPlan = generationPlanFor(a);
   let report = validateAppProject(result.app, generationPlan, repaired);
   const isFinalStage = /(?:CONSTRUÇÃO|REFINAMENTO) POR ETAPAS\s*[—-]\s*ETAPA\s+(?:7\s+DE\s+7|3\s+DE\s+3)/i.test(a.message);
@@ -345,6 +350,17 @@ function assessCandidate(result: AppGenerationResult, a: Args, repaired = false)
     report.errors = newErrors;
     report.valid = newErrors.length === 0;
     report.score = Math.max(0, 100 - newErrors.length * 20 - report.warnings.length * 4);
+  }
+
+  const previousFiles = a.currentFiles?.length ? a.currentFiles
+    : a.currentCode ? [{ path: "App.jsx", content: a.currentCode }] : null;
+  if (previousFiles?.length) {
+    const entry = previousFiles.find((file) => /(^|\/)App\.(jsx|tsx|js|ts)$/.test(file.path))?.path || previousFiles[0].path;
+    report.errors.push(...detectProjectRegressions(
+      { kind: "app", name: a.name, description: "", files: previousFiles, entry }, result.app, a.message
+    ));
+    report.valid = report.errors.length === 0;
+    report.score = Math.max(0, 100 - report.errors.length * 20 - report.warnings.length * 4);
   }
 
   report = stagedRuntimeQualityReport(

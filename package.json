@@ -27,12 +27,12 @@
     "jszip": "3.10.1",
     "lucide-react": "^0.446.0",
     "nanoid": "^5.0.7",
-    "next": "15.5.25",
+    "next": "15.5.27",
     "next-themes": "^0.3.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "sonner": "^1.5.0",
-    "tailwind-merge": "^2.5.2",
+    "tailwind-merge": "3.7.0",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
@@ -40,15 +40,16 @@
     "@types/node": "^20.16.5",
     "@types/react": "^18.3.8",
     "@types/react-dom": "^18.3.0",
-    "autoprefixer": "^10.4.20",
+    "@tailwindcss/postcss": "4.3.3",
     "postcss": "8.5.23",
-    "tailwindcss": "^3.4.12",
+    "tailwindcss": "4.3.3",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.6.2",
     "vitest": "^4.1.11"
   },
   "overrides": {
     "postcss": "8.5.23",
-    "sharp": "0.35.4"
+    "sharp": "0.35.5",
+    "source-map-js": "1.2.2"
   }
 }

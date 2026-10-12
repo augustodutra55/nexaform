@@ -8,6 +8,7 @@ import { authorizeProjectOwner, consumeRateLimit, isUuid } from "@/lib/engine/da
 import { finalizeGeneration, reserveGeneration } from "@/lib/engine/generation-usage";
 import { sanitizePromptAttachments } from "@/lib/engine/prompt-attachments";
 import { classifyGenerationFailure, safeOperationalMessage } from "@/lib/engine/observability";
+import { readProjectGenerationPlan } from "@/lib/engine/generation-contract";
 
 // Apps grandes + auto-cura (retry/fallback) podem passar de 2 min; damos folga
 // para o servidor não cortar a resposta no meio (o que virava "não é JSON válido").
@@ -329,8 +330,10 @@ export async function POST(req: NextRequest) {
   if (!access.allowed) {
     return NextResponse.json({ error: access.error }, { status: access.status ?? 403 });
   }
-  const { data: projectMediaRow } = await supabase.from("projects").select("meta").eq("id", projectId).maybeSingle();
+  const { data: projectMediaRow, error: projectContextError } = await supabase.from("projects").select("meta").eq("id", projectId).maybeSingle();
+  if (projectContextError) return NextResponse.json({ error: "Não foi possível carregar o contrato do projeto. Nenhuma geração foi iniciada." }, { status: 503 });
   const mediaAssets = trustedProjectMedia(projectMediaRow?.meta?.media, projectId);
+  const existingPlan = readProjectGenerationPlan(projectMediaRow?.meta);
   const attachments = sanitizePromptAttachments(body?.attachments);
   const isRefinementRequest =
     (Array.isArray(currentFiles) && currentFiles.length > 0) ||
@@ -401,7 +404,7 @@ export async function POST(req: NextRequest) {
         currentFiles: Array.isArray(currentFiles) ? currentFiles : null,
         name: typeof name === "string" ? name : "App", userKey: typeof userKey === "string" ? userKey : null,
         userProvider: userProvider ?? null, costMode: costMode ?? "auto",
-        forceReal: forceReal !== false, allowTemplate: allowTemplate === true, attachments, mediaAssets }),
+        forceReal: forceReal !== false, allowTemplate: allowTemplate === true, attachments, mediaAssets, existingPlan }),
       new Promise<typeof DEADLINE>((resolve) => setTimeout(() => resolve(DEADLINE), GEN_MAX_MS)),
     ]);
   } catch (error) {

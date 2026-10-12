@@ -1,6 +1,7 @@
 import type { AppCode, AppFile, GenerationPlan, ProjectQualityIssue, ProjectQualityReport } from "./app-types";
 import ts from "typescript";
 import { buildBackendBlueprint } from "./backend-blueprint";
+import { REGRESSION_ISSUE_CODES } from "./project-regression";
 
 const SCRIPT_EXTENSIONS = ["", ".jsx", ".js", ".tsx", ".ts"];
 const FORBIDDEN_IMPORTS = new Set([
@@ -32,6 +33,7 @@ function dirname(path: string): string {
  * algo para você iterar. Bloqueamos quando o app não abre ou impede a jornada central.
  */
 export const FATAL_ISSUE_CODES = new Set<string>([
+  ...REGRESSION_ISSUE_CODES,
   "single_file",
   "unsafe_path",
   "duplicate_path",

@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: quality-${{ github.workflow }}-${{ github.ref }}
@@ -19,27 +19,16 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Baixar o código
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Preparar Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
-
-      - name: Sincronizar lockfile da correção
-        if: github.event_name == 'pull_request' && github.event.pull_request.number == 68
-        run: |
-          npm install --package-lock-only
-          if ! git diff --quiet -- package-lock.json; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add package-lock.json
-            git commit -m "Atualiza lockfile das dependências seguras"
-            git push
-          fi
 
       - name: Instalar dependências
         run: npm ci
@@ -63,12 +52,13 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Baixar o código
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Preparar Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -84,8 +74,62 @@ jobs:
 
       - name: Publicar relatório do Playwright em caso de falha
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: relatorio-playwright
           path: playwright-report/
           retention-days: 7
+
+  style-migration:
+    name: Comparação visual Tailwind 3 → 4
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/tailwind-v4-migration'
+    needs: core
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Baixar a revisão exata e a referência anterior
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependências e Chromium
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Preparar referência Tailwind 3 isolada
+        env:
+          STUDIO_BASELINE: ${{ runner.temp }}/studio-v3
+        run: |
+          git worktree add --detach "$STUDIO_BASELINE" 46258b28360bfe4d859dbd731cb5ad16d31a0f2b
+          cp -R src/app/e2e-runtime/styles "$STUDIO_BASELINE/src/app/e2e-runtime/"
+          npm ci --prefix "$STUDIO_BASELINE" --no-audit
+
+      - name: Capturar versão anterior
+        env:
+          STUDIO_STYLE_PORT: 3101
+        run: node scripts/verify-studio-styles.mjs "$RUNNER_TEMP/studio-v3" "$RUNNER_TEMP/studio-proof/before"
+
+      - name: Capturar versão migrada
+        env:
+          STUDIO_STYLE_PORT: 3102
+        run: node scripts/verify-studio-styles.mjs . "$RUNNER_TEMP/studio-proof/after"
+
+      - name: Bloquear mudanças de cores, dimensões e espaçamentos
+        run: node scripts/compare-studio-styles.mjs "$RUNNER_TEMP/studio-proof/before" "$RUNNER_TEMP/studio-proof/after"
+
+      - name: Guardar imagens e medidas para revisão visual
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: comparacao-visual-tailwind
+          path: ${{ runner.temp }}/studio-proof/
+          retention-days: 14

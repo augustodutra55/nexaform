@@ -1,6 +1,66 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../../tailwind.config.ts";
+
+/* Preserve the Studio's v3 utility values while the compiler moves to v4. */
+@theme {
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --blur-sm: 4px;
+  --blur: 8px;
+  --default-ring-width: 3px;
+  --default-ring-color: hsl(var(--ring));
+  --color-purple-500: #a855f7;
+  --color-violet-500: #8b5cf6;
+  --color-violet-600: #7c3aed;
+  --color-emerald-500: #10b981;
+}
+
+/* v4 no longer reads theme.container.center/padding/screens. */
+@utility container {
+  width: 100%;
+  max-width: none;
+  margin-inline: auto;
+  padding-inline: 1.5rem;
+  @media (width >= 1200px) {
+    max-width: 1200px;
+  }
+}
+
+/* Keep the former invisible outline in forced-colors mode for accessibility. */
+@utility outline-none {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+
+/* Preserve v3 sibling spacing, including inline labels and explicit margins.
+   v4's last-child/bottom-margin selector otherwise collapses form spacing. */
+@utility space-y-* {
+  & > :not([hidden]) ~ :not([hidden]) {
+    --tw-space-y-reverse: 0;
+    margin-top: calc(--spacing(--value(number)) * (1 - var(--tw-space-y-reverse)));
+    margin-top: calc(--value([length]) * (1 - var(--tw-space-y-reverse)));
+    margin-bottom: calc(--spacing(--value(number)) * var(--tw-space-y-reverse));
+    margin-bottom: calc(--value([length]) * var(--tw-space-y-reverse));
+  }
+}
+
+@utility space-x-* {
+  & > :not([hidden]) ~ :not([hidden]) {
+    --tw-space-x-reverse: 0;
+    margin-right: calc(--spacing(--value(number)) * var(--tw-space-x-reverse));
+    margin-right: calc(--value([length]) * var(--tw-space-x-reverse));
+    margin-left: calc(--spacing(--value(number)) * (1 - var(--tw-space-x-reverse)));
+    margin-left: calc(--value([length]) * (1 - var(--tw-space-x-reverse)));
+  }
+}
+
+@utility space-y-reverse {
+  & > :not([hidden]) ~ :not([hidden]) { --tw-space-y-reverse: 1; }
+}
+
+@utility space-x-reverse {
+  & > :not([hidden]) ~ :not([hidden]) { --tw-space-x-reverse: 1; }
+}
 
 /* ═════════════════════════════════════════════════════════════
    AD Studio · brand tokens
@@ -56,8 +116,12 @@
     --ring: 246 89% 66%;
   }
 
-  * {
+  *, ::before, ::after, ::backdrop, ::file-selector-button {
     @apply border-border;
+  }
+
+  button:not(:disabled), [role="button"]:not(:disabled) {
+    cursor: pointer;
   }
 
   body {
@@ -73,10 +137,10 @@
 @layer utilities {
   /* Assinatura tipográfica AD Studio: indigo → violeta, contido e preciso */
   .text-brand {
-    @apply bg-gradient-to-r from-brand-500 to-purple-500 bg-clip-text text-transparent;
+    @apply bg-linear-to-r/srgb from-brand-500 to-purple-500 bg-clip-text text-transparent;
   }
   .bg-brand-gradient {
-    @apply bg-gradient-to-br from-brand-500 to-purple-500;
+    @apply bg-linear-to-br/srgb from-brand-500 to-purple-500;
   }
   .glow-brand {
     box-shadow: 0 0 70px -16px rgba(109, 93, 246, 0.5);

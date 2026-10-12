@@ -1,5 +1,25 @@
 import type { GenerationPlan } from "./app-types";
 
+/** Older or malformed metadata must never crash a generation. */
+export function readProjectGenerationPlan(meta: unknown): GenerationPlan | undefined {
+  if (!meta || typeof meta !== "object") return undefined;
+  const plan = (meta as { acceptance?: { plan?: unknown } }).acceptance?.plan;
+  if (!plan || typeof plan !== "object") return undefined;
+  const p = plan as GenerationPlan;
+  const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
+  if (!["site", "app"].includes(p.kind) || typeof p.objective !== "string" || typeof p.audience !== "string" ||
+      !strings(p.requiredCapabilities) || !strings(p.visualDirection) || !strings(p.acceptanceCriteria)) return undefined;
+  const v = p.visualProfile;
+  const b = p.visualBlueprint;
+  const m = p.media;
+  if (!v || !b || !m || ![v.id, v.label, v.style, v.layout, v.motion, b.id, b.segment, b.signature, b.palette, b.typography, b.surface].every((item) => typeof item === "string") ||
+      ![v.allowVideo, v.allow3D, v.require3DFallback].every((item) => typeof item === "boolean") ||
+      ![v.maxExternalPackages, m.imageCount, m.videoCount].every((item) => typeof item === "number" && Number.isFinite(item) && item >= 0) ||
+      ![v.performanceRules, b.compositions, b.mediaTreatment, b.motionRecipe, b.threeDRecipe, m.videoUrls].every(strings) ||
+      !["uploaded", "placeholder", "none"].includes(m.videoMode)) return undefined;
+  return p;
+}
+
 /**
  * O plano salvo representa o produto pedido, não o último comando de edição.
  * Refinamentos podem acrescentar código, mas não podem trocar "clínica

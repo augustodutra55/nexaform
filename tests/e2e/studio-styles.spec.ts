@@ -40,8 +40,11 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 1000
     await page.getByRole("button", { name: "Revisar publicação" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
+    // The opening animation scales the dialog briefly; measure its final
+    // layout after it settles, keeping the exact baseline requirement.
+    await expect.poll(async () => (await dialog.boundingBox())?.height)
+      .toBe(viewport.width === 390 ? 150 : 130);
     const box = (await dialog.boundingBox())!;
-    expect(box.height).toBe(viewport.width === 390 ? 150 : 130);
     expect(box.x).toBeGreaterThanOrEqual(-1);
     expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
     await page.getByRole("button", { name: "Fechar", exact: true }).click();

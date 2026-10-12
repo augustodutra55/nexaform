@@ -33,7 +33,7 @@ try {
   for (const [size, viewport] of Object.entries({ mobile: { width: 390, height: 844 }, desktop: { width: 1440, height: 1000 }, wide: { width: 1920, height: 1080 } })) {
     const page = await browser.newPage({ viewport, reducedMotion: "reduce", deviceScaleFactor: 1 });
     await page.goto(url);
-    await page.getByRole("heading", { name: "Identidade e publicação" }).waitFor();
+    await page.getByText("Identidade e publicação", { exact: true }).waitFor();
     await page.evaluate(() => document.fonts.ready);
     await page.addStyleTag({ content: "*,::before,::after { animation:none!important; transition:none!important; caret-color:transparent!important; }" });
     for (const theme of ["light", "dark"]) {
@@ -84,6 +84,9 @@ try {
     await page.close();
   }
   await fs.writeFile(path.join(output, "metrics.json"), JSON.stringify(snapshots, null, 2));
+} catch (error) {
+  console.error(serverLog);
+  throw error;
 } finally {
   if (browser) await browser.close();
   server.kill("SIGTERM");

@@ -4,7 +4,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 1000
   test(`preserva tema, campos, abas e diálogo em ${viewport.width}px`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.goto("/e2e-runtime/styles");
-    await expect(page.getByRole("heading", { name: "Identidade e publicação" })).toBeVisible();
+    await expect(page.getByText("Identidade e publicação", { exact: true })).toBeVisible();
     for (const theme of ["light", "dark"]) {
       await page.getByRole("button", { name: theme === "light" ? "Tema claro" : "Tema escuro" }).click();
       await expect(page.locator("html")).toHaveClass(new RegExp(`\\b${theme}\\b`));

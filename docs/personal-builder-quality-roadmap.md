@@ -32,8 +32,12 @@ Referências oficiais consultadas em 2026-10-11:
 - https://docs.lovable.dev/features/browser-testing
 - https://docs.lovable.dev/features/projects/history
 
-## Bloqueio de segurança encontrado em 2026-10-11
+## Segurança e migração da ferramenta de estilos
 
-Braces 3.0.3 (dependência da cadeia de construção Tailwind 3) tem aviso alto sem versão corrigida publicada. Não suprimir o alerta nem retirar o audit do CI. Planejar substituição/migração da ferramenta de estilos em branch isolada, com aprovação do escopo e verificação visual antes de produção.
+Braces 3.0.3 (dependência da cadeia de construção Tailwind 3) tinha aviso alto sem versão corrigida publicada. A migração autorizada para Tailwind 4.3.3 substitui essa cadeia de dependências; não suprime o alerta nem retira o audit do CI. A auditoria local em 2026-10-12 reportou zero vulnerabilidades conhecidas.
 
-Atualizações pontuais compatíveis preparadas nesta entrega: Next 15.5.27, Sharp 0.35.5, source-map-js 1.2.2. A geração Golden paga não é executada por esta entrega.
+Atualizações preparadas nesta entrega: Next 15.5.27, Sharp 0.35.5, source-map-js 1.2.2, Tailwind/PostCSS 4.3.3 e tailwind-merge 3.7.0. Tema, sombras, foco, cores da marca e largura do container preservados explicitamente. O compilador do Studio muda; o runtime CSS dos apps já gerados mantém sua compatibilidade.
+
+A revisão da migração exige build, auditoria, testes de contrato e testes de interação. Um job separado compara a referência Tailwind 3 com a nova versão em 390, 1440 e 1920px, nos temas claro/escuro, com diálogos, cores, dimensões e espaçamentos. As capturas incluem as páginas públicas inicial e login. Os testes de componentes permanecem nos próximos CIs. Essa amostra não cobre toda tela ou funcionalidade dos apps gerados.
+
+A geração Golden paga não é executada por esta entrega. Não declarar superioridade sobre outros construtores com base apenas nesta migração.

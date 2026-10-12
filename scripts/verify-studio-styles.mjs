@@ -10,7 +10,15 @@ const output = path.resolve(process.argv[3] || "artifacts/studio-styles");
 const port = process.env.STUDIO_STYLE_PORT || "3100";
 const origin = `http://127.0.0.1:${port}`;
 const server = spawn(process.execPath, [path.join(project, "node_modules/next/dist/bin/next"), "dev", "--hostname", "127.0.0.1", "--port", port], {
-  cwd: project, env: { ...process.env, E2E_TEST_MODE: "1" }, stdio: ["ignore", "pipe", "pipe"],
+  cwd: project,
+  env: {
+    ...process.env, E2E_TEST_MODE: "1",
+    // Public screens initialize their auth client. These non-working values
+    // keep screenshots independent of real accounts, credentials and data.
+    NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321",
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: "studio-visual-test-not-a-real-key",
+  },
+  stdio: ["ignore", "pipe", "pipe"],
 });
 let serverLog = "";
 let exited = false;
@@ -72,7 +80,9 @@ try {
     // Capture real public screens too, with no signed-in account or paid calls.
     if (size !== "wide") {
       for (const [screen, route] of [["home", "/"], ["login", "/login"]]) {
-        await page.goto(`${origin}${route}`);
+        const response = await page.goto(`${origin}${route}`);
+        if (!response?.ok()) throw new Error(`Página ${route} respondeu ${response?.status()}`);
+        if (screen === "login") await page.getByLabel("Email", { exact: true }).waitFor();
         await page.evaluate(() => document.fonts.ready);
         await page.addStyleTag({ content: "*,::before,::after { animation:none!important; transition:none!important; caret-color:transparent!important; }" });
         for (const theme of ["light", "dark"]) {

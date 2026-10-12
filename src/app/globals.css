@@ -32,6 +32,36 @@
   outline-offset: 2px;
 }
 
+/* Preserve v3 sibling spacing, including inline labels and explicit margins.
+   v4's last-child/bottom-margin selector otherwise collapses form spacing. */
+@utility space-y-* {
+  --studio-space-y: --spacing(--value(number));
+  --studio-space-y: --value([length]);
+  & > :not([hidden]) ~ :not([hidden]) {
+    --tw-space-y-reverse: 0;
+    margin-top: calc(var(--studio-space-y) * (1 - var(--tw-space-y-reverse)));
+    margin-bottom: calc(var(--studio-space-y) * var(--tw-space-y-reverse));
+  }
+}
+
+@utility space-x-* {
+  --studio-space-x: --spacing(--value(number));
+  --studio-space-x: --value([length]);
+  & > :not([hidden]) ~ :not([hidden]) {
+    --tw-space-x-reverse: 0;
+    margin-right: calc(var(--studio-space-x) * var(--tw-space-x-reverse));
+    margin-left: calc(var(--studio-space-x) * (1 - var(--tw-space-x-reverse)));
+  }
+}
+
+@utility space-y-reverse {
+  & > :not([hidden]) ~ :not([hidden]) { --tw-space-y-reverse: 1; }
+}
+
+@utility space-x-reverse {
+  & > :not([hidden]) ~ :not([hidden]) { --tw-space-x-reverse: 1; }
+}
+
 /* ═════════════════════════════════════════════════════════════
    AD Studio · brand tokens
    tinta #0B1020 · primária #6D5DF6 · apoio #A855F7

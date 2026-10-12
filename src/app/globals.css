@@ -35,22 +35,22 @@
 /* Preserve v3 sibling spacing, including inline labels and explicit margins.
    v4's last-child/bottom-margin selector otherwise collapses form spacing. */
 @utility space-y-* {
-  --studio-space-y: --spacing(--value(number));
-  --studio-space-y: --value([length]);
   & > :not([hidden]) ~ :not([hidden]) {
     --tw-space-y-reverse: 0;
-    margin-top: calc(var(--studio-space-y) * (1 - var(--tw-space-y-reverse)));
-    margin-bottom: calc(var(--studio-space-y) * var(--tw-space-y-reverse));
+    margin-top: calc(--spacing(--value(number)) * (1 - var(--tw-space-y-reverse)));
+    margin-top: calc(--value([length]) * (1 - var(--tw-space-y-reverse)));
+    margin-bottom: calc(--spacing(--value(number)) * var(--tw-space-y-reverse));
+    margin-bottom: calc(--value([length]) * var(--tw-space-y-reverse));
   }
 }
 
 @utility space-x-* {
-  --studio-space-x: --spacing(--value(number));
-  --studio-space-x: --value([length]);
   & > :not([hidden]) ~ :not([hidden]) {
     --tw-space-x-reverse: 0;
-    margin-right: calc(var(--studio-space-x) * var(--tw-space-x-reverse));
-    margin-left: calc(var(--studio-space-x) * (1 - var(--tw-space-x-reverse)));
+    margin-right: calc(--spacing(--value(number)) * var(--tw-space-x-reverse));
+    margin-right: calc(--value([length]) * var(--tw-space-x-reverse));
+    margin-left: calc(--spacing(--value(number)) * (1 - var(--tw-space-x-reverse)));
+    margin-left: calc(--value([length]) * (1 - var(--tw-space-x-reverse)));
   }
 }
 

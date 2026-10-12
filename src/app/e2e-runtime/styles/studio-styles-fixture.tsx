@@ -41,7 +41,7 @@ export function StudioStylesFixture() {
               <TabsContent value="projeto">
                 <form className="space-y-4 pt-3" onSubmit={(event) => { event.preventDefault(); setSaved(true); }}>
                   <div className="space-y-2"><Label htmlFor="style-name">Nome do projeto</Label><Input id="style-name" data-testid="style-input" defaultValue="Clínica Beleza In Dente" required /></div>
-                  <div className="space-y-2"><Label htmlFor="style-email">Contato</Label><Input id="style-email" type="email" defaultValue="equipe@example.com" required /></div>
+                  <div className="space-y-2"><Label htmlFor="style-email">Contato</Label><Input id="style-email" data-testid="style-contact-input" type="email" defaultValue="equipe@example.com" required /></div>
                   <div className="flex items-center justify-between gap-3"><Label htmlFor="style-reminder">Lembretes ativos</Label><Switch id="style-reminder" checked={enabled} onCheckedChange={setEnabled} /></div>
                   <div className="flex flex-wrap gap-2">
                     <Button type="submit" data-testid="style-primary">Salvar projeto</Button>
@@ -64,7 +64,7 @@ export function StudioStylesFixture() {
             <h1 className="text-2xl font-bold">Ideias que viram produtos</h1>
             <p className="mt-3 text-sm">Seu construtor pessoal para criar e comercializar aplicativos.</p>
           </div>
-          <Card><CardHeader><CardTitle>Operação protegida</CardTitle><CardDescription>Agenda, catálogo e mídia permanecem disponíveis.</CardDescription></CardHeader>
+          <Card data-testid="style-operation-card"><CardHeader><CardTitle>Operação protegida</CardTitle><CardDescription>Agenda, catálogo e mídia permanecem disponíveis.</CardDescription></CardHeader>
             <CardContent><div className="grid grid-cols-3 gap-3 text-center">
               {["Agenda", "Catálogo", "Mídia"].map((item) => <div key={item} className="rounded-lg border bg-secondary p-3 text-sm font-medium">{item}</div>)}
             </div></CardContent>

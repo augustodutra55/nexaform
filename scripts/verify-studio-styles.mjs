@@ -55,7 +55,7 @@ try {
           const ctx = canvas.getContext("2d"); ctx.fillStyle = value; ctx.fillRect(0, 0, 1, 1);
           return [...ctx.getImageData(0, 0, 1, 1).data];
         };
-        for (const id of ["style-container", "style-header", "style-card", "style-input", "style-primary", "style-gradient"]) {
+        for (const id of ["style-container", "style-header", "style-card", "style-input", "style-contact-input", "style-primary", "style-gradient", "style-operation-card"]) {
           const node = document.querySelector(`[data-testid="${id}"]`);
           const rect = node.getBoundingClientRect(); const style = getComputedStyle(node);
           result[id] = { x: rect.x, y: rect.y, width: rect.width, height: rect.height,

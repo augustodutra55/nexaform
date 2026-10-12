@@ -1,6 +1,9 @@
 import ts from "typescript";
 import type { AppCode, AppFile, ProjectQualityIssue } from "./app-types";
-import { buildBackendBlueprint } from "./backend-blueprint";
+import { buildBackendBlueprint, type BackendCollectionBlueprint } from "./backend-blueprint";
+import { settingsForCollection } from "./backend-settings";
+import { decideCollectionAccess, type CollectionOperation } from "./collection-access";
+import type { DataFieldRule } from "./data-contract";
 
 /** These are blocking regressions, including during intermediate build stages. */
 export const REGRESSION_ISSUE_CODES = new Set([
@@ -127,6 +130,46 @@ function aliasesFor(target: string): string[] {
   return aliases[target] || [target];
 }
 
+function weakenedRule(previous: DataFieldRule, candidate: DataFieldRule): boolean {
+  const narrowerTypes: Partial<Record<DataFieldRule["type"], DataFieldRule["type"][]>> = {
+    string: ["email", "date", "uuid"], number: ["integer"],
+  };
+  if (previous.type !== candidate.type && !narrowerTypes[previous.type]?.includes(candidate.type)) return true;
+  if ((previous.required && !candidate.required) || (previous.unique && !candidate.unique)) return true;
+  if (previous.reference && (previous.reference.collection !== candidate.reference?.collection ||
+      previous.reference.onDelete !== candidate.reference?.onDelete)) return true;
+  for (const key of ["minLength", "min"] as const) {
+    if (previous[key] !== undefined && (candidate[key] === undefined || candidate[key] < previous[key])) return true;
+  }
+  for (const key of ["maxLength", "max"] as const) {
+    if (previous[key] !== undefined && (candidate[key] === undefined || candidate[key] > previous[key])) return true;
+  }
+  // Regex inclusion cannot be proven generally. Keep the existing expression
+  // until a field-specific contract change is explicitly requested.
+  if (previous.pattern && previous.pattern !== candidate.pattern) return true;
+  if (previous.enum && (!candidate.enum || candidate.enum.some((value) => !previous.enum!.includes(value)))) return true;
+  return false;
+}
+
+function broaderAccess(previous: BackendCollectionBlueprint, candidate: BackendCollectionBlueprint): boolean {
+  const before = settingsForCollection(previous);
+  const after = settingsForCollection(candidate);
+  const roles = new Set([...before.allowed_roles, ...after.allowed_roles]);
+  let other = "unlisted_role_0";
+  for (let index = 1; roles.has(other); index++) other = `unlisted_role_${index}`;
+  roles.add(other); // Represents every role outside both finite allowlists.
+  const actors = [null, ...[...roles].map((role) => ({ id: "regression-check", role }))];
+  const operations: CollectionOperation[] = ["read", "insert", "update", "delete"];
+  for (const operation of operations) {
+    for (const actor of actors) {
+      const oldDecision = decideCollectionAccess(before, operation, actor);
+      const newDecision = decideCollectionAccess(after, operation, actor);
+      if (newDecision.allowed && (!oldDecision.allowed || (oldDecision.scopeToAppUser && !newDecision.scopeToAppUser))) return true;
+    }
+  }
+  return false;
+}
+
 /** Deterministic pre-save comparison. It does not execute code or call AI. */
 export function detectProjectRegressions(previous: AppCode, candidate: AppCode, message: string): ProjectQualityIssue[] {
   const beforeFiles = reachableFiles(previous);
@@ -147,23 +190,26 @@ export function detectProjectRegressions(previous: AppCode, candidate: AppCode, 
   const beforeBackend = buildBackendBlueprint({ ...previous, files: beforeFiles });
   const afterBackend = buildBackendBlueprint({ ...candidate, files: afterFiles });
   for (const collection of beforeBackend.collections.filter((item) => item.source === "manifest")) {
-    if (explicitlyRemoves(message, aliasesFor(collection.collection))) continue;
+    const requestedRemoval = explicitlyRemoves(message, aliasesFor(collection.collection));
     const next = afterBackend.collections.find((item) => item.collection === collection.collection);
+    // Removing a collection cannot authorize exposing one that still exists,
+    // even if the remaining contract was inferred from runtime calls.
+    if (next && broaderAccess(collection, next)) {
+      push("regression_access", `A coleção '${collection.collection}' ampliou acesso público, escopo ou papéis. Preserve as permissões; alterações de acesso exigem revisão explícita.`);
+    }
     if (!next || next.source !== "manifest") {
-      push("regression_backend", `O contrato da coleção '${collection.collection}' foi removido. Preserve o AD_BACKEND anterior.`);
+      if (!requestedRemoval) push("regression_backend", `O contrato da coleção '${collection.collection}' foi removido. Preserve o AD_BACKEND anterior.`);
       continue;
+    }
+    if (requestedRemoval) continue;
+    if (!collection.dataContract.allowUnknown && next.dataContract.allowUnknown) {
+      push("regression_backend", `A coleção '${collection.collection}' passou a aceitar campos não declarados. Preserve o contrato de dados.`);
     }
     for (const [field, rule] of Object.entries(collection.dataContract.fields)) {
       const nextRule = next.dataContract.fields[field];
-      if ((!nextRule || (rule.required && !nextRule.required) || (rule.unique && !nextRule.unique) ||
-          (rule.reference && rule.reference.collection !== nextRule.reference?.collection)) && !explicitlyRemoves(message, [field])) {
+      if ((!nextRule || weakenedRule(rule, nextRule)) && !explicitlyRemoves(message, [field])) {
         push("regression_backend", `O campo/validação '${collection.collection}.${field}' desapareceu ou foi enfraquecido. Preserve o contrato de dados.`);
       }
-    }
-    if ((collection.profile !== "catalog" && next.profile === "catalog") ||
-        (collection.profile === "authenticated" && collection.authenticatedScope === "own" && next.authenticatedScope === "all") ||
-        (collection.allowedRoles.length > 0 && (!next.allowedRoles.length || next.allowedRoles.some((role) => !collection.allowedRoles.includes(role))))) {
-      push("regression_access", `A coleção '${collection.collection}' ampliou acesso público, escopo ou papéis. Preserve as permissões; alterações de acesso exigem revisão explícita.`);
     }
   }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { detectProjectRegressions, explicitlyRemoves } from "./project-regression";
 import { isRunnableReport } from "./project-validator";
 import type { AppCode } from "./app-types";
+import { validateDataRecord, type DataFieldRule } from "./data-contract";
 
 function app(content: string, files: AppCode["files"] = []): AppCode {
   return { kind: "app", name: "Teste", description: "", entry: "App.jsx", files: [{ path: "App.jsx", content }, ...files] };
@@ -64,6 +65,73 @@ describe("proteção determinística contra regressões", () => {
       const errors = detectProjectRegressions(app(header(previous) + booking), app(header(next) + booking), "melhore a versão mobile");
       expect(errors.map((item) => item.code)).toContain("regression_access");
     }
+  });
+
+  it.each([
+    ["private", "catalog"], ["private", "form"], ["private", "authenticated"],
+    ["custom", "catalog"], ["custom", "form"], ["custom", "authenticated"],
+    ["catalog", "form"], ["catalog", "authenticated"],
+    ["form", "catalog"], ["form", "authenticated"],
+    ["authenticated", "catalog"], ["authenticated", "form"],
+  ])("bloqueia novo acesso ao trocar %s por %s", (oldProfile, newProfile) => {
+    const contract = (profile: string) => app(header({ collections: [{ name: "pacientes", profile }] }) + booking);
+    expect(detectProjectRegressions(contract(oldProfile), contract(newProfile), "melhore o layout").map((item) => item.code)).toContain("regression_access");
+  });
+
+  it("permite restringir acesso e papéis sem tratar a mudança como exposição", () => {
+    const contract = (profile: string, allowedRoles: string[] = []) => app(header({ collections: [{ name: "pacientes", profile, allowedRoles }] }) + booking);
+    expect(detectProjectRegressions(contract("authenticated"), contract("private"), "restrinja acesso")).toEqual([]);
+    expect(detectProjectRegressions(contract("authenticated", ["admin", "equipe"]), contract("authenticated", ["admin"]), "restrinja acesso")).toEqual([]);
+  });
+
+  it("não usa um pedido de remoção para autorizar exposição da coleção restante", () => {
+    const contract = (profile: string) => app(header({ collections: [{ name: "pacientes", profile }] }) + booking);
+    expect(detectProjectRegressions(contract("private"), contract("form"), "remova a coleção pacientes").map((item) => item.code)).toContain("regression_access");
+  });
+
+  const validationChanges: Array<[string, DataFieldRule, DataFieldRule, unknown]> = [
+    ["email vira texto livre", { type: "email" }, { type: "string" }, "inválido"],
+    ["inteiro aceita fração", { type: "integer" }, { type: "number" }, 1.5],
+    ["remove pattern", { type: "string", pattern: "^[0-9]+$" }, { type: "string" }, "ABC"],
+    ["troca pattern por qualquer texto", { type: "string", pattern: "^[0-9]+$" }, { type: "string", pattern: ".*" }, "ABC"],
+    ["reduz minLength", { type: "string", minLength: 3 }, { type: "string", minLength: 1 }, "a"],
+    ["remove minLength", { type: "string", minLength: 3 }, { type: "string" }, "a"],
+    ["aumenta maxLength", { type: "string", maxLength: 3 }, { type: "string", maxLength: 9 }, "abcdef"],
+    ["remove maxLength", { type: "string", maxLength: 3 }, { type: "string" }, "abcdef"],
+    ["reduz min", { type: "number", min: 10 }, { type: "number", min: 0 }, 1],
+    ["remove min", { type: "number", min: 10 }, { type: "number" }, 1],
+    ["aumenta max", { type: "number", max: 10 }, { type: "number", max: 20 }, 15],
+    ["remove max", { type: "number", max: 10 }, { type: "number" }, 15],
+    ["remove enum", { type: "string", enum: ["pendente"] }, { type: "string" }, "qualquer"],
+    ["amplia enum", { type: "string", enum: ["pendente"] }, { type: "string", enum: ["pendente", "qualquer"] }, "qualquer"],
+  ];
+  it.each(validationChanges)("rejeita contrato que %s", (_name, oldRule, newRule, malformed) => {
+    const contract = (rule: DataFieldRule) => ({ version: 1 as const, allowUnknown: false, fields: { dado: rule } });
+    // Demonstrate a record the previous contract rejects and the candidate
+    // would accept, rather than merely asserting the comparator's branches.
+    expect(validateDataRecord({ dado: malformed }, contract(oldRule)).valid).toBe(false);
+    expect(validateDataRecord({ dado: malformed }, contract(newRule)).valid).toBe(true);
+    const project = (rule: DataFieldRule) => app(header({ collections: [{ name: "pacientes", profile: "private", fields: { dado: rule } }] }) + booking);
+    expect(detectProjectRegressions(project(oldRule), project(newRule), "troque as cores").map((item) => item.code)).toContain("regression_backend");
+  });
+
+  it("impede aceitar campos não declarados e trocar referências existentes", () => {
+    const collection = { name: "pacientes", profile: "private", allowUnknown: false, fields: { contato: { type: "uuid", reference: { collection: "contatos" } } } };
+    const previous = app(header({ collections: [collection] }) + booking);
+    for (const change of [{ allowUnknown: true }, { fields: { contato: { type: "uuid", reference: { collection: "laboratorios" } } } }]) {
+      const next = app(header({ collections: [{ ...collection, ...change }] }) + booking);
+      expect(detectProjectRegressions(previous, next, "melhore o layout").map((item) => item.code)).toContain("regression_backend");
+    }
+  });
+
+  it("permite validações comprovadamente mais restritas", () => {
+    const fields = { contato: { type: "string", minLength: 3, maxLength: 100, enum: ["a@b.com", "c@d.com"] }, valor: { type: "number", min: 0, max: 100 } };
+    const previous = app(header({ collections: [{ name: "pacientes", profile: "private", fields }] }) + booking);
+    const next = app(header({ collections: [{ name: "pacientes", profile: "private", fields: {
+      contato: { ...fields.contato, type: "email", required: true, unique: true, minLength: 4, maxLength: 90, enum: ["a@b.com"] },
+      valor: { ...fields.valor, type: "integer", min: 1, max: 90 },
+    } }] }) + booking);
+    expect(detectProjectRegressions(previous, next, "melhore a validação")).toEqual([]);
   });
 
   it("preserva automações, ações HTTP, webhooks e preços", () => {

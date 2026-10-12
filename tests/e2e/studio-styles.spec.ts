@@ -10,15 +10,19 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 1000
       await expect(page.locator("html")).toHaveClass(new RegExp(`\\b${theme}\\b`));
       const metrics = await page.evaluate(() => {
         const input = document.querySelector('[data-testid="style-input"]')!;
+        const contact = document.querySelector('[data-testid="style-contact-input"]')!;
         const card = document.querySelector('[data-testid="style-card"]')!;
         const button = document.querySelector('[data-testid="style-primary"]')!;
         const container = document.querySelector('[data-testid="style-container"]')!;
-        return { inputHeight: input.getBoundingClientRect().height, cardBorder: getComputedStyle(card).borderTopWidth,
+        return { inputHeight: input.getBoundingClientRect().height,
+          fieldSpacing: contact.getBoundingClientRect().top - input.getBoundingClientRect().top,
+          cardBorder: getComputedStyle(card).borderTopWidth,
           cardRadius: getComputedStyle(card).borderRadius, buttonCursor: getComputedStyle(button).cursor,
           containerWidth: container.getBoundingClientRect().width,
           overflow: document.documentElement.scrollWidth - innerWidth };
       });
       expect(metrics.inputHeight).toBe(36);
+      expect(metrics.fieldSpacing).toBe(84);
       expect(metrics.cardBorder).toBe("1px");
       expect(metrics.cardRadius).toBe("12px");
       expect(metrics.buttonCursor).toBe("pointer");
@@ -37,6 +41,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 1000
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     const box = (await dialog.boundingBox())!;
+    expect(box.height).toBe(viewport.width === 390 ? 150 : 130);
     expect(box.x).toBeGreaterThanOrEqual(-1);
     expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
     await page.getByRole("button", { name: "Fechar", exact: true }).click();

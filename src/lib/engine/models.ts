@@ -20,9 +20,29 @@ export function isFunctionalRefinement(message: string): boolean {
 }
 
 /** Modelo OpenRouter barato — bom para copy/estrutura/sites. */
-export const ECON_MODEL_OPENROUTER = process.env.NEXT_PUBLIC_ECON_MODEL || "anthropic/claude-haiku-4.5";
-/** Modelo OpenRouter forte — apps, lógica, refinos técnicos. */
-export const PREMIUM_MODEL_OPENROUTER = process.env.NEXT_PUBLIC_PREMIUM_MODEL || "anthropic/claude-sonnet-4.5";
+export const ECON_MODEL_OPENROUTER = process.env.NEXT_PUBLIC_ECON_MODEL || "anthropic/claude-haiku-5.5";
+/**
+ * Alias oficial do OpenRouter para o Sonnet atual. Usar o alias evita que o
+ * motor fique preso a um snapshot retirado do catálogo, como ocorreu com 4.5.
+ */
+export const PREMIUM_MODEL_OPENROUTER = process.env.NEXT_PUBLIC_PREMIUM_MODEL || "~anthropic/claude-sonnet-latest";
+/**
+ * Modelos fortes de fornecedores diferentes. São usados somente se o Sonnet
+ * atual falhar por indisponibilidade, limite ou erro 5xx; continuam sujeitos ao
+ * mesmo parser e quality gate do modelo principal.
+ */
+const DEFAULT_PREMIUM_FALLBACK_MODELS_OPENROUTER = [
+  "openai/gpt-6.1-sol",
+  "google/gemini-4-argon",
+];
+
+export const PREMIUM_FALLBACK_MODELS_OPENROUTER = uniqueModels(
+  String(process.env.OPENROUTER_PREMIUM_FALLBACK_MODELS || "")
+    .split(",")
+    .map((model) => model.trim())
+    .filter(Boolean)
+    .concat(DEFAULT_PREMIUM_FALLBACK_MODELS_OPENROUTER)
+);
 /**
  * Fallbacks de orçamento do OpenRouter. Mantemos o Claude escolhido como primeira
  * opção. MiMo V2.5 é multimodal, muito barato e amplamente usado para coding;
@@ -52,8 +72,8 @@ export function isFreeOpenRouterModel(model: string): boolean {
 }
 
 /** Equivalentes para a API direta da Anthropic. */
-export const ECON_MODEL_ANTHROPIC = "claude-3-5-haiku-latest";
-export const PREMIUM_MODEL_ANTHROPIC = "claude-sonnet-4-5";
+export const ECON_MODEL_ANTHROPIC = "claude-haiku-5-5";
+export const PREMIUM_MODEL_ANTHROPIC = "claude-sonnet-5-5";
 
 
 export function pickTier(
@@ -101,13 +121,15 @@ export function modelExecutionPlan(
 ): string[] {
   const selected = modelFor(tier, provider);
   if (provider === "claude") return [selected];
-  // Apps reais (multi-arquivo) NÃO se beneficiam de rebaixar para modelos
-  // fracos/gratuitos quando o modelo forte falha por formato ou qualidade — eles
-  // só produzem código inaplicável ou 429 e terminam em demo/falha. Mantemos
-  // apenas o modelo escolhido; o retry por etapa e o quality gate cuidam da
-  // resiliência, e uma falha honesta é melhor que um demo disfarçado. A cascata
-  // barata continua valendo para sites/landing simples.
-  if (opts?.isApp) return [selected];
+  // Apps reais não rebaixam para modelos fracos/gratuitos. No tier premium,
+  // porém, mantemos redundância entre modelos fortes de fornecedores distintos.
+  // Isso preserva a qualidade e evita interromper a construção por um 5xx ou
+  // pela retirada de um único modelo do catálogo.
+  if (opts?.isApp) {
+    return tier === "premium"
+      ? uniqueModels([selected, ...PREMIUM_FALLBACK_MODELS_OPENROUTER])
+      : [selected];
+  }
   return uniqueModels([
     selected,
     BUDGET_MODEL_OPENROUTER,
@@ -117,13 +139,16 @@ export function modelExecutionPlan(
 }
 
 const PRICE: Record<string, { in: number; out: number }> = {
-  "anthropic/claude-haiku-4.5": { in: 1, out: 5 },
+  "anthropic/claude-haiku-5.5": { in: 1, out: 5 },
   "anthropic/claude-3.5-haiku": { in: 0.8, out: 4 },
-  "anthropic/claude-sonnet-4.5": { in: 3, out: 15 },
+  "~anthropic/claude-sonnet-latest": { in: 2, out: 10 },
+  "anthropic/claude-sonnet-5.5": { in: 2, out: 10 },
+  "openai/gpt-6.1-sol": { in: 2, out: 10 },
+  "google/gemini-4-argon": { in: 2, out: 10 },
   "xiaomi/mimo-v2.5": { in: 0.14, out: 0.28 },
   "openrouter/free": { in: 0, out: 0 },
-  "claude-3-5-haiku-latest": { in: 0.8, out: 4 },
-  "claude-sonnet-4-5": { in: 3, out: 15 },
+  "claude-haiku-5-5": { in: 1, out: 5 },
+  "claude-sonnet-5-5": { in: 2, out: 10 },
 };
 
 export function estimateCost(model: string, inTokens: number, outTokens: number): number {

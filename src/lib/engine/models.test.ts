@@ -6,6 +6,7 @@ import {
   FREE_CODING_MODELS_OPENROUTER,
   FREE_MODEL_OPENROUTER,
   PREMIUM_MODEL_ANTHROPIC,
+  PREMIUM_FALLBACK_MODELS_OPENROUTER,
   PREMIUM_MODEL_OPENROUTER,
   estimateCost,
   modelExecutionPlan,
@@ -61,14 +62,16 @@ describe("modelExecutionPlan", () => {
     expect(FREE_CODING_MODELS_OPENROUTER.every((model) => model.endsWith(":free"))).toBe(true);
   });
 
-  it("APP não rebaixa para modelos fracos/grátis — usa só o modelo escolhido", () => {
+  it("APP premium usa modelos fortes redundantes sem rebaixar para modelos fracos/grátis", () => {
     expect(modelExecutionPlan("premium", "openrouter", { isApp: true })).toEqual([
       PREMIUM_MODEL_OPENROUTER,
+      ...PREMIUM_FALLBACK_MODELS_OPENROUTER,
     ]);
     expect(modelExecutionPlan("economy", "openrouter", { isApp: true })).toEqual([
       ECON_MODEL_OPENROUTER,
     ]);
     const appPlan = modelExecutionPlan("premium", "openrouter", { isApp: true });
+    expect(PREMIUM_FALLBACK_MODELS_OPENROUTER.length).toBeGreaterThanOrEqual(2);
     expect(appPlan).not.toContain(BUDGET_MODEL_OPENROUTER);
     expect(appPlan).not.toContain(FREE_MODEL_OPENROUTER);
     FREE_CODING_MODELS_OPENROUTER.forEach((m) => expect(appPlan).not.toContain(m));

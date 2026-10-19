@@ -950,8 +950,8 @@ export async function generateAppWithProviders(a: Args): Promise<AppGenerationRe
 
   // ── AUTO-CURA PREVISÍVEL ──────────────────────────────────────────────────
   // Repetimos falhas transitórias e podemos tentar outra chave/provedor, mas
-  // preservamos o tier escolhido. Nunca rebaixamos Premium para Haiku nem
-  // elevamos Econômico para Premium sem uma nova escolha do usuário.
+  // preservamos o tier escolhido. Premium usa somente fallbacks fortes; nunca
+  // rebaixa para Haiku/free sem uma nova escolha do usuário.
   async function tryChain(
     provider: "claude" | "openrouter",
     key: string,
@@ -1179,13 +1179,14 @@ export async function streamAppWithOpenRouter(
         diag.push(`OpenRouter: resposta em streaming de ${model} não pôde ser aplicada (${responseFormatSummary(streamed.text)}); recuperação de formato sem streaming iniciada.`);
       }
     }
-    // Rede de segurança: quando o streaming falha por FORMATO (ex.: AD_PATCH+
-    // json-like) ou por qualidade, repetimos a MESMA etapa SEM streaming. Esse
-    // caminho tem recuperação de formato (reforça AD_FILE/AD_PATCH) e correção
-    // de quality gate. Antes, um refinamento nesse formato era descartado direto
-    // e o pedido do usuário nem chegava a ser aplicado.
-    const synced = await callOpenRouter(apiKey, a, model, diag, opts.fetchImpl ?? fetch);
-    if (synced) return synced;
+    // Rede de segurança: quando o streaming respondeu, mas veio em formato
+    // inaplicável ou falhou no quality gate, repetimos a etapa sem streaming.
+    // Em erro HTTP, timeout ou stream vazio, avançamos imediatamente para o
+    // próximo modelo forte em vez de repetir a mesma falha e consumir o prazo.
+    if (streamed) {
+      const synced = await callOpenRouter(apiKey, a, model, diag, opts.fetchImpl ?? fetch);
+      if (synced) return synced;
+    }
   }
   return demoFallback(a.message, diag.length ? diag.join(" | ") : undefined);
 }

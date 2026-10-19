@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assessCandidate, compactFormatRepairMessages, compactProviderSystemPrompt, MAX_QUALITY_REPAIR_ATTEMPTS, modelOutputTokenBudget, openRouterControlsForModel, providerSystemPrompt, qualityRepairBaseFiles, qualityRepairInstruction, recoverStagedMissingImports, rollbackMissingImportFiles, shouldContinueQualityRepair, shouldTryFreeModelsAfterPaidDiagnostics, stagedRuntimeQualityReport, streamAppWithOpenRouter, streamOpenRouter } from "./code-providers";
-import { BUDGET_MODEL_OPENROUTER, PREMIUM_MODEL_OPENROUTER } from "./models";
+import { BUDGET_MODEL_OPENROUTER, PREMIUM_FALLBACK_MODELS_OPENROUTER, PREMIUM_MODEL_OPENROUTER } from "./models";
 import type { AppGenerationResult, ProjectQualityReport } from "./app-types";
 import { buildGenerationPlan } from "./generation-plan";
 import { isRunnableReport } from "./project-validator";
@@ -464,26 +464,23 @@ describe("streamAppWithOpenRouter — chain de fallback", () => {
     expect(result.app.files?.map((file) => file.path)).toEqual(["App.jsx", "components/Home.jsx"]);
   });
 
-  it("app NÃO rebaixa para modelo fraco quando o forte falha — falha honesta", async () => {
-    // Para apps reais, rebaixar sonnet -> xiaomi/free só produz lixo ou 429.
-    // O chain do app tem apenas o modelo forte; se ele falhar, entregamos um
-    // erro honesto em vez de um demo disfarçado gerado por modelo fraco.
+  it("troca para outro modelo forte quando o principal falha por HTTP", async () => {
     const models: string[] = [];
     const fetchImpl = (async (_url: any, init: any) => {
       const model = JSON.parse(init.body).model;
       models.push(model);
-      return new Response(JSON.stringify({ error: { message: "Insufficient credits" } }), { status: 402 });
+      if (model === PREMIUM_MODEL_OPENROUTER) {
+        return new Response(JSON.stringify({ error: { message: "Internal Server Error" } }), { status: 500 });
+      }
+      return sseResponse([sseChunk(VALID_INITIAL_PROJECT), sseUsage(500, 300)]);
     }) as unknown as typeof fetch;
 
     const result = await streamAppWithOpenRouter("sk-or-teste", STREAM_ARGS, { fetchImpl });
 
-    // Pode tentar o modelo forte no streaming e de novo no fallback sem streaming,
-    // mas NUNCA rebaixa para um modelo fraco/grátis.
-    expect(models.length).toBeGreaterThanOrEqual(1);
-    expect(models.every((m) => m === PREMIUM_MODEL_OPENROUTER)).toBe(true);
+    expect(models).toEqual([PREMIUM_MODEL_OPENROUTER, PREMIUM_FALLBACK_MODELS_OPENROUTER[0]]);
     expect(models).not.toContain(BUDGET_MODEL_OPENROUTER);
-    expect(result.engineMode).toBe("demo");
-    expect(result.failureReason).toContain("HTTP 402");
+    expect(result.engineMode).toBe("real");
+    expect(result.model).toBe(PREMIUM_FALLBACK_MODELS_OPENROUTER[0]);
   });
 
   it("recupera pelo caminho SEM streaming quando o streaming vem em formato inaplicável", async () => {
